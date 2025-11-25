@@ -2,6 +2,7 @@ bintrade-rust
 
 This is a simple trading app for Linux for Binance using egui, tokio.
 
+NOTE THIS IS A WIP AND IS NOT FULLY FUNCTIONAL
 
 Features:
 -Trade live binance assets
