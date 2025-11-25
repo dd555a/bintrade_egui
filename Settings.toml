@@ -1,0 +1,52 @@
+#Binance credentials
+api_key= '<your api key>'
+api_secret= '<your secret api key>'
+
+##Chart config
+extend_range_days=3 
+
+default_symbol='BTCUSDT'
+default_interval='1min'
+default_next_wicks=20
+
+k0_inc=0.005
+k1_inc=0.1
+k2_inc=0.1
+
+##Line styles
+stop='dashed'
+stop_width=1
+stop_market='large_dashed'
+stop_market_width=2
+limit='solid'
+limit_width=2
+
+set_last_order=false
+last_order='large_dashed'
+last_order_width=1
+fee_color='##ff6600'
+fee_line='dashed'
+fee_width=1
+tick_color='##cccc00'
+tick_width=1
+tick_style='large_dashed'
+##Colors
+
+active_buy_col='##00ff00'
+active_sell_col='##ff0000'
+
+inactive_buy_col='##ccffcc'
+inactive_sell_col='##ffad99'
+
+fee=0.0015
+
+last_buy_col='##ccffcc'
+last_sell_col='##ffd6cc'
+
+##WS settings
+ws_streams=['@ticker','@kline_','@bookTicker','@trade']
+ws_stream_names=['24hrTicker','kline','bookTicker','trade']
+
+####Historic trade defaults
+h_chart_type=0
+h_start_money=10000
