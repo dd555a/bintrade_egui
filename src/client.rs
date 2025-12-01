@@ -28,7 +28,6 @@ use log::Level;
 
 use config::Config;
 
-//TODO replace with select_all;
 use futures::future::join_all;
 
 use eframe::EventLoopBuilderHook;
@@ -492,6 +491,14 @@ impl ClientTask {
         );
         log::info!("Binclient started");
         loop {
+            let sub_params=vec!["btcusdt@aggTrade".to_string()];
+            let mut params:HashMap<String,Vec<String>>=HashMap::new();
+            params.insert("BTCUSDT".to_string(),sub_params);
+            let res=cli.connect_ws(params).await;
+            match res{
+                Ok(_)=>log::trace!["WS connected successfuly for BTCUSDT"],
+                Err(e)=> log::error!["WS connection failed, ERROR: {}",e]
+            };
             loop {
                 select! {
                     _ = recv_from_client.changed() =>{
@@ -658,16 +665,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn semaphore_example() {
-        let semaphore = Semaphore::new(3);
-
-        let a_permit = semaphore.acquire().await.unwrap();
-        let two_permits = semaphore.acquire_many(2).await.unwrap();
-
-        assert_eq!(semaphore.available_permits(), 0);
-
-        let permit_attempt = semaphore.try_acquire();
-        assert_eq!(permit_attempt.err(), Some(TryAcquireError::NoPermits));
-        assert!(true);
+    async fn exmpl() {
     }
 }
