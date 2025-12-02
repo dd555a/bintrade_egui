@@ -16,12 +16,12 @@ use tokio::sync::watch;
 
 use eframe::egui::{self, DragValue, Event, Vec2};
 
-use crate::{ClientInstruct,ClientResponse, SQLResponse,ProcResp, SQLInstructs};
+use crate::{ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse};
 
 use egui::{Color32, ComboBox, epaint};
 use egui_plot_bintrade::{
-    Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine,
-    Legend, Line, Plot, PlotPoints, PlotUi, uniform_grid_spacer,
+    Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, Legend, Line, Plot,
+    PlotPoints, PlotUi, uniform_grid_spacer,
 };
 use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
@@ -50,7 +50,9 @@ struct KlinePlot {
     x_bounds: (f64, f64),
     y_bounds: (f64, f64),
 
-    hlines:Vec<HLine>
+    symbol:String,
+
+    hlines: Vec<HLine>,
 }
 impl Default for KlinePlot {
     fn default() -> Self {
@@ -65,9 +67,9 @@ impl Default for KlinePlot {
             chart_params: (1.0, 1.0),
             x_bounds: (0.0, 100.0),
             y_bounds: (0.0, 100.0),
+            symbol: "BTCUSDT".to_string(),
 
-            hlines:vec![],
-
+            hlines: vec![],
         }
     }
 }
@@ -78,6 +80,18 @@ impl KlinePlot {
         plot.show(ui, |plot_ui| {
             plot_ui.box_plot(bp);
         });
+    }
+    fn show_live(
+        &mut self,
+        ui: &mut egui::Ui,
+        plot_extras: &PlotExtras,
+        live_ad: Arc<Mutex<AssetData>>,
+    ) -> Result<()> {
+        let ad = live_ad.lock().expect("Live AD mutex locked");
+        let symbol=self.symbol.clone();
+        self.live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None);
+        self.show(ui, plot_extras);
+        Ok(())
     }
     fn mk_plt(&self) -> Plot {
         let (x_lower, x_higher) = self.x_bounds;
@@ -95,7 +109,10 @@ impl KlinePlot {
         let mut highest: f64 = 0.0;
         let t0 = kline_input[0].0;
         let t1 = kline_input[kline_input.len() - 1].0;
-        self.x_bounds = ((t0.timestamp() as f64)*0.99993/self.chart_params.0, (t1.timestamp() as f64)*1.00007/self.chart_params.0);
+        self.x_bounds = (
+            (t0.timestamp() as f64) * 0.99993 / self.chart_params.0,
+            (t1.timestamp() as f64) * 1.00007 / self.chart_params.0,
+        );
         for kline in kline_input.iter() {
             let (_, _, h, _, _, _) = kline;
             if h > &highest {
@@ -124,20 +141,17 @@ impl KlinePlot {
         let (boxe, bar) = box_element(slice, divider, width);
         self.l_boxplot.push(boxe);
         self.l_barchart.push(bar);
-    } 
-    fn show(&mut self, ui: &mut egui::Ui, plot_extras:&PlotExtras) -> Result<()> {
+    }
+    fn show(&mut self, ui: &mut egui::Ui, plot_extras: &PlotExtras) -> Result<()> {
         let plot = self.mk_plt();
         //Handle live tick as separate box...
         let bp = BoxPlot::new(&self.name, self.l_boxplot.clone())
             .element_formatter(Box::new(time_format));
         let bc = BarChart::new(&self.name, self.l_barchart.clone());
-        let hlines=self.hlines.clone();
+        let hlines = self.hlines.clone();
         if let Some(tick_kline) = self.tick_kline {
-            let (tick_box_e, tick_vol) = box_element(
-                &tick_kline,
-                &self.chart_params.0,
-                &self.chart_params.1,
-            );
+            let (tick_box_e, tick_vol) =
+                box_element(&tick_kline, &self.chart_params.0, &self.chart_params.1);
             let tick_box_plot = vec![tick_box_e];
             let tick_bar_vol = vec![tick_vol];
             let bp_tick = BoxPlot::new("Tick", tick_box_plot);
@@ -155,12 +169,12 @@ impl KlinePlot {
         } else {
             if self.loading == false && self.static_loaded == true {
                 plot.show(ui, |plot_ui| {
-                    log::debug!["Hlines in plot: {:?}",&hlines];
-                    if hlines!= []{
-                        for h in hlines{
-                            log::debug!["Hlines (for h in ){:?}",&h];
+                    log::debug!["Hlines in plot: {:?}", &hlines];
+                    if hlines != [] {
+                        for h in hlines {
+                            log::debug!["Hlines (for h in ){:?}", &h];
                             plot_ui.add(h);
-                        };
+                        }
                     };
                     plot_ui.box_plot(bp);
                     plot_ui.bar_chart(bc);
@@ -180,16 +194,16 @@ impl KlinePlot {
         symbol: &str,
         intv: Intv,
         max_load_points: usize,
-        timestamps:Option<(chrono::NaiveDateTime,chrono::NaiveDateTime)>
+        timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
     ) -> Result<()> {
         //tracing::debug!["Show live data from AD asset data={:?}",ad.debug()];
-        let k = match timestamps{
-            Some((start,end))=>{
-                ad.find_slice(symbol, &intv, &start, &end)
-                    .ok_or(anyhow!["Unable to find slice in the period:{} to {}", &start,&end])?
-            }
-            None=>ad.load_full_intv(symbol, &intv)?
-
+        let k = match timestamps {
+            Some((start, end)) => ad.find_slice(symbol, &intv, &start, &end).ok_or(anyhow![
+                "Unable to find slice in the period:{} to {}",
+                &start,
+                &end
+            ])?,
+            None => ad.load_full_intv(symbol, &intv)?,
         };
         let (div, width) = get_chart_params(&intv);
         self.chart_params = (div, width);
@@ -210,14 +224,7 @@ impl KlinePlot {
     }
     fn from_watch_channel(
         &mut self,
-        mut kline_chan: watch::Receiver<(
-            chrono::NaiveDateTime,
-            f64,
-            f64,
-            f64,
-            f64,
-            f64,
-        )>,
+        mut kline_chan: watch::Receiver<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>,
     ) {
         let kl = kline_chan.borrow_and_update().clone();
         let (div, width) = self.chart_params;
@@ -225,14 +232,7 @@ impl KlinePlot {
     }
     fn tick_from_watch_channel(
         &mut self,
-        mut kline_chan: watch::Receiver<(
-            chrono::NaiveDateTime,
-            f64,
-            f64,
-            f64,
-            f64,
-            f64,
-        )>,
+        mut kline_chan: watch::Receiver<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>,
     ) {
         let kl = kline_chan.borrow_and_update().clone();
         self.tick_kline = Some(kl);
@@ -316,13 +316,7 @@ macro_rules! make_p{
         }
     };
 }
-fn make_plot(
-    name: &str,
-    intv: Intv,
-    y_higher: f64,
-    x_lower: f64,
-    x_higher: f64,
-) -> Plot {
+fn make_plot(name: &str, intv: Intv, y_higher: f64, x_lower: f64, x_higher: f64) -> Plot {
     match intv {
         Intv::Min1 => make_p!(
             name,
@@ -472,8 +466,8 @@ const d1_div: i64 = 60 * 4 * 4 * 6;
 const d3_div: i64 = 60 * 4 * 4 * 6;
 const w1_div: i64 = 60 * 4 * 4 * 6;
 
-const gap1:f64=0.8;
-const gap2:f64=0.8 * 4.0;
+const gap1: f64 = 0.8;
+const gap2: f64 = 0.8 * 4.0;
 fn get_chart_params(intv: &Intv) -> (f64, f64) {
     match intv {
         Intv::Min1 => (m1_div as f64, gap1), //incorrect
@@ -481,11 +475,11 @@ fn get_chart_params(intv: &Intv) -> (f64, f64) {
         Intv::Min5 => (m5_div as f64, gap1),
         Intv::Min15 => (m15_div as f64, gap2),
         Intv::Min30 => (m30_div as f64, gap2),
-        Intv::Hour1 => (h1_div as f64, gap2 ),
-        Intv::Hour2 => (h2_div as f64, gap2 ),
-        Intv::Hour4 => (h4_div as f64, gap2 ),
-        Intv::Hour6 => (h6_div as f64, gap2 ),
-        Intv::Hour8 => (h8_div as f64, gap2 ),
+        Intv::Hour1 => (h1_div as f64, gap2),
+        Intv::Hour2 => (h2_div as f64, gap2),
+        Intv::Hour4 => (h4_div as f64, gap2),
+        Intv::Hour6 => (h6_div as f64, gap2),
+        Intv::Hour8 => (h8_div as f64, gap2),
         Intv::Hour12 => (h12_div as f64, gap2),
         Intv::Day1 => (d1_div as f64, gap2),
         Intv::Day3 => (d3_div as f64, gap2),
@@ -624,25 +618,14 @@ fn x_format_1w(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
 fn time_format(input: &BoxElem, plot: &BoxPlot) -> String {
     format!(
         "Time: {} \n High: {} \n Low: {} \n Average: {}",
-        input.name,
-        input.spread.upper_whisker,
-        input.spread.lower_whisker,
-        input.spread.median
+        input.name, input.spread.upper_whisker, input.spread.lower_whisker, input.spread.median
     )
 }
 
 //NOTE interval formatter 2 values = width (0.8 for 1min), divider (60 for 1 min), spacer(60 60 1
 //for 1min)
 
-#[derive(
-    EnumIter,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(EnumIter, Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 
 enum PaneType {
     None,
@@ -725,64 +708,73 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                 test_chart(ui);
             }
             PaneType::LiveTrade => {
-                let chan =
-                    self.send_to_cli.clone().expect("Cli comm channel none!");
-                let live_price =
-                    self.live_price.lock().expect("Live price mutex poisoned!");
+                let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+                let live_price = self.live_price.lock().expect("Live price mutex poisoned!");
                 let live_plot_l = self.live_plot.clone();
-                let c_data=self.collect_data.lock().expect("Live collect data mutex poisoned!");
+                let c_data = self
+                    .collect_data
+                    .lock()
+                    .expect("Live collect data mutex poisoned!");
 
-                let p_extras:PlotExtras=PlotExtras::None;
-                let mut live_plot =
-                    live_plot_l.lock().expect("Live plot mutex posoned!");
-                //NOTE... see if chan works too... should... 
+                let p_extras: PlotExtras = PlotExtras::None;
+                let mut live_plot = live_plot_l.lock().expect("Live plot mutex posoned!");
+                //NOTE... see if chan works too... should...
                 LivePlot::show(&mut live_plot, &p_extras, chan, &live_price, &c_data, ui);
                 let mut man_orders = self
                     .man_orders
                     .get_mut(&pane.nr)
                     .expect("Manual order window not found!");
-                if man_orders.plot_extras.is_some() != true{
-                    man_orders.plot_extras=Some(p_extras);
+                if man_orders.plot_extras.is_some() != true {
+                    man_orders.plot_extras = Some(p_extras);
                 };
-                let chan =
-                    self.send_to_cli.clone().expect("Cli comm channel none!");
-                ManualOrders::show(&mut man_orders, &live_price, None, chan, ui, None);
+                let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+                ManualOrders::show(
+                    &mut man_orders,
+                    &live_price,
+                    None,
+                    chan,
+                    ui,
+                    Some(&mut live_plot.kline_plot.hlines),
+                );
             }
             PaneType::HistTrade => {
-                let sql_resps:Option<&Vec<ClientResponse>>=match self.resp_buff.as_ref(){
-                    Some(a)=>{
-                        a.get(&ProcResp::SQLResp(SQLResponse::None))
-                    }
-                    None => None 
+                let sql_resps: Option<&Vec<ClientResponse>> = match self.resp_buff.as_ref() {
+                    Some(a) => a.get(&ProcResp::SQLResp(SQLResponse::None)),
+                    None => None,
                 };
-                let chan =
-                    self.send_to_cli.clone().expect("Cli comm channel none!");
-                let hist_extras=HistExtras::default();
-                let p_extras:PlotExtras=PlotExtras::None;
+                let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+                let hist_extras = HistExtras::default();
+                let p_extras: PlotExtras = PlotExtras::None;
                 let mut h_plot = self
                     .hist_plot
                     .get_mut(&pane.nr)
                     .expect("Hist plot gui struct not found!");
-                if h_plot.hist_extras.is_some() != true{
-                    h_plot.hist_extras=Some(hist_extras);
+                if h_plot.hist_extras.is_some() != true {
+                    h_plot.hist_extras = Some(hist_extras);
                 };
                 HistPlot::show(&mut h_plot, &p_extras, chan, ui);
                 let mut man_orders = self
                     .man_orders
                     .get_mut(&pane.nr)
                     .expect("Manual order window not found!");
-                if man_orders.plot_extras.is_some() != true{
-                    man_orders.plot_extras=Some(p_extras);
+                if man_orders.plot_extras.is_some() != true {
+                    man_orders.plot_extras = Some(p_extras);
                 };
-                let chan =
-                    self.send_to_cli.clone().expect("Cli comm channel none!");
-                ManualOrders::show(&mut man_orders, &hist_extras.last_price, Some(&mut h_plot.hist_trade), chan, ui, Some(&mut h_plot.kline_plot.hlines));
+                let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+                ManualOrders::show(
+                    &mut man_orders,
+                    &hist_extras.last_price,
+                    Some(&mut h_plot.hist_trade),
+                    chan,
+                    ui,
+                    Some(&mut h_plot.kline_plot.hlines),
+                );
             }
         };
         return response;
     }
     fn on_tab_close(
-        //TODO - remove old structs form maps here...
+        //NOTE - remove old structs form maps here...
         &mut self,
         tiles: &mut Tiles<Pane>,
         tile_id: TileId,
@@ -801,10 +793,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                         }
                     }
                     let tab_title = self.tab_title_for_pane(pane);
-                    log::debug!(
-                        "Closing tab: {}, tile ID: {tile_id:?}",
-                        tab_title.text()
-                    );
+                    log::debug!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
                 }
                 Tile::Container(container) => {
                     log::debug!("Closing container: {:?}", container.kind());
@@ -812,10 +801,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     for child_id in children_ids {
                         if let Some(Tile::Pane(pane)) = tiles.get(*child_id) {
                             let tab_title = self.tab_title_for_pane(pane);
-                            log::debug!(
-                                "Closing tab: {}, tile ID: {tile_id:?}",
-                                tab_title.text()
-                            );
+                            log::debug!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
                         }
                     }
                 }
@@ -826,14 +812,11 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 }
 
 fn create_tree() -> egui_tiles::Tree<Pane> {
-    let mut next_view_nr = 0;
     let mut gen_pane = || {
         let pane = Pane {
-            nr: next_view_nr,
-            //ty: PaneType::LiveTrade,
-            ..Default::default()
+            nr: 0,
+            ty: PaneType::LiveTrade,
         };
-        next_view_nr += 1;
         pane
     };
     let mut tiles = egui_tiles::Tiles::default();
@@ -843,13 +826,11 @@ fn create_tree() -> egui_tiles::Tree<Pane> {
     egui_tiles::Tree::new("my_tree", root, tiles)
 }
 
-
 #[derive(PartialEq, Debug, Clone)]
 enum PlotExtras {
     None,
     OrderHlines(Vec<HLine>),
 }
-
 
 #[derive(Dbg)]
 struct DataAsset {}
@@ -862,8 +843,6 @@ struct DataAsset {}
 //unload asset
 
 use derive_debug::Dbg;
-
-
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -892,55 +871,62 @@ pub struct DesktopApp {
     live_price: Arc<Mutex<f64>>,
     asset_data: Arc<Mutex<AssetData>>,
     hist_asset_data: Arc<Mutex<AssetData>>,
-    collect_data:Arc<Mutex<HashMap<String,SymbolOutput>>>,
+    collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
 
     live_plot: Rc<Mutex<LivePlot>>,
 
-    lp_chan_recv:watch::Receiver<f64>,
+    lp_chan_recv: watch::Receiver<f64>,
 
     send_to_cli: Option<watch::Sender<ClientInstruct>>,
     recv_from_cli: Option<watch::Receiver<ClientResponse>>,
 
-    resp_buff:Option<HashMap<ProcResp, Vec<ClientResponse>>>,
-    last_resp:Option<ClientResponse>,
+    resp_buff: Option<HashMap<ProcResp, Vec<ClientResponse>>>,
+    last_resp: Option<ClientResponse>,
 
     man_orders: BTreeMap<usize, ManualOrders>,
     hist_plot: BTreeMap<usize, HistPlot>,
 }
 
-
-impl DesktopApp{
-    fn update_procresp(last_resp:&mut ClientResponse,recv:&mut watch::Receiver<ClientResponse>, buff:&mut HashMap<ProcResp,Vec<ClientResponse>>){
-        let resp=recv.borrow_and_update().clone();
-        if &resp != last_resp{
-            match resp{
-                ClientResponse::None=>{},
-                ClientResponse::Success | ClientResponse::Failure(_)=>{
-                    let res=buff.get(&ProcResp::Client);
-                    match res{
-                        Some(_)=>{
-                            let resp_vec=buff.get_mut(&ProcResp::Client).expect("Unable to find cli_resp vector!");
+impl DesktopApp {
+    fn update_procresp(
+        last_resp: &mut ClientResponse,
+        recv: &mut watch::Receiver<ClientResponse>,
+        buff: &mut HashMap<ProcResp, Vec<ClientResponse>>,
+    ) {
+        let resp = recv.borrow_and_update().clone();
+        if &resp != last_resp {
+            match resp {
+                ClientResponse::None => {}
+                ClientResponse::Success | ClientResponse::Failure(_) => {
+                    let res = buff.get(&ProcResp::Client);
+                    match res {
+                        Some(_) => {
+                            let resp_vec = buff
+                                .get_mut(&ProcResp::Client)
+                                .expect("Unable to find cli_resp vector!");
                             resp_vec.push(resp.clone())
                         }
-                        None=>{
-                            buff.insert(ProcResp::Client,vec![]);
+                        None => {
+                            buff.insert(ProcResp::Client, vec![]);
                         }
                     }
-                },
-                ClientResponse::ProcResp(ref proc_resp)=>{
-                    let res=buff.get(&proc_resp);
-                    match res{
-                        Some(_)=>{
-                            let resp_vec=buff.get_mut(&proc_resp).expect("Unable to find proc_resp vector!");
+                }
+                ClientResponse::ProcResp(ref proc_resp) => {
+                    let res = buff.get(&proc_resp);
+                    match res {
+                        Some(_) => {
+                            let resp_vec = buff
+                                .get_mut(&proc_resp)
+                                .expect("Unable to find proc_resp vector!");
                             resp_vec.push(resp.clone());
                         }
-                        None=>{
-                            buff.insert(proc_resp.clone(),vec![]);
+                        None => {
+                            buff.insert(proc_resp.clone(), vec![]);
                         }
                     }
-                },
+                }
             }
-            *last_resp=resp;
+            *last_resp = resp;
         }
     }
 }
@@ -953,12 +939,17 @@ impl Default for DesktopApp {
         let lp = Arc::new(Mutex::new(0.0));
         let asset_data = Arc::new(Mutex::new(AssetData::new(6661)));
         let hist_asset_data = Arc::new(Mutex::new(AssetData::new(6662)));
-        let cd= Arc::new(Mutex::new(HashMap::new()));
+        let cd = Arc::new(Mutex::new(HashMap::new()));
 
-        let (_,lp_chan_recv)=watch::channel(0.0);
+        let (_, lp_chan_recv) = watch::channel(0.0);
+
+        let man_o = ManualOrders::default();
+        let mut man_o_default = BTreeMap::new();
+        man_o_default.insert(0, man_o);
+
         Self {
-            last_resp:Some(ClientResponse::None),
-            resp_buff:Some(HashMap::new()),
+            last_resp: Some(ClientResponse::None),
+            resp_buff: Some(HashMap::new()),
             simplification_options: egui_tiles::SimplificationOptions {
                 ..egui_tiles::SimplificationOptions::OFF
             },
@@ -975,14 +966,14 @@ impl Default for DesktopApp {
             lock_y: false,
             ctrl_to_zoom: false,
             shift_to_horizontal: false,
-            zoom_speed: 1.0,//
+            zoom_speed: 1.0, //
             scroll_speed: 1.0,
 
             //Cli refs
             live_price: lp,
             asset_data,
             hist_asset_data,
-            collect_data:cd,
+            collect_data: cd,
 
             lp_chan_recv,
 
@@ -992,12 +983,11 @@ impl Default for DesktopApp {
             send_to_cli: None,
             recv_from_cli: None,
 
-            man_orders: BTreeMap::new(),
+            man_orders: man_o_default,
             hist_plot: BTreeMap::new(),
         }
     }
 }
-
 
 impl DesktopApp {
     pub fn new(
@@ -1007,8 +997,7 @@ impl DesktopApp {
         asset_data: Arc<Mutex<AssetData>>,
         hist_asset_data: Arc<Mutex<AssetData>>,
         live_price: Arc<Mutex<f64>>,
-        collect_data: Arc<Mutex<HashMap<String,SymbolOutput>>>,
-        lp_chan_recv:watch::Receiver<f64>
+        collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
     ) -> Self {
         cc.storage;
         let live_plot = Rc::new(Mutex::new(LivePlot::new(asset_data.clone())));
@@ -1020,7 +1009,6 @@ impl DesktopApp {
             collect_data,
             asset_data,
             hist_asset_data,
-            lp_chan_recv,
             ..Default::default()
         }
     }
@@ -1050,30 +1038,20 @@ impl eframe::App for DesktopApp {
                     .selected_text(format!("Tools"))
                     .show_ui(ui, |ui| {
                         for pty in PaneType::iter() {
-                            ui.selectable_value(
-                                &mut next_panel_type,
-                                pty,
-                                format!["{}", pty],
-                            );
+                            ui.selectable_value(&mut next_panel_type, pty, format!["{}", pty]);
                         }
                     });
                 if next_panel_type != PaneType::None {
                     if let Some(parent) = self.add_child_to.take() {
-                        let mut tree = self
-                            .tree
-                            .lock()
-                            .expect("Posoned mutex on pane tree!");
-                        let mut new_child = tree.tiles.insert_pane(Pane::new(
-                            self.pane_number,
-                            PaneType::None,
-                        ));
+                        let mut tree = self.tree.lock().expect("Posoned mutex on pane tree!");
+                        let mut new_child = tree
+                            .tiles
+                            .insert_pane(Pane::new(self.pane_number, PaneType::None));
                         match next_panel_type {
-                            PaneType::None=> {}
+                            PaneType::None => {}
                             PaneType::LiveTrade => {
-                                self.man_orders.insert(
-                                    self.pane_number + 1,
-                                    ManualOrders::default(),
-                                );
+                                self.man_orders
+                                    .insert(self.pane_number + 1, ManualOrders::default());
 
                                 new_child = tree.tiles.insert_pane(Pane::new(
                                     self.pane_number + 1,
@@ -1082,11 +1060,9 @@ impl eframe::App for DesktopApp {
                                 self.pane_number += 1;
                             }
                             PaneType::HistTrade => {
-                                self.man_orders.insert(
-                                    self.pane_number + 1,
-                                    ManualOrders::default(),
-                                );
-                                let ad=self.hist_asset_data.lock().expect("Debug mutex");
+                                self.man_orders
+                                    .insert(self.pane_number + 1, ManualOrders::default());
+                                let ad = self.hist_asset_data.lock().expect("Debug mutex");
                                 //tracing::debug!["HIST TRADE CREATION {}",ad.debug()];
                                 self.hist_plot.insert(
                                     self.pane_number + 1,
@@ -1100,9 +1076,9 @@ impl eframe::App for DesktopApp {
                                 self.pane_number += 1;
                             }
                         }
-                        if let Some(egui_tiles::Tile::Container(
-                            egui_tiles::Container::Tabs(tabs),
-                        )) = tree.tiles.get_mut(parent)
+                        if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(
+                            tabs,
+                        ))) = tree.tiles.get_mut(parent)
                         {
                             tabs.add_child(new_child);
                             tabs.set_active(new_child);
@@ -1114,13 +1090,16 @@ impl eframe::App for DesktopApp {
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            let mut last_resp=self.last_resp.take().expect("Unable to get last_resp");;
-            let mut recv=self.recv_from_cli.take().expect("Unable to get recv_from_client channel!");
-            let mut buff=self.resp_buff.take().expect("Unable to get resp_buff");
-            DesktopApp::update_procresp(&mut last_resp,&mut recv,&mut buff);
-            self.recv_from_cli=Some(recv);
-            self.resp_buff=Some(buff);
-            self.last_resp=Some(last_resp);
+            let mut last_resp = self.last_resp.take().expect("Unable to get last_resp");
+            let mut recv = self
+                .recv_from_cli
+                .take()
+                .expect("Unable to get recv_from_client channel!");
+            let mut buff = self.resp_buff.take().expect("Unable to get resp_buff");
+            DesktopApp::update_procresp(&mut last_resp, &mut recv, &mut buff);
+            self.recv_from_cli = Some(recv);
+            self.resp_buff = Some(buff);
+            self.last_resp = Some(last_resp);
 
             //if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
             /*
@@ -1160,31 +1139,27 @@ pub fn password_ui(ui: &mut egui::Ui, password: &mut String) -> egui::Response {
 
     // Get state for this widget.
     // You should get state by value, not by reference to avoid borrowing of [`Memory`].
-    let mut show_plaintext =
-        ui.data_mut(|d| d.get_temp::<bool>(state_id).unwrap_or(false));
+    let mut show_plaintext = ui.data_mut(|d| d.get_temp::<bool>(state_id).unwrap_or(false));
 
     // Process ui, change a local copy of the state
     // We want TextEdit to fill entire space, and have button after that, so in that case we can
     // change direction to right_to_left.
-    let result = ui.with_layout(
-        egui::Layout::right_to_left(egui::Align::Center),
-        |ui| {
-            // Toggle the `show_plaintext` bool with a button:
-            let response = ui
-                .selectable_label(show_plaintext, "👁")
-                .on_hover_text("Show/hide password");
+    let result = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        // Toggle the `show_plaintext` bool with a button:
+        let response = ui
+            .selectable_label(show_plaintext, "👁")
+            .on_hover_text("Show/hide password");
 
-            if response.clicked() {
-                show_plaintext = !show_plaintext;
-            }
+        if response.clicked() {
+            show_plaintext = !show_plaintext;
+        }
 
-            // Show the password field:
-            ui.add_sized(
-                ui.available_size(),
-                egui::TextEdit::singleline(password).password(!show_plaintext),
-            );
-        },
-    );
+        // Show the password field:
+        ui.add_sized(
+            ui.available_size(),
+            egui::TextEdit::singleline(password).password(!show_plaintext),
+        );
+    });
 
     // Store the (possibly changed) state:
     ui.data_mut(|d| d.insert_temp(state_id, show_plaintext));
@@ -1205,7 +1180,6 @@ enum Action {
     Delete,
 }
 
-
 use crate::trade::HistTrade as HistTradeRunner;
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -1215,7 +1189,7 @@ struct ManualOrders {
     man_orders: Option<HistTrade>,
     active_orders: Option<Vec<Order>>,
 
-    hist_trade_runner:HistTradeRunner,
+    hist_trade_runner: HistTradeRunner,
 
     search_string: String,
     quant: Quant,
@@ -1226,17 +1200,18 @@ struct ManualOrders {
     buy: bool,
     price_string: String,
     stop_price_string: String,
-    orders: HashMap<i32, (Order,bool)>,
+    orders: HashMap<i32, (Order, bool)>,
     asset1: f64,
     asset2: f64,
     last_id: i32,
     asset1_name: String,
     asset2_name: String,
+
     last_price_buffer: Vec<f64>,
     last_price_buffer_size: usize,
     last_price_s: f64,
 
-    plot_extras:Option<PlotExtras>
+    plot_extras: Option<PlotExtras>,
 }
 
 use std::collections::HashMap;
@@ -1262,7 +1237,7 @@ impl Default for ManualOrders {
             scalar_set: false,
             buy: true,
 
-            hist_trade_runner:HistTradeRunner::default(),
+            hist_trade_runner: HistTradeRunner::default(),
 
             price_string: "0.0".to_string(),
             stop_price_string: "0.0".to_string(),
@@ -1277,19 +1252,19 @@ impl Default for ManualOrders {
             last_price_s: 0.0,
             last_id: 0,
 
-            plot_extras:None
+            plot_extras: None,
         }
     }
 }
 use egui::{FontId, RichText};
 
-
-#[instrument(level="debug")]
-fn link_hline_orders(orders:&HashMap<i32,(Order,bool)>,hlines: &mut Vec<HLine>){
-    let mut hl:Vec<HLine>=orders.iter().map(|(_,(order,active))|{
-        HlineType::hline_order(order,*active)
-    }).collect();
-    tracing::debug!["Hlines (link_hline_orders):{:?}",&hl];
+#[instrument(level = "trace")]
+fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLine>) {
+    let mut hl: Vec<HLine> = orders
+        .iter()
+        .map(|(_, (order, active))| HlineType::hline_order(order, *active))
+        .collect();
+    tracing::trace!["Hlines (link_hline_orders):{:?}", &hl];
     hlines.clear();
     hlines.append(&mut hl);
 }
@@ -1301,17 +1276,16 @@ impl ManualOrders {
             ..Default::default()
         }
     }
-    fn check_order_hist(&self, order:&Order, hist_trade:&mut HistTrade)->Result<()>{
+    fn check_order_hist(&self, order: &Order, hist_trade: &mut HistTrade) -> Result<()> {
         //todo!()
         Ok(())
     }
-    fn check_order_price(&self, order:&Order, last_price:&f64)->Result<()>{
+    fn check_order_price(&self, order: &Order, last_price: &f64) -> Result<()> {
         Ok(())
         //todo!()
     }
-    fn sync(&mut self, hist_trade:Option<&HistTrade>){
+    fn sync(&mut self, hist_trade: Option<&HistTrade>) {
         todo!()
-
     }
     fn show(
         mut man_orders: &mut ManualOrders,
@@ -1319,11 +1293,12 @@ impl ManualOrders {
         mut hist_trade: Option<&mut HistTrade>,
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
-        hlines:Option<&mut Vec<HLine>>
+        hlines: Option<&mut Vec<HLine>>,
     ) -> Result<()> {
-        match hlines{
-            Some(hline_ref)=>link_hline_orders(&man_orders.orders,hline_ref),
-            None=>{
+
+        match hlines {
+            Some(hline_ref) => link_hline_orders(&man_orders.orders, hline_ref),
+            None => {
                 tracing::debug!["Hlines not available!"];
             }
         };
@@ -1333,59 +1308,41 @@ impl ManualOrders {
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.label(
-                        RichText::new(format![
-                            "{}:{}",
-                            man_orders.asset1_name, man_orders.asset1
-                        ])
-                        .color(Color32::GREEN),
+                        RichText::new(format!["{}:{}", man_orders.asset1_name, man_orders.asset1])
+                            .color(Color32::GREEN),
                     );
                     ui.end_row();
                 });
                 ui.vertical(|ui| {
                     ui.label(
-                        RichText::new(format![
-                            "{}:{}",
-                            man_orders.asset2_name, man_orders.asset2
-                        ])
-                        .color(Color32::RED),
+                        RichText::new(format!["{}:{}", man_orders.asset2_name, man_orders.asset2])
+                            .color(Color32::RED),
                     );
                     ui.end_row();
                 });
                 ui.vertical(|ui| {
-                    if *last_price != man_orders.last_price_s {
                         man_orders.last_price_s = *last_price;
                         man_orders.last_price_buffer.push(last_price.clone());
                         let n = man_orders.last_price_buffer.len();
                         if n < man_orders.last_price_buffer_size {
                             ui.label(
-                                RichText::new(format![
-                                    "Last price:{}",
-                                    last_price
-                                ])
-                                .color(Color32::WHITE),
+                                RichText::new(format!["Last price:{}", last_price])
+                                    .color(Color32::WHITE),
                             );
                         } else {
-                            let sum: f64 =
-                                man_orders.last_price_buffer.iter().sum();
+                            let sum: f64 = man_orders.last_price_buffer.iter().sum();
                             if sum / (n as f64) <= *last_price {
                                 ui.label(
-                                    RichText::new(format![
-                                        "Last price:{}",
-                                        last_price
-                                    ])
-                                    .color(Color32::GREEN),
+                                    RichText::new(format!["Last price:{}", last_price])
+                                        .color(Color32::GREEN),
                                 );
                             } else {
                                 ui.label(
-                                    RichText::new(format![
-                                        "Last price:{}",
-                                        last_price
-                                    ])
-                                    .color(Color32::RED),
+                                    RichText::new(format!["Last price:{}", last_price])
+                                        .color(Color32::RED),
                                 );
                             }
                         }
-                    }
                     ui.end_row();
                 });
                 /*
@@ -1402,36 +1359,18 @@ impl ManualOrders {
 
                 ui.end_row();
                 let mut dummy: Option<f64> = None;
+                ui.style_mut().visuals.selection.bg_fill = Color32::ORANGE;
 
                 ui.horizontal(|ui| {
-                    ui.selectable_value(
-                        &mut man_orders.quant,
-                        Quant::Q25,
-                        "25%",
-                    );
-                    ui.selectable_value(
-                        &mut man_orders.quant,
-                        Quant::Q50,
-                        "50%",
-                    );
-                    ui.selectable_value(
-                        &mut man_orders.quant,
-                        Quant::Q75,
-                        "75%",
-                    );
-                    ui.selectable_value(
-                        &mut man_orders.quant,
-                        Quant::Q100,
-                        "100%",
-                    );
-                    ui.selectable_value(&mut dummy, None, "");
+                    ui.selectable_value(&mut man_orders.quant, Quant::Q25, "25%");
+                    ui.selectable_value(&mut man_orders.quant, Quant::Q50, "50%");
+                    ui.selectable_value(&mut man_orders.quant, Quant::Q75, "75%");
+                    ui.selectable_value(&mut man_orders.quant, Quant::Q100, "100%");
+                    //ui.selectable_value(&mut dummy, None, "");
                 });
                 ui.end_row();
 
-                ui.add(
-                    egui::Slider::new(&mut man_orders.scalar, 0.0..=100.0)
-                        .suffix(format!("%")),
-                );
+                ui.add(egui::Slider::new(&mut man_orders.scalar, 0.0..=100.0).suffix(format!("%")));
                 ui.end_row();
                 ui.horizontal(|ui| {
                     ui.selectable_value(
@@ -1507,10 +1446,8 @@ impl ManualOrders {
                     } => {
                         ui.label("Enter the limit price:");
                         ui.add(
-                            egui::TextEdit::singleline(
-                                &mut man_orders.price_string,
-                            )
-                            .hint_text("Enter the limit price"),
+                            egui::TextEdit::singleline(&mut man_orders.price_string)
+                                .hint_text("Enter the limit price"),
                         );
                         man_orders.order = Order::Limit {
                             buy: bb,
@@ -1529,17 +1466,13 @@ impl ManualOrders {
                     } => {
                         ui.label("Enter the limit price:");
                         ui.add(
-                            egui::TextEdit::singleline(
-                                &mut man_orders.price_string,
-                            )
-                            .hint_text("Enter the limit price"),
+                            egui::TextEdit::singleline(&mut man_orders.price_string)
+                                .hint_text("Enter the limit price"),
                         );
                         ui.label("Enter the stop price:");
                         ui.add(
-                            egui::TextEdit::singleline(
-                                &mut man_orders.stop_price_string,
-                            )
-                            .hint_text("Enter the stop price"),
+                            egui::TextEdit::singleline(&mut man_orders.stop_price_string)
+                                .hint_text("Enter the stop price"),
                         );
                         man_orders.order = Order::StopLimit {
                             buy: bb,
@@ -1558,10 +1491,8 @@ impl ManualOrders {
                     } => {
                         ui.label("Enter the stop price:");
                         ui.add(
-                            egui::TextEdit::singleline(
-                                &mut man_orders.stop_price_string,
-                            )
-                            .hint_text("Enter the stop price"),
+                            egui::TextEdit::singleline(&mut man_orders.stop_price_string)
+                                .hint_text("Enter the stop price"),
                         );
                         man_orders.order = Order::StopMarket {
                             buy: bb,
@@ -1572,41 +1503,40 @@ impl ManualOrders {
                     }
                     Order::None => {}
                 }
+
                 if ui.button("Add").clicked() {
                     //for hist tade this if fine but if live have this on the outside XXX
                     let o = man_orders.order.clone();
-                    let res:Result<()>=match hist_trade{
-                        Some(mut hist_trade)=>{
-                            let res1=man_orders.check_order_price(&o, &last_price);
-                            match res1{
-                                Ok(_)=>{
-                                    let res=man_orders.check_order_hist(&o, &mut hist_trade);
-                                        match res{
-                                            Ok(_)=>{
-                                                hist_trade.place_order(&o);
-                                                Ok(())
-                                            },
-                                            Err(e)=>Err(e),
+                    let res: Result<()> = match hist_trade {
+                        Some(mut hist_trade) => {
+                            let res1 = man_orders.check_order_price(&o, &last_price);
+                            match res1 {
+                                Ok(_) => {
+                                    let res = man_orders.check_order_hist(&o, &mut hist_trade);
+                                    match res {
+                                        Ok(_) => {
+                                            hist_trade.place_order(&o);
+                                            Ok(())
                                         }
-
-                                },
-                                Err(e)=>Err(e),
+                                        Err(e) => Err(e),
+                                    }
+                                }
+                                Err(e) => Err(e),
                             }
                         }
-                        None=>{
+                        None => {
                             todo!();
-
                         }
                     };
-                    match res{
-                        Ok(_)=>{
+                    match res {
+                        Ok(_) => {
                             man_orders.last_id += 1;
                             let oid = man_orders.last_id.clone();
                             man_orders.orders.insert(oid, (o, false));
                             //NOTE allow only one order for now...
                         }
-                        Err(e)=>{
-                            tracing::error!["Invalid order:{:?}, error:{}",&o,e];
+                        Err(e) => {
+                            tracing::error!["Invalid order:{:?}, error:{}", &o, e];
                         }
                     };
                 }
@@ -1617,9 +1547,7 @@ impl ManualOrders {
                 let available_height = ui.available_height();
                 let mut table = TableBuilder::new(ui)
                     .resizable(true)
-                    .cell_layout(egui::Layout::left_to_right(
-                        egui::Align::Center,
-                    ))
+                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                     .column(Column::auto().resizable(false))
                     .column(Column::auto().resizable(false))
                     .column(
@@ -1653,17 +1581,14 @@ impl ManualOrders {
                     })
                     .body(|mut body| {
                         let orders = man_orders.orders.clone();
-                        for (id,(order,active)) in orders.iter() {
+                        for (id, (order, active)) in orders.iter() {
                             let row_height = 18.0;
                             body.row(row_height, |mut row| {
                                 row.col(|ui| {
                                     ui.label(format!["{}", id]);
                                 });
                                 row.col(|ui| {
-                                    ui.label(format![
-                                        "{}",
-                                        order.get_qnt() * man_orders.asset1
-                                    ]);
+                                    ui.label(format!["{}", order.get_qnt() * man_orders.asset1]);
                                 });
                                 row.col(|ui| {
                                     ui.label(format!["{}", order.get_price()]);
@@ -1907,12 +1832,10 @@ struct LivePlot {
     live_asset_data: Arc<Mutex<AssetData>>,
     kline_plot: KlinePlot,
     search_string: String,
-    search_date: String,
-    search_load_string: String,
+    symbol:String,
     intv: Intv,
-    picked_date: chrono::NaiveDate,
-    picked_date_end: chrono::NaiveDate,
-    lines:Vec<HLine>,
+    lines: Vec<HLine>,
+
 }
 
 impl Default for LivePlot {
@@ -1922,12 +1845,9 @@ impl Default for LivePlot {
             live_asset_data: Arc::new(Mutex::new(AssetData::new(666))),
 
             search_string: "".to_string(),
-            search_date: "".to_string(),
-            search_load_string: "".to_string(),
+            symbol:"BTCUSDT".to_string(),
             intv: Intv::Min15,
-            picked_date: chrono::NaiveDate::from_ymd(2024, 10, 1),
-            picked_date_end: chrono::NaiveDate::from_ymd(2025, 10, 10),
-            lines:vec![]
+            lines: vec![],
         }
     }
 }
@@ -1944,10 +1864,12 @@ impl LivePlot {
         plot_extras: &PlotExtras,
         cli_chan: watch::Sender<ClientInstruct>,
         live_price: &f64,
-        collect_data: &HashMap<String,SymbolOutput>,
+        collect_data: &HashMap<String, SymbolOutput>,
         ui: &mut egui::Ui,
     ) {
-        live_plot.kline_plot.show(ui, plot_extras);
+
+
+        live_plot.kline_plot.show_live(ui, plot_extras, live_plot.live_asset_data.clone());
 
         ui.end_row();
         egui::Grid::new("Hplot order assets:")
@@ -1957,69 +1879,36 @@ impl LivePlot {
                     .selected_text(format!("{}", live_plot.intv.to_str()))
                     .show_ui(ui, |ui| {
                         for i in Intv::iter() {
-                            ui.selectable_value(
-                                &mut live_plot.intv,
-                                i,
-                                i.to_str(),
-                            );
+                            ui.selectable_value(&mut live_plot.intv, i, i.to_str());
                         }
                     });
-                ui.add(
-                    egui::TextEdit::singleline(&mut live_plot.search_string)
-                        .hint_text("Enter date or pick period"),
-                );
-                ui.add(egui_extras::DatePickerButton::new(
-                    &mut live_plot.picked_date,
-                ).id_salt("live_start"));
-                ui.add(egui_extras::DatePickerButton::new(
-                    &mut live_plot.picked_date_end,
-                ).id_salt("live_end"));
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut live_plot.search_string)
-                        .hint_text("Search for loaded asset"),
+                        .hint_text("Search"),
                 );
-                if ui.button("Show").clicked() {
-                    let s = &live_plot.search_string.clone();
-                    let ad_lock=live_plot.live_asset_data.lock().expect("Posoned mutex! - Live asset data");
-                    let ad = ad_lock;
-                    let i = live_plot.intv;
-                    let res =
-                        live_plot.kline_plot.live_from_ad(&ad, s, i, 1_000, None);
-                }
-                let search_load = ui.add(
-                    egui::TextEdit::singleline(
-                        &mut live_plot.search_load_string,
-                    )
-                    .hint_text("Asset to Load"),
-                );
-                if ui.button("Load Asset").clicked() {
-                    let msg = ClientInstruct::SendSQLInstructs(
-                        SQLInstructs::LoadHistData {
-                            symbol: live_plot.search_load_string.clone(),
-                        },
-                    );
-                    cli_chan.send(msg);
-                }
+                ui.label("Search for asset symbol");
+                let s = &live_plot.search_string.clone();
+                let i = live_plot.intv;
+                let ad = live_plot
+                    .live_asset_data
+                    .lock()
+                    .expect("Live AD mutex poisoned! - LivePlot::show()");
+                let res = live_plot.kline_plot.live_from_ad(&ad, s, i, 1_000, None);
             });
     }
 }
 
-
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(default))]
-#[derive(Copy, Clone)]
-#[derive(Dbg)]
-struct HistExtras{
-    last_price:f64,
+#[derive(Copy, Clone, Dbg)]
+struct HistExtras {
+    last_price: f64,
 }
-impl Default for HistExtras{
-    fn default()->Self{
-        Self{
-            last_price:0.0
-        }
+impl Default for HistExtras {
+    fn default() -> Self {
+        Self { last_price: 0.0 }
     }
 }
-
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -2033,8 +1922,8 @@ struct HistPlot {
     intv: Intv,
     picked_date: chrono::NaiveDate,
     picked_date_end: chrono::NaiveDate,
-    hist_extras:Option<HistExtras>,
-    hist_trade:HistTrade,
+    hist_extras: Option<HistExtras>,
+    hist_trade: HistTrade,
 }
 
 impl Default for HistPlot {
@@ -2049,89 +1938,87 @@ impl Default for HistPlot {
             intv: Intv::Min15,
             picked_date: chrono::NaiveDate::from_ymd(2024, 10, 1),
             picked_date_end: chrono::NaiveDate::from_ymd(2025, 10, 10),
-            hist_extras:None,
-            hist_trade:HistTrade::default(),
+            hist_extras: None,
+            hist_trade: HistTrade::default(),
         }
     }
 }
 
-enum LineStyle{
+enum LineStyle {
     Solid(f32),
-    Dotted(f32)
+    Dotted(f32),
 }
 
-enum LineState{
+enum LineState {
     ActiveColor(Color32),
-    InactiveColor(Color32)
+    InactiveColor(Color32),
 }
 
-enum HlineType{
-    BuyOrder((LineState,LineStyle)),
-    SellOrder((LineState,LineStyle)),
-    LastPrice((LineStyle,Color32)),
+enum HlineType {
+    BuyOrder((LineState, LineStyle)),
+    SellOrder((LineState, LineStyle)),
+    LastPrice((LineStyle, Color32)),
 }
 
-const buy_active:LineState=LineState::ActiveColor(Color32::GREEN);
-const buy_inactive:LineState=LineState::InactiveColor(Color32::GREEN);
-const buy_style:LineStyle=LineStyle::Solid(0.5);
+const buy_active: LineState = LineState::ActiveColor(Color32::GREEN);
+const buy_inactive: LineState = LineState::InactiveColor(Color32::GREEN);
+const buy_style: LineStyle = LineStyle::Solid(0.5);
 
+const sell_active: LineState = LineState::ActiveColor(Color32::RED);
+const sell_inactive: LineState = LineState::InactiveColor(Color32::RED);
+const sell_style: LineStyle = LineStyle::Solid(0.5);
 
-const sell_active:LineState=LineState::ActiveColor(Color32::RED);
-const sell_inactive:LineState=LineState::InactiveColor(Color32::RED);
-const sell_style:LineStyle=LineStyle::Solid(0.5);
+const last_price_color: Color32 = Color32::YELLOW;
+const last_price_line: LineStyle = LineStyle::Dotted(0.5);
 
-const last_price_color:Color32=Color32::YELLOW;
-const last_price_line:LineStyle=LineStyle::Dotted(0.5);
-
-
-impl HlineType{
-    fn hline_order(o:&Order,active:bool)->HLine{
-        let side=o.get_side();
-        let price=o.get_price();
-        if side ==true{
-            if active == true{
-                return HlineType::BuyOrder((buy_active,buy_style)).to_hline(price);
-            }else{
-                return HlineType::BuyOrder((buy_inactive,buy_style)).to_hline(price);
+impl HlineType {
+    fn hline_order(o: &Order, active: bool) -> HLine {
+        let side = o.get_side();
+        let price = o.get_price();
+        if side == true {
+            if active == true {
+                return HlineType::BuyOrder((buy_active, buy_style)).to_hline(price);
+            } else {
+                return HlineType::BuyOrder((buy_inactive, buy_style)).to_hline(price);
             }
-        }else{
-            if active == true{
-                return HlineType::SellOrder((sell_active,sell_style)).to_hline(price);
-            }else{
-                return HlineType::SellOrder((sell_inactive,sell_style)).to_hline(price);
+        } else {
+            if active == true {
+                return HlineType::SellOrder((sell_active, sell_style)).to_hline(price);
+            } else {
+                return HlineType::SellOrder((sell_inactive, sell_style)).to_hline(price);
             }
         }
     }
-    fn to_hline(&self,value:&f64)->HLine{
-        match &self{
-            HlineType::BuyOrder((ba,bs))=>{
-                let color=match ba{
-                    LineState::ActiveColor(color)=>color,
-                    LineState::InactiveColor(color)=>color,
+    fn to_hline(&self, value: &f64) -> HLine {
+        match &self {
+            HlineType::BuyOrder((ba, bs)) => {
+                let color = match ba {
+                    LineState::ActiveColor(color) => color,
+                    LineState::InactiveColor(color) => color,
                 };
-                let width=match bs{
-                    LineStyle::Solid(width)=>width,
-                    LineStyle::Dotted(width)=>width,
+                let width = match bs {
+                    LineStyle::Solid(width) => width,
+                    LineStyle::Dotted(width) => width,
                 };
                 let s = Stroke::new(width.clone(), color.clone());
                 HLine::new("Buy order", value.clone()).stroke(s)
             }
-            HlineType::SellOrder((si,ss))=>{
-                let color=match si{
-                    LineState::ActiveColor(color)=>color,
-                    LineState::InactiveColor(color)=>color,
+            HlineType::SellOrder((si, ss)) => {
+                let color = match si {
+                    LineState::ActiveColor(color) => color,
+                    LineState::InactiveColor(color) => color,
                 };
-                let width=match ss{
-                    LineStyle::Solid(width)=>width,
-                    LineStyle::Dotted(width)=>width,
+                let width = match ss {
+                    LineStyle::Solid(width) => width,
+                    LineStyle::Dotted(width) => width,
                 };
                 let s = Stroke::new(width.clone(), color.clone());
                 HLine::new("Sell order", value.clone()).stroke(s)
             }
-            HlineType::LastPrice((l,color))=>{
-                let width=match l{
-                    LineStyle::Solid(width)=>width,
-                    LineStyle::Dotted(width)=>width,
+            HlineType::LastPrice((l, color)) => {
+                let width = match l {
+                    LineStyle::Solid(width) => width,
+                    LineStyle::Dotted(width) => width,
                 };
                 let s = Stroke::new(width.clone(), color.clone());
                 HLine::new("Last price", value.clone()).stroke(s)
@@ -2140,14 +2027,12 @@ impl HlineType{
     }
 }
 
-
-
-
 impl HistPlot {
-    fn create_hlines(&self, order_price:&[(Order,bool)])->Vec<HLine>{
-        order_price.iter().map(|(order,active)|{
-            HlineType::hline_order(order,*active)
-        }).collect()
+    fn create_hlines(&self, order_price: &[(Order, bool)]) -> Vec<HLine> {
+        order_price
+            .iter()
+            .map(|(order, active)| HlineType::hline_order(order, *active))
+            .collect()
     }
     fn new(hist_asset_data: Arc<Mutex<AssetData>>) -> Self {
         Self {
@@ -2161,7 +2046,10 @@ impl HistPlot {
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
     ) {
+
+
         hist_plot.kline_plot.show(ui, plot_extras);
+
 
         ui.end_row();
         egui::Grid::new("Hplot order assets:")
@@ -2171,56 +2059,52 @@ impl HistPlot {
                     .selected_text(format!("{}", hist_plot.intv.to_str()))
                     .show_ui(ui, |ui| {
                         for i in Intv::iter() {
-                            ui.selectable_value(
-                                &mut hist_plot.intv,
-                                i,
-                                i.to_str(),
-                            );
+                            ui.selectable_value(&mut hist_plot.intv, i, i.to_str());
                         }
                     });
                 ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.search_string)
                         .hint_text("Enter date or pick period"),
                 );
-                ui.add(egui_extras::DatePickerButton::new(
-                    &mut hist_plot.picked_date,
-                ).id_salt("hist_start"));
-                ui.add(egui_extras::DatePickerButton::new(
-                    &mut hist_plot.picked_date_end,
-                ).id_salt("hist_end"));
+                ui.add(
+                    egui_extras::DatePickerButton::new(&mut hist_plot.picked_date)
+                        .id_salt("hist_start"),
+                );
+                ui.add(
+                    egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
+                        .id_salt("hist_end"),
+                );
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.search_string)
                         .hint_text("Search for loaded asset"),
                 );
                 if ui.button("Show").clicked() {
                     let s = &hist_plot.search_string.clone();
-                    let ad = hist_plot.hist_asset_data.lock().expect("Posoned mutex! - Hist asset data");
+                    let ad = hist_plot
+                        .hist_asset_data
+                        .lock()
+                        .expect("Posoned mutex! - Hist asset data");
                     let i = hist_plot.intv;
-                    let time=chrono::NaiveTime::from_hms_milli_opt(0, 0, 0, 0).expect("Really?...");
-                    let res =
-                        hist_plot.kline_plot.live_from_ad(&ad, s, i, 1_000, None
-                            //hist_plot.picked_date.and_time(time), hist_plot.picked_date_end.and_time(time))
-                            );
-                }
-            });
-        egui::Grid::new("HistLoad")
-            .striped(true)
-            .show(ui, |ui| {
-                let search_load = ui.add(
-                    egui::TextEdit::singleline(
-                        &mut hist_plot.search_load_string,
-                    )
-                    .hint_text("Asset to Load"),
-                );
-                if ui.button("Load Asset").clicked() {
-                    let msg = ClientInstruct::SendSQLInstructs(
-                        SQLInstructs::LoadHistData {
-                            symbol: hist_plot.search_load_string.clone(),
-                        },
+                    let time =
+                        chrono::NaiveTime::from_hms_milli_opt(0, 0, 0, 0).expect("Really?...");
+                    let res = hist_plot.kline_plot.live_from_ad(
+                        &ad, s, i, 1_000,
+                        None, //hist_plot.picked_date.and_time(time), hist_plot.picked_date_end.and_time(time))
                     );
-                    cli_chan.send(msg);
                 }
             });
+        egui::Grid::new("HistLoad").striped(true).show(ui, |ui| {
+            let search_load = ui.add(
+                egui::TextEdit::singleline(&mut hist_plot.search_load_string)
+                    .hint_text("Asset to Load"),
+            );
+            if ui.button("Load Asset").clicked() {
+                let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistData {
+                    symbol: hist_plot.search_load_string.clone(),
+                });
+                cli_chan.send(msg);
+            }
+        });
         egui::Grid::new("Hplot forwards:").show(ui, |ui| {
             if ui.button("Forward").clicked() {
                 todo!()

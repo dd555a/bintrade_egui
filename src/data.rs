@@ -339,6 +339,26 @@ pub enum Intv {
     Month1,
 }
 impl Intv {
+    pub fn from_str(input:&str) -> Self {
+        match input {
+           "1min"    => Intv::Min1   ,
+           "3min"    => Intv::Min3   ,
+           "5min"    => Intv::Min5   ,
+           "15min"   => Intv::Min15  ,
+           "30min"   => Intv::Min30  ,
+           "1hour"   => Intv::Hour1  ,
+           "2hour"   => Intv::Hour2  ,
+           "4hour"   => Intv::Hour4  ,
+           "6hour"   => Intv::Hour6  ,
+           "8hour"   => Intv::Hour8  ,
+           "12hour"  => Intv::Hour12 ,
+           "1day"    => Intv::Day1   ,
+           "3day"    => Intv::Day3   ,
+           "1week"   => Intv::Week1  ,
+           "1month"  => Intv::Month1 ,
+           _=> panic!("Invalid interval string, Intv::from_str()")
+        }
+    }
     pub fn to_str(&self) -> &str {
         match &self {
             Intv::Min1 => "1min",
@@ -558,7 +578,7 @@ impl Kline {
 }
 
 #[derive(Debug)]
-struct Klines {
+pub struct Klines {
     //symb:String, //String of the asset etc BTCUSTD
     start_time: chrono::NaiveDateTime, //Data start time
     end_time: chrono::NaiveDateTime,   //Data end time
@@ -578,7 +598,7 @@ impl Klines {
             dat: dat,
         }
     }
-    fn new_empty() -> Self {
+    pub fn new_empty() -> Self {
         let start_time = chrono::NaiveDateTime::from_timestamp(0, 0);
         let end_time = chrono::NaiveDateTime::from_timestamp(0, 0);
         Self {
@@ -591,7 +611,7 @@ impl Klines {
     fn insert(&mut self, i: &Intv, kl: Kline) {
         self.dat.insert(i.clone(), kl);
     }
-    fn insert_fat(&mut self, i: &Intv, kl: FatKline) {
+    pub fn insert_fat(&mut self, i: &Intv, kl: FatKline) {
         self.full_dat.insert(i.clone(), kl);
     }
     #[instrument(level="debug")]
@@ -656,7 +676,7 @@ impl Klines {
 pub struct AssetData {
     id:usize,
     size: usize,
-    kline_data: HashMap<String, Klines>,
+    pub kline_data: HashMap<String, Klines>,
 
 }
 
@@ -790,7 +810,7 @@ impl AssetData {
 
 
 
-fn get_data_binance(
+pub fn get_data_binance(
     client: &Market,
     symbol: &str,
     intv: Intv,

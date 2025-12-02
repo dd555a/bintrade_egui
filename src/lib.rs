@@ -1,52 +1,52 @@
 #![allow(warnings)]
-use serde_json::Value;
 use crate::trade::Order;
+use serde_json::Value;
 use strum_macros::EnumIter;
 
-#[derive(Eq, PartialEq, Debug, Clone,Copy,  Hash)]
-pub enum Sys_err{
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
+pub enum Sys_err {
     No_Network,
     DiskFull,
 }
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
-pub enum Get_err{
+pub enum Get_err {
     Download_failed,
     Not_found,
-    Access_denied
+    Access_denied,
 }
-#[derive(Eq, PartialEq, Debug, Clone,Copy,  Hash)]
-pub enum Put_err{
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
+pub enum Put_err {
     Upload_failed,
     Path_not_found,
 }
 
-#[derive(Eq, PartialEq, Debug, Clone,Copy,  Hash)]
-pub enum Indp_data_err{
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
+pub enum Indp_data_err {
     Duplicates,
     Timezone,
     WrongFormat,
 }
-#[derive(Eq, PartialEq, Debug, Clone,Copy,  Hash)]
-pub enum Dep_data_err{
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
+pub enum Dep_data_err {
     WrongFormat,
     Duplicates,
     Timezone,
-    Incorrect_method
+    Incorrect_method,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
-pub enum DataError{
+pub enum DataError {
     Indp_corrup(Indp_data_err), //=> delete db, download again, etc...
-    Depn_corrup(Dep_data_err),    //=> delete afflicted dependent tables and recalc...
+    Depn_corrup(Dep_data_err),  //=> delete afflicted dependent tables and recalc...
 }
 
-#[derive(Eq, PartialEq, Debug, Clone, Copy,Hash)]
-pub enum GeneralError{
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
+pub enum GeneralError {
     SystemError(Sys_err),
     GetError(Get_err),
     PutError(Put_err),
     DATAError(DataError),
-    Generic
+    Generic,
 }
 
 #[derive(Eq, PartialEq, Debug, Clone, Hash, Default)]
@@ -61,17 +61,23 @@ pub enum ProcResp {
 pub enum SQLInstructs {
     #[default]
     None,
-    LoadHistData { symbol: String },
-    UnloadHistData { symbol: String },
-    LoadTradeRecord { id: u32 },
+    LoadHistData {
+        symbol: String,
+    },
+    UnloadHistData {
+        symbol: String,
+    },
+    LoadTradeRecord {
+        id: u32,
+    },
 }
-impl SQLInstructs{
-    pub fn to_str(&self)->&str{
-        match &self{
-            SQLInstructs::None=>"SQLInstructs: None",
-            SQLInstructs::LoadHistData { symbol:_ }=>"SQLInstructs: Load Hist Data",
-            SQLInstructs::UnloadHistData { symbol:_ }=>"SQLInstructs: Unload Hist Data",
-            SQLInstructs::LoadTradeRecord { id:_}=>"SQLInstructs: Load Trade Record",
+impl SQLInstructs {
+    pub fn to_str(&self) -> &str {
+        match &self {
+            SQLInstructs::None => "SQLInstructs: None",
+            SQLInstructs::LoadHistData { symbol: _ } => "SQLInstructs: Load Hist Data",
+            SQLInstructs::UnloadHistData { symbol: _ } => "SQLInstructs: Unload Hist Data",
+            SQLInstructs::LoadTradeRecord { id: _ } => "SQLInstructs: Load Trade Record",
         }
     }
 }
@@ -87,42 +93,55 @@ pub enum SQLResponse {
 pub enum BinResponse {
     None,
     Success,
-    Failure((String,  GeneralError)),
+    Failure((String, GeneralError)),
     OrderStatus(i32),
-
 }
 
-use std::collections::HashMap;
 use crate::binance::SymbolOutput;
+use std::collections::HashMap;
 
 #[derive(PartialEq, EnumIter, Debug, Clone, Default)]
 pub enum BinInstructs {
     #[default]
     None,
-    ConnectWS { params:HashMap<String,Vec<String>> },
-    ConnectUserWS { params: Value },
+    ConnectWS {
+        params: HashMap<String, Vec<String>>,
+    },
+    ConnectUserWS {
+        params: Value,
+    },
     Disconnect,
     GetUserData,
-    PlaceOrder { symbol: String, o: Order },
-    CancelAndReplaceOrder { symbol: String, o: Order },
-    CancelAllOrders { symbol: String },
+    PlaceOrder {
+        symbol: String,
+        o: Order,
+    },
+    CancelAndReplaceOrder {
+        symbol: String,
+        o: Order,
+    },
+    CancelAllOrders {
+        symbol: String,
+    },
 }
-impl BinInstructs{
-    pub fn to_str(&self)->&str{
-        match &self{
-            BinInstructs::None=>"BinInstruct: None",
-            BinInstructs::ConnectWS { params:_}=>"BinInstruct: Connect WS",
-            BinInstructs::ConnectUserWS { params:_}=>"BinInstruct: Connect User WS",
-            BinInstructs::Disconnect=>"BinInstruct: Disconnect",
-            BinInstructs::GetUserData=>"BinInstruct: GetUserData",
-            BinInstructs::PlaceOrder { symbol: _, o:_ }=>"BinInstruct: Place Order",
-            BinInstructs::CancelAndReplaceOrder { symbol: _, o: _}=>"BinInstruct: Cancel and Replace Order:",
-            BinInstructs::CancelAllOrders { symbol: _}=>"BinInstruct: Cancel All Orders",
+impl BinInstructs {
+    pub fn to_str(&self) -> &str {
+        match &self {
+            BinInstructs::None => "BinInstruct: None",
+            BinInstructs::ConnectWS { params: _ } => "BinInstruct: Connect WS",
+            BinInstructs::ConnectUserWS { params: _ } => "BinInstruct: Connect User WS",
+            BinInstructs::Disconnect => "BinInstruct: Disconnect",
+            BinInstructs::GetUserData => "BinInstruct: GetUserData",
+            BinInstructs::PlaceOrder { symbol: _, o: _ } => "BinInstruct: Place Order",
+            BinInstructs::CancelAndReplaceOrder { symbol: _, o: _ } => {
+                "BinInstruct: Cancel and Replace Order:"
+            }
+            BinInstructs::CancelAllOrders { symbol: _ } => "BinInstruct: Cancel All Orders",
         }
     }
 }
 
-#[derive(Eq, PartialEq,EnumIter, Debug, Clone)]
+#[derive(Eq, PartialEq, EnumIter, Debug, Clone)]
 pub enum ClientResponse {
     None,
     Success,
@@ -149,32 +168,30 @@ pub enum ClientInstruct {
     StopSQL,
     SendSQLInstructs(SQLInstructs),
 
-
     //Ping pong the server
     Ping(i64),
     Pong(i64),
 }
-impl ClientInstruct{
-    pub fn to_str(&self)->&str{
-        match &self{
-            ClientInstruct::None=>"None",
-            ClientInstruct::Stop=>"Stop",
-            ClientInstruct::Start=>"Start",
-            ClientInstruct::Terminate=>"Terminate",
-            ClientInstruct::RestartRemote=>"Restart Remote",
-            ClientInstruct::StartBinCli=>"Start Bin Client",
-            ClientInstruct::StopBinCli=>"Stop Bin Client",
-            ClientInstruct::SendBinInstructs(_)=>"Send Bin Instructs",
-            ClientInstruct::StartSQL=>"Start SQL",
-            ClientInstruct::StopSQL=>"Stop SQL",
-            ClientInstruct::SendSQLInstructs(_)=>"Send SQL Instructs",
-            ClientInstruct::Ping(_)=>"Ping",
-            ClientInstruct::Pong(_)=>"Pong",
-
+impl ClientInstruct {
+    pub fn to_str(&self) -> &str {
+        match &self {
+            ClientInstruct::None => "None",
+            ClientInstruct::Stop => "Stop",
+            ClientInstruct::Start => "Start",
+            ClientInstruct::Terminate => "Terminate",
+            ClientInstruct::RestartRemote => "Restart Remote",
+            ClientInstruct::StartBinCli => "Start Bin Client",
+            ClientInstruct::StopBinCli => "Stop Bin Client",
+            ClientInstruct::SendBinInstructs(_) => "Send Bin Instructs",
+            ClientInstruct::StartSQL => "Start SQL",
+            ClientInstruct::StopSQL => "Stop SQL",
+            ClientInstruct::SendSQLInstructs(_) => "Send SQL Instructs",
+            ClientInstruct::Ping(_) => "Ping",
+            ClientInstruct::Pong(_) => "Pong",
         }
     }
 }
-impl std::fmt::Display for ClientInstruct{
+impl std::fmt::Display for ClientInstruct {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.to_str())
     }
