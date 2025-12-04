@@ -18,6 +18,8 @@ use eframe::egui::{self, DragValue, Event, Vec2};
 
 use crate::{ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse};
 
+use crate::binance::KlineTick;
+
 use egui::{Color32, ComboBox, epaint};
 use egui_plot_bintrade::{
     Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, Legend, Line, Plot,
@@ -60,7 +62,7 @@ impl Default for KlinePlot {
             l_boxplot: vec![],
             l_barchart: vec![],
             tick_kline: None,
-            intv: Intv::Min15,
+            intv: Intv::Min1,
             name: "".to_string(),
             loading: false,
             static_loaded: false,
@@ -86,9 +88,13 @@ impl KlinePlot {
         ui: &mut egui::Ui,
         plot_extras: &PlotExtras,
         live_ad: Arc<Mutex<AssetData>>,
+        collected_data: &HashMap<String, SymbolOutput>,
     ) -> Result<()> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
         let symbol=self.symbol.clone();
+        if let Some(data)=collected_data.get(&symbol){
+            self.live_live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None, &data);
+        };
         self.live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None);
         self.show(ui, plot_extras);
         Ok(())
@@ -169,10 +175,10 @@ impl KlinePlot {
         } else {
             if self.loading == false && self.static_loaded == true {
                 plot.show(ui, |plot_ui| {
-                    log::debug!["Hlines in plot: {:?}", &hlines];
+                    log::trace!["Hlines in plot: {:?}", &hlines];
                     if hlines != [] {
                         for h in hlines {
-                            log::debug!["Hlines (for h in ){:?}", &h];
+                            log::trace!["Hlines (for h in ){:?}", &h];
                             plot_ui.add(h);
                         }
                     };
@@ -186,6 +192,50 @@ impl KlinePlot {
         Ok(())
     }
     fn live_from_sql() { //TODO load a designated period directly from sql... maybe better...
+    }
+    fn live_live_from_ad(
+        &mut self,
+        ad: &AssetData,
+        symbol: &str,
+        intv: Intv,
+        max_load_points: usize,
+        timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
+        data:&SymbolOutput
+    ) -> Result<()> {
+        tracing::debug!["\x1b[93m  live_live ran \x1b[0m"];
+
+        let k=if let Some(ck)=data.closed_klines.get(&intv){
+            KlineTick::to_kline_vec(ck)
+        }else{
+            vec![]
+        };
+
+        tracing::debug!["\x1b  CLOSED klines GUI \x1b[93m  = {:?}", &k];
+        let ok=if let Some(ok)=data.all_klines.get(&intv){
+            KlineTick::to_kline_vec(ok)
+        }else{
+            vec![]
+        };
+        let (div, width) = get_chart_params(&intv);
+        self.chart_params = (div, width);
+        if k.len() <= max_load_points {
+            self.loading = true;
+            if k.is_empty() == false{
+                self.add_live(&k, &div, &width);
+            };
+            self.loading = false;
+        } else {
+            //tracing::debug!["max load points separation{:?}",k];
+            let kl = &k[(k.len() - max_load_points)..];
+            //tracing::debug!["max load points separation{:?}",kl];
+            self.loading = true;
+            if k.is_empty() == false{
+                self.add_live(&k, &div, &width);
+            };
+            self.loading = false;
+        }
+        self.static_loaded = true;
+        return Ok(());
     }
     //#[instrument(level="debug")]
     fn live_from_ad(
@@ -308,7 +358,9 @@ macro_rules! make_p{
                 //.x_grid_spacer(uniform_grid_spacer($($formatter2)*))
                 //TODO BUG if this is not here... the gui doesn't crash...
                 .default_y_bounds(0.0,$($y_upper)*)
-                .default_x_bounds($($x_lower)*,$($x_higher)*)
+                //.default_x_bounds($($x_lower)*,$($x_hig/her)*)
+                //add bounds with ability to plot
+                //Make volume a separate chart?
                 .height(320.0)
                 .view_aspect(2.0);
 
@@ -1866,7 +1918,7 @@ impl Default for LivePlot {
 
             search_string: "".to_string(),
             symbol:"BTCUSDT".to_string(),
-            intv: Intv::Min15,
+            intv: Intv::Min1,
             lines: vec![],
         }
     }
@@ -1889,10 +1941,10 @@ impl LivePlot {
     ) {
 
 
-        live_plot.kline_plot.show_live(ui, plot_extras, live_plot.live_asset_data.clone());
+        live_plot.kline_plot.show_live(ui, plot_extras, live_plot.live_asset_data.clone(), collect_data);
 
         
-        tracing::debug!["\x1b[36m Collected Data\x1b[0m: {:?}", &collect_data];
+        tracing::trace!["\x1b[36m Collected Data\x1b[0m: {:?}", &collect_data];
 
         ui.end_row();
         egui::Grid::new("Hplot order assets:")
@@ -1958,7 +2010,7 @@ impl Default for HistPlot {
             search_string: "".to_string(),
             search_date: "".to_string(),
             search_load_string: "".to_string(),
-            intv: Intv::Min15,
+            intv: Intv::Min1,
             picked_date: chrono::NaiveDate::from_ymd(2024, 10, 1),
             picked_date_end: chrono::NaiveDate::from_ymd(2025, 10, 10),
             hist_extras: None,

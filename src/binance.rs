@@ -113,7 +113,7 @@ struct AggTradeWS {
 }
    //{'t': 1748736000000, 'T': 1751327999999, 's': 'TRUMPUSDT', 'i': '1M', 'f': 141621259, 'L': 142166556, 'o': '11.24000000', 'c': '11.19000000', 'h': '11.90000000', 'l': '10.94000000', 'v': '15876266.19100000', 'n': 545298, 'x': False, 'q': '179814040.65914000', 'V': '8111489.88500000', 'Q': '91972469.36091000', 'B': '0'}
 #[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
-struct KlineTick{
+pub struct KlineTick{
     t: i64, // open time 
     T: i64, // close time
     //s: String, //symbol
@@ -131,6 +131,14 @@ struct KlineTick{
     V: f64,
     Q: f64,
     B: i64, //ignore
+}
+impl KlineTick{
+    pub fn to_kline_vec(input:&[KlineTick])->Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>{
+        input.iter().map(|i|{
+            let open_time=chrono::NaiveDateTime::from_timestamp_millis(i.t).expect("Fukcckckck");
+            (open_time, i.o, i.h, i.l, i.c, i.v)
+        }).collect()
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct TradeWS {}
@@ -307,8 +315,8 @@ pub struct SymbolOutput {
     trade: Vec<TradeWS>,
     agg_trade: Vec<AggTradeWS>,
     order_book: Vec<OrderBookWS>,
-    closed_klines: HashMap<Intv,Vec<KlineTick>>,
-    all_klines: HashMap<Intv,Vec<KlineTick>>,
+    pub closed_klines: HashMap<Intv,Vec<KlineTick>>,
+    pub all_klines: HashMap<Intv,Vec<KlineTick>>,
 }
 
 #[derive(Debug, Default)]
@@ -388,13 +396,13 @@ impl WSTick {
                     .expect("(BINCLIENT) poisoned data collection mutex");
                 if let Some(mut queue) = cum_queue.get_mut(&symbol) {
                     if kline.x==true{
-                        tracing::trace!["\x1b  CLOSED kline \x1b[93m  = {:?}", &kline];
+                        tracing::debug!["\x1b  CLOSED kline \x1b[93m  = {:?}", &kline];
                         if let Some(mut kline_closed_queue)= queue.closed_klines.get_mut(&intv){
                             kline_closed_queue.push(kline.clone());
                             //clear the tick queue once the kline is closed
-                            tracing::trace!["\x1b kline_tick CLOSED queue size \x1b[93m  = {:?}", kline_closed_queue];
+                            tracing::debug!["\x1b kline_tick CLOSED queue size \x1b[93m  = {:?}", kline_closed_queue];
                             queue.all_klines.insert(intv.clone(),vec![]);
-                            if let Some(mut kline_all_queue)= queue.closed_klines.get_mut(&intv){
+                            if let Some(mut kline_all_queue)= queue.all_klines.get_mut(&intv){
                                 kline_all_queue.clear();
                                 tracing::trace!["\x1b kline_tick OPEN clear() ran! \x1b[93m  "];
 
