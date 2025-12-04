@@ -1191,6 +1191,8 @@ struct ManualOrders {
 
     hist_trade_runner: HistTradeRunner,
 
+    current_symbol:String,
+
     search_string: String,
     quant: Quant,
     order: Order,
@@ -1222,6 +1224,8 @@ impl Default for ManualOrders {
         Self {
             man_orders: None,
             active_orders: None,
+
+            current_symbol:"BTCUSDT".to_string(),
 
             search_string: "".to_string(),
             quant: Quant::Q100,
@@ -1303,6 +1307,19 @@ impl ManualOrders {
             }
         };
         //man_orders.sync(hist_trade.as_deref());
+        //man_orders.sync(hist_trade.as_deref());
+        egui::Grid::new("Current symboll:")
+            .striped(true)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!["Current asset: {}", man_orders.current_symbol])
+                            .color(Color32::WHITE),
+                    );
+                    ui.end_row();
+                });
+            });
+        ui.end_row();
         egui::Grid::new("Man order assets:")
             .striped(true)
             .show(ui, |ui| {
@@ -1320,33 +1337,36 @@ impl ManualOrders {
                     );
                     ui.end_row();
                 });
-                ui.vertical(|ui| {
+            });
+        ui.end_row();
+        egui::Grid::new("Last price:")
+            .striped(true)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
                         man_orders.last_price_s = *last_price;
                         man_orders.last_price_buffer.push(last_price.clone());
                         let n = man_orders.last_price_buffer.len();
                         if n < man_orders.last_price_buffer_size {
                             ui.label(
-                                RichText::new(format!["Last price:{}", last_price])
+                                RichText::new(format!["Last price: {}", last_price])
                                     .color(Color32::WHITE),
                             );
                         } else {
                             let sum: f64 = man_orders.last_price_buffer.iter().sum();
                             if sum / (n as f64) <= *last_price {
                                 ui.label(
-                                    RichText::new(format!["Last price:{}", last_price])
+                                    RichText::new(format!["Last price: {}", last_price])
                                         .color(Color32::GREEN),
                                 );
                             } else {
                                 ui.label(
-                                    RichText::new(format!["Last price:{}", last_price])
+                                    RichText::new(format!["Last price: {}", last_price])
                                         .color(Color32::RED),
                                 );
                             }
                         }
                     ui.end_row();
                 });
-                /*
-                 */
             });
 
         ui.end_row();
@@ -1870,6 +1890,9 @@ impl LivePlot {
 
 
         live_plot.kline_plot.show_live(ui, plot_extras, live_plot.live_asset_data.clone());
+
+        
+        tracing::debug!["\x1b[36m Collected Data\x1b[0m: {:?}", &collect_data];
 
         ui.end_row();
         egui::Grid::new("Hplot order assets:")

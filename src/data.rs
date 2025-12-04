@@ -397,6 +397,26 @@ impl Intv {
             Intv::Month1 => "1M",
         }
     }
+    pub fn from_bin_str(input:&str) -> Self{
+        match input {
+            "1m"  => Intv::Min1    ,
+            "3m"  => Intv::Min3    ,
+            "5m"  => Intv::Min5    ,
+            "15m" => Intv::Min15   ,
+            "30m" => Intv::Min30   ,
+            "1h"  => Intv::Hour1   ,
+            "2h"  => Intv::Hour2   ,
+            "4h"  => Intv::Hour4   ,
+            "6h"  => Intv::Hour6   ,
+            "8h"  => Intv::Hour8   ,
+            "12h" => Intv::Hour12  ,
+            "1d"  => Intv::Day1    ,
+            "3d"  => Intv::Day3    ,
+            "1w"  => Intv::Week1   ,
+            "1M"  => Intv::Month1  ,
+            _ => panic!("Invalid string parsed Intv::from_bin_str()"),
+        }
+    }
     pub fn to_timedelta(&self) -> chrono::TimeDelta {
         match &self {
             Intv::Min1 => chrono::TimeDelta::minutes(1),

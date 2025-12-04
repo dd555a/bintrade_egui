@@ -529,11 +529,11 @@ impl ClientTask {
         );
         log::info!("Binclient started");
         loop {
-            let sub_params = vec!["btcusdt@aggTrade".to_string()];
+            let sub_params = vec!["btcusdt@aggTrade".to_string(), "btcusdt@kline_1m".to_string()];
             let mut params: HashMap<String, Vec<String>> = HashMap::new();
             params.insert("BTCUSDT".to_string(), sub_params);
             let res = cli.connect_ws(params).await;
-            match res {
+            match res{
                 Ok(_) => log::trace!["WS connected successfuly for BTCUSDT"],
                 Err(e) => log::error!["WS connection failed, ERROR: {}", e],
             };

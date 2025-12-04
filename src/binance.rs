@@ -10,6 +10,8 @@ use binance_async::websocket::{
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::{BinInstructs, BinResponse, GeneralError};
 
 use crate::data::AssetData;
@@ -109,6 +111,27 @@ struct AggTradeWS {
     q: f64,
     //s: String,
 }
+   //{'t': 1748736000000, 'T': 1751327999999, 's': 'TRUMPUSDT', 'i': '1M', 'f': 141621259, 'L': 142166556, 'o': '11.24000000', 'c': '11.19000000', 'h': '11.90000000', 'l': '10.94000000', 'v': '15876266.19100000', 'n': 545298, 'x': False, 'q': '179814040.65914000', 'V': '8111489.88500000', 'Q': '91972469.36091000', 'B': '0'}
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
+struct KlineTick{
+    t: i64, // open time 
+    T: i64, // close time
+    //s: String, //symbol
+    //i: String, //Interval
+    f: i64, //??
+    L: i64,// ??
+    o: f64, 
+    c: f64,
+    h: f64,
+    l: f64,
+    v: f64,
+    n: i64, //no of trades
+    x: bool, //kline open or close
+    q: f64, //qout taer volume
+    V: f64,
+    Q: f64,
+    B: i64, //ignore
+}
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct TradeWS {}
 
@@ -117,6 +140,7 @@ enum BinWSResponse {
     OrderBook(OrderBookWS),
     AggTrade(AggTradeWS),
     Trade(TradeWS),
+    KlineTick((Intv,KlineTick)),
 }
 impl Default for BinWSResponse {
     fn default() -> BinWSResponse {
@@ -136,6 +160,9 @@ impl BinWSResponse {
             }
             BinWSResponse::Trade(_) => {
                 format!["{}@Trade", symbol.to_lowercase()]
+            }
+            BinWSResponse::KlineTick((intv,_)) => {
+                format!["{}@kline_{}", symbol.to_lowercase(), intv.to_bin_str()]
             }
         };
         tracing::debug!["{}", &ret];
@@ -159,6 +186,13 @@ impl BinWSResponse {
                     .as_str()
                     .ok_or(anyhow!["Unable to parse s"])?
                     .to_string();
+
+
+                #[cfg(debug_assertions)]
+                let t_now=SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
+                #[cfg(debug_assertions)]
+                let event_time=input["E"].as_i64().ok_or(anyhow!["Unable to parse E as i64"])?;
+                tracing::trace!["\x1b[34m (AGGTrade Current linux epoch - event_time)\x1b[0m: {}ms", t_now-event_time];
                 Ok((
                     symbol,
                     BinWSResponse::AggTrade(
@@ -182,6 +216,84 @@ impl BinWSResponse {
                         },
                     ),
                 ))
+
+            }
+            "kline" => {
+                tracing::trace!["Parsing kline: {}",&input["k"]];
+                let symbol = input
+                    .get("s")
+                    .ok_or(anyhow!["s Symbol not found in input :{:?}", input])?
+                    .as_str()
+                    .ok_or(anyhow!["Unable to parse s"])?
+                    .to_string();
+                tracing::trace!["Parsing kline 2: {}",&input["k"]];
+                let interval= input["k"].
+                    get("i")
+                    .ok_or(anyhow!["i Interval not found in input :{:?}", input])?
+                    .as_str()
+                    .ok_or(anyhow!["Unable to parse i"])?;
+                    
+                let i=Intv::from_bin_str(interval);
+                let input2=&input["k"];
+
+                #[cfg(debug_assertions)]
+                let t_now=SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
+                #[cfg(debug_assertions)]
+                let event_time=input["E"].as_i64().ok_or(anyhow!["Unable to parse E as i64"])?;
+                tracing::trace!["\x1b[31m (KLINE Current linux epoch - event_time)\x1b[0m: {}ms", t_now-event_time];
+                /*
+                */
+                Ok((
+                    symbol,
+                    BinWSResponse::KlineTick((i,
+                        //NOTE this code makes me want to get aids...
+                        KlineTick {
+                            t: input2["t"].as_i64().ok_or(anyhow!["Unable to parse t"])?,
+                            T: input2["T"].as_i64().ok_or(anyhow!["Unable to parse T"])?,
+                            f: input2["f"].as_i64().ok_or(anyhow!["Unable to parse f"])?,
+                            L: input2["L"].as_i64().ok_or(anyhow!["Unable to parse L"])?,
+                            o: input2["o"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse o"])?
+                                .parse()?,
+                            h: input2["h"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse o"])?
+                                .parse()?,
+                            l: input2["l"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse o"])?
+                                .parse()?,
+                            c: input2["c"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse o"])?
+                                .parse()?,
+                            v: input2["v"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse v"])?
+                                .parse()?,
+                            n: input2["n"].as_i64().ok_or(anyhow!["Unable to parse n"])?,
+                            x: input2["x"].as_bool().ok_or(anyhow!["Unable to parse x"])?,
+                            q: input2["q"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse q"])?
+                                .parse()?,
+                            V: input2["V"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse V"])?
+                                .parse()?,
+                            Q: input2["Q"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse Q"])?
+                                .parse()?,
+                            B: input2["B"]
+                                .as_str()
+                                .ok_or(anyhow!["Unable to parse B"])?
+                                .parse()?,
+                        },
+                    ))
+                ))
+
             }
             _ => Err(anyhow!["Unable to parse ws output:{:?}", input]),
         };
@@ -195,6 +307,8 @@ pub struct SymbolOutput {
     trade: Vec<TradeWS>,
     agg_trade: Vec<AggTradeWS>,
     order_book: Vec<OrderBookWS>,
+    closed_klines: HashMap<Intv,Vec<KlineTick>>,
+    all_klines: HashMap<Intv,Vec<KlineTick>>,
 }
 
 #[derive(Debug, Default)]
@@ -225,6 +339,7 @@ impl WSTick {
     }
     #[instrument(level = "trace")]
     async fn place_unsorted(&mut self, symbol: String, input: BinWSResponse) -> Result<()> {
+        tracing::trace!["Binws response: {:?}",input];
         match input {
             BinWSResponse::OrderBook(o) => {
                 let mut cum_queue = self
@@ -266,32 +381,84 @@ impl WSTick {
                     cum_queue.insert(symbol, queue);
                 };
             }
+            BinWSResponse::KlineTick((intv, kline)) => {
+                let mut cum_queue = self
+                    .symbol_sorted_output
+                    .lock()
+                    .expect("(BINCLIENT) poisoned data collection mutex");
+                if let Some(mut queue) = cum_queue.get_mut(&symbol) {
+                    if kline.x==true{
+                        tracing::trace!["\x1b  CLOSED kline \x1b[93m  = {:?}", &kline];
+                        if let Some(mut kline_closed_queue)= queue.closed_klines.get_mut(&intv){
+                            kline_closed_queue.push(kline.clone());
+                            //clear the tick queue once the kline is closed
+                            tracing::trace!["\x1b kline_tick CLOSED queue size \x1b[93m  = {:?}", kline_closed_queue];
+                            queue.all_klines.insert(intv.clone(),vec![]);
+                            if let Some(mut kline_all_queue)= queue.closed_klines.get_mut(&intv){
+                                kline_all_queue.clear();
+                                tracing::trace!["\x1b kline_tick OPEN clear() ran! \x1b[93m  "];
+
+                            };
+                            //Notify that a kline is closed - close time
+                        }else{
+                            queue.closed_klines.insert(intv.clone(),vec![kline.clone()]);
+                            tracing::trace!["\x1b kline_tick CLOSED queue size :1 - initiated\x1b[93m"];
+                            //plot closed_klines directly and fill any gaps
+                        };
+                    }else{
+                        if let Some(mut kline_all_queue)= queue.all_klines.get_mut(&intv){
+                            kline_all_queue.push(kline.clone());
+                            tracing::trace!["\x1b kline_tick OPEN queue size \x1b[93m  = {:?}", &kline_all_queue.len()];
+                        }else{
+                            queue.all_klines.insert(intv.clone(),vec![kline.clone()]);
+                            tracing::trace!["\x1b kline_tick OPEN queue size :1 - initiated\x1b[93m"];
+                        };
+
+                    };
+                } else {
+                    let mut queue = SymbolOutput::default();
+                    if kline.x==true{
+                        queue.closed_klines.insert(intv.clone(),vec![kline.clone()]);
+                    }else{
+                        queue.all_klines.insert(intv.clone(),vec![kline.clone()]);
+                    };
+                    cum_queue.insert(symbol, queue);
+                };
+            }
         }
         Ok(())
     }
+    #[instrument(level = "trace")]
     async fn append_tick(&mut self, input: Value) -> Result<()> {
-        let (symbol, sorted) = BinWSResponse::parse_into_by_str(input)?;
+        tracing::trace!["\x1b[93m Raw ws output\x1b[93m : {:?}", input];
+        let (symbol, sorted) = BinWSResponse::parse_into_by_str(input).context("Failed to parse into str")?;
         match (sorted, self.watch_price_ty) {
             (BinWSResponse::Trade(val), BinWSResponse::Trade(_)) => {
-                todo!()
+                //todo!()
             }
             (BinWSResponse::AggTrade(val), BinWSResponse::AggTrade(_)) => {
                 let mut lp1=self.live_price1.lock().expect("Unable to unlock mutex: binance::append_tick()");
                 *lp1=val.p.clone();
             }
             (BinWSResponse::OrderBook(val), BinWSResponse::AggTrade(_)) => {
-                todo!()
+                //todo!()
+
+            }
+            (BinWSResponse::KlineTick((_,val)), BinWSResponse::KlineTick((_,_))) => {
+                //todo!()
             }
             _ => (),
         }
         let mut uo = self.unsorted_output.lock().expect("Unable to unlock mutex: binance::append_tick()");
+        tracing::trace!["Placing ws output"];
         uo.push((symbol, sorted));
+        tracing::trace!["Raw ws successfully placed"];
         Ok(())
     }
     fn get_data_ref(&self) -> Arc<Mutex<HashMap<String, SymbolOutput>>> {
         Arc::clone(&self.symbol_sorted_output)
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn connect(&self) -> Result<(WebSocket)> {
         let mut p = self.sub_params.clone();
         tracing::debug!["\x1b[93m Subscribe message hashmap\x1b[93m : {:?}", p];
@@ -303,7 +470,7 @@ impl WSTick {
             })
             .collect::<()>();
         //let params = ["btcustd@Trade","btcustd@aggTrade", "btcusdt@bookTicker"];
-        tracing::debug!["\x1b[93m Ovec \x1b[0m: {:?}", ovec];
+        tracing::trace!["\x1b[93m Ovec \x1b[0m: {:?}", ovec];
         let socket = "wss://stream.binance.com:9443/ws";
         let sub_message = json!({
             "method": "SUBSCRIBE",
@@ -316,27 +483,28 @@ impl WSTick {
         log::info!["Web socket connected with message:{:?}", sub_message];
         Ok(conn)
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn collect_output(&mut self, buffer_size: usize, conn: &mut WebSocket) -> Result<()> {
         let mut n = 0;
         loop {
             while n < buffer_size {
                 let msg = conn.receive().await?;
-                tracing::trace!["\x1b[93m WS output: \x1b[0m {:?}", msg];
+                tracing::trace!["\x1b[93m WS raw output: \x1b[0m {:?}", msg];
                 if let Some((m, _, _)) = msg.clone().into_text() {
                     let v: Value = serde_json::from_str(&m)?;
                     if let Some(id) = v.get("id") {
                         tracing::trace!["\x1b[93m WS output (NOT APPEND): \x1b[0m {:?}", msg];
                     } else {
-                        self.append_tick(v).await?;
                         tracing::trace!["\x1b[93m WS output (APPEND): \x1b[0m {:?}", msg];
+                        self.append_tick(v).await.context("Failed to append tick")?;
                         n += 1;
                     }
                 }
             }
             let mut buffer = self.sort().await;
             while let Some((symbol, response)) = buffer.pop() {
-                self.place_unsorted(symbol, response).await?;
+                tracing::trace!["\x1b[93m WS placing raw output: \x1b[0m {:?}", response];
+                self.place_unsorted(symbol, response).await.context("Unable to sort WS output")?;
             }
             n = 0;
             tracing::trace!["\x1b[93m Unsorted  messages placed \x1b[0m"];
@@ -350,7 +518,7 @@ impl WSTick {
         self.disconnect = false;
         Ok(())
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn run(&mut self, buffer_size: usize) -> Result<()> {
         let mut conn = self.connect().await?;
         self.collect_output(buffer_size, &mut conn).await?;
