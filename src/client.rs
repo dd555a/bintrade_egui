@@ -46,7 +46,7 @@ const err_ctx: &str = "Main client";
 
 pub fn load_config() -> Result<Config> {
     let settings = Config::builder()
-        .add_source(config::File::with_name("./Settings.toml"))
+        .add_source(config::File::with_name("./Settings-testing.toml"))
         .build()?;
     Ok(settings)
 }
@@ -296,7 +296,7 @@ impl ClientTask {
                         .with_inner_size([1980.0, 1080.0])
                         .with_min_inner_size([300.0, 220.0]),
                     event_loop_builder,
-                    persist_window: true,
+                    persist_window: false,
                     persistence_path: Some(std::path::PathBuf::from("./bintrade_gui_save")),
                     ..Default::default()
                 };
@@ -507,6 +507,7 @@ impl ClientTask {
         let cli_handle = self.run_cli();
         tokio::join![cli_handle, hh];
     }
+    #[instrument(level = "trace")]
     async fn start_binclient(
         mut task_chans: Vec<ChanType>,
         api_key: &str,
@@ -532,6 +533,15 @@ impl ClientTask {
             let sub_params = vec!["btcusdt@aggTrade".to_string(), "btcusdt@kline_1m".to_string()];
             let mut params: HashMap<String, Vec<String>> = HashMap::new();
             params.insert("BTCUSDT".to_string(), sub_params);
+            let res = cli
+                .get_initial_data("BTCUSDT", &Intv::Min1, 2_000, live_ad.clone())
+                .await;
+            match res {
+                Ok(_) => log::trace!["Initial data for BTCUSDT received"],
+                Err(e) => log::error!["Initial data connection failed, ERROR: {}", e],
+            };
+            /*
+            */
             let res = cli.connect_ws(params).await;
             match res{
                 Ok(_) => log::trace!["WS connected successfuly for BTCUSDT"],
@@ -539,13 +549,6 @@ impl ClientTask {
             };
             //NOTE replce with defaults from config...
             //NOTE call this function every time an interval is switched for LIVE
-            let res = cli
-                .get_initial_data("BTCUSDT", &Intv::Min15, 12_000, live_ad.clone())
-                .await;
-            match res {
-                Ok(_) => log::trace!["Initial data for BTCUSDT received"],
-                Err(e) => log::error!["Initial data connection failed, ERROR: {}", e],
-            };
             loop {
                 select! {
                     _ = recv_from_client.changed() =>{

@@ -37,7 +37,7 @@ use binance::model::{KlineSummaries, KlineSummary};
 use plotters::prelude::*;
 
 const err_ctx:&str="SQL Data loader";
-const metadata_db_path:&str="./metadata.db";
+const metadata_db_path:&str="./databases/metadata.db";
 
 use tracing::instrument;
 
@@ -212,7 +212,7 @@ async fn append_kline(
     )],
 ) -> Result<()> {
     let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
-        "INSERT OR REPLACE INTO {}([Timestamp MS] INTEGER,[Open Time], Open, High, Low, Close, Volume, [Close Timestamp MS], [Close Time], [Quote Asset Volume], [Number of Trades], [Taker Buy Base Asset Volume], [Taker Buy Quote Asset Volume] ) ",
+        "INSERT OR REPLACE INTO {}( [Timestamp MS], [Open Time], Open, High, Low, Close, Volume, [Close Timestamp MS], [Close Time], [Quote Asset Volume], [Number of Trades], [Taker Buy Base Asset Volume], [Taker Buy Quote Asset Volume] ) ",
         table
     ));
     assert!(input.len() <= 65535 / 11);
@@ -564,7 +564,7 @@ impl Kline {
             kline: std::vec::Vec::new(),
         }
     }
-    fn new_sql(
+    pub fn new_sql(
         k: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>,
     ) -> Self {
         Self { kline: k }
@@ -603,7 +603,7 @@ pub struct Klines {
     start_time: chrono::NaiveDateTime, //Data start time
     end_time: chrono::NaiveDateTime,   //Data end time
     full_dat: HashMap<Intv, FatKline>,
-    dat: HashMap<Intv, Kline>,
+    pub dat: HashMap<Intv, Kline>,
 }
 impl Klines {
     fn new(
@@ -628,7 +628,7 @@ impl Klines {
             dat: HashMap::new(),
         }
     }
-    fn insert(&mut self, i: &Intv, kl: Kline) {
+    pub fn insert(&mut self, i: &Intv, kl: Kline) {
         self.dat.insert(i.clone(), kl);
     }
     pub fn insert_fat(&mut self, i: &Intv, kl: FatKline) {
@@ -836,7 +836,6 @@ pub fn get_data_binance(
     intv: Intv,
     part_download: Option<i64>,
 ) -> Result<FatKline> {
-    #[instrument(level="debug")]
     fn kline_conv(
         input: &KlineSummary,
     ) -> Result<(
@@ -855,7 +854,7 @@ pub fn get_data_binance(
         f64,
     )> {
 
-        tracing::debug!["Kline conv in = {:?}",&input];
+        tracing::trace!["Kline conv in = {:?}",&input];
         let based_time=input.open_time;
         let time =
             chrono::NaiveDateTime::from_timestamp_millis(input.open_time)
@@ -924,7 +923,7 @@ async fn create_metadata_db()->Result<()>{
         .await
         .context(anyhow!("SQL::Unable to metadata connect to db"))?;
     let q = format!(
-        "CREATE TABLE assets ( [Asset] TEXT, [Exchange] TEXT, [Extras] TEXT, [Extras Multi] TEXT, [Start Time ms] INTEGER, [End Time ms] INTEGER, [Market cap] REAL )"
+        "CREATE TABLE assets ( [Asset] TEXT, [Exchange] TEXT, [Status] TEXT, [BaseAsset] TEXT, [QouteAsset] TEXT, [Extras] TEXT, [Extras Multi] TEXT, [Start Time ms] INTEGER, [End Time ms] INTEGER, [Market cap] REAL )"
     );
     exec_query(&pool, &q).await?;
     let q=format!(
@@ -932,11 +931,61 @@ async fn create_metadata_db()->Result<()>{
         ON assets ( [Asset] )"
     );
     exec_query(&pool, &q).await?;
+    let q = format!(
+        "CREATE TABLE assets_dl ( [Asset] TEXT, [Exchange] TEXT)"
+        //TODO make "default asset list for release version"
+    );
+    exec_query(&pool, &q).await?;
+    let q=format!(
+        "CREATE UNIQUE INDEX Asset_DL
+        ON assets_dl ( [Asset] )"
+    );
+    exec_query(&pool, &q).await?;
     Ok(())
 }
 
-async fn load_asset_list(pool:&Pool<Sqlite>)->Result<Vec<(String, String, Option<String>, Option<String>, Option<i64>, Option<i64>)>>{
-    let out:Vec<(String,String, Option<String>, Option<String>, Option<i64>,Option<i64>)> = sqlx::query_as(format!("SELECT [Asset], [Exchange], [Extras], [Extras Multi], [Start Time ms], [End Time ms], FROM assets;").as_str())
+use crate::binance::{get_exchange_info, SymbolInfo};
+
+async fn download_asset_list_binance(metadata_db:&Pool<Sqlite>)->Result<()>{
+    tracing::debug!["Fetching exchange info"];
+    let symbol_info_full=get_exchange_info().await?;
+    let symbol_inf=symbol_info_full.chunks(100);
+    tracing::debug!["Symbol info: {:?}", symbol_inf];
+    for symbol_info in symbol_inf{
+        let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
+            "INSERT OR REPLACE INTO assets(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset])"
+        ));
+        query_builder.push_values(
+            symbol_info.iter(),
+            |mut b, si|  {
+                b.push_bind(si.symbol.clone())
+                    .push_bind("Binance")
+                    .push_bind(si.status.clone())
+                    .push_bind(si.baseAsset.clone())
+                    .push_bind(si.quoteAsset.clone());
+            },
+        );
+        let mut query = query_builder.build();
+        let result = query.execute(metadata_db).await?;
+        log::info!("{:?}", result);
+    };
+    Ok(())
+}
+async fn dl_load_asset_list(pool:&Pool<Sqlite>)->Result<Vec<(String, String)>>{
+    let out:Vec<(String, String)> = sqlx::query_as(format!("SELECT 
+[Asset] , [Exchange] FROM assets_dl;"
+            
+            ).as_str())
+        .fetch_all(pool)
+        .await?;
+    Ok(out)
+}
+
+async fn load_asset_list(pool:&Pool<Sqlite>)->Result<Vec<(String, String, String, String, String, Option<String>, Option<String>, Option<i64>, Option<i64>, Option<f64>)>>{
+    let out:Vec<(String, String, String, String, String, Option<String>, Option<String>, Option<i64>, Option<i64>, Option<f64>)> = sqlx::query_as(format!("SELECT 
+[Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset] , [Extras] , [Extras Multi] , [Start Time ms] , [End Time ms] , [Market cap] FROM assets;"
+            
+            ).as_str())
         .fetch_all(pool)
         .await?;
     Ok(out)
@@ -992,17 +1041,19 @@ async fn get_asset_info(symbol:&str, exchange:&Exchange)->Result<AssetMetadata>{
 }
 
 async fn download_asset_data(symbol:&str, exchange:&Exchange, timestamp:Option<i64>)->Result<Klines>{
-    match exchange{
+    let klines= match exchange{
         Exchange::Binance=>{
-            let klines=intv_dl_klines(symbol, timestamp);
+            tracing::debug!["Downloading kline data for: {} from timestamp {:?}", symbol, timestamp];
+            intv_dl_klines(symbol, timestamp).await
         }
         Exchange::Yahoo=>{
             todo!()
         }
 
-    }
-    todo!()
+    }?;
+    Ok(klines)
 }
+
 const ITER_SIZE:usize=4_000;
 
 
@@ -1077,6 +1128,41 @@ async fn create_db(db_path: &str) -> Result<()> {
 }
 
 
+async fn cr_kl_tables(pool: &Pool<Sqlite>)->Result<()>{
+    for i in Intv::iter() {
+        let q = format!(
+            "CREATE TABLE kline_{} ( [Timestamp MS] INTEGER, [Open Time] datetime,  Open REAL,  High REAL,  Low REAL,  Close REAL,  Volume REAL, [Close Timestamp MS] INTEGER, [Close Time] INTEGER,  [Quote Asset Volume] REAL,  [Number of Trades] INTEGER,  [Taker Buy Base Asset Volume] REAL,  [Taker Buy Quote Asset Volume] REAL,[Ignore], [Pattern hash] REAL )",
+            i.to_str()
+        );
+        exec_query(&pool, &q).await?;
+        let q=format!(
+            "CREATE UNIQUE INDEX time_index_{}
+            ON kline_{} ( [Timestamp MS] )",
+            i.to_str(), i.to_str()
+        );
+        exec_query(&pool, &q).await?;
+    };
+    let q = format!(
+        "CREATE TABLE colstats ( Column TEXT, Type INTEGER, Mean REAL, [Standard Deviaton] REAL , No INTEGER )",
+    );
+    exec_query(&pool, &q).await?;
+    let q=format!(
+        "CREATE UNIQUE INDEX col_id
+        ON colstats ( Column )"
+    );
+    exec_query(&pool, &q).await?;
+    let q = format!(
+        "CREATE TABLE metadata (Symbol TEXT, Exchange INTEGER, [Start Time] INTEGER, [End Time] INTEGER, [Key asset class 1] INTEGER, [Sub asset class 1] INTEGER ) "
+    );
+    exec_query(&pool, &q).await?;
+    let q=format!(
+        "CREATE UNIQUE INDEX asset_id
+        ON metadata ( Symbol )"
+    );
+    exec_query(&pool, &q).await?;
+    Ok(())
+}
+
 async fn create_kline_tables(
     pool: &Pool<Sqlite>,
     klines: Klines,
@@ -1107,7 +1193,7 @@ async fn create_kline_tables(
         sql_append_kline_iter(&kline, &i, &iter_size, &pool).await?;
     }
     let q = format!(
-        "CREATE TABLE colstats ( Column TEXT, Type INTEGER, Mean REAL, [Standard Deviaton] , No [INTEGER] )",
+        "CREATE TABLE colstats ( Column TEXT, Type INTEGER, Mean REAL, [Standard Deviaton] REAL , No INTEGER )",
     );
     exec_query(&pool, &q).await?;
     let q=format!(
@@ -1172,10 +1258,22 @@ async fn update_metadata_time(pool:&Pool<Sqlite>,am:AssetMetadata)->Result<()>{
 
 async fn check_if_columns_exist(pool:&Pool<Sqlite>,columns:&str,table:&str)->Result<bool>{
     let start: (chrono::NaiveDateTime, f64, f64, f64, f64, f64) =
-        sqlx::query_as(&format!["PRAGMA table_info({}) WHERE name = {}", columns,table])
+        sqlx::query_as(&format!["PRAGMA table_info({}) WHERE name = '{}'", columns,table])
             .fetch_one(pool)
             .await?;
     todo!();
+}
+//NOTE for text queries '' is needed... 
+
+async fn get_asset_timestamps(symbol:&str, metadata_db: &Pool<Sqlite>)->Result<(Option<i64>,Option<i64>)>{
+    let q=&format!["SELECT [Start time ms], [End time ms] FROM assets WHERE Asset = '{}';", symbol];
+    let k: (Option<i64>, Option<i64>) =
+        sqlx::query_as(
+            q
+        )
+        .fetch_one(metadata_db)
+        .await?;
+    Ok(k)
 }
 
 async fn binance_get_metadata(symbol:&str)->Result<AssetMetadata>{
@@ -1243,15 +1341,20 @@ impl SQLConn {
         tracing::debug!["Asset Data SQL CONNECT = {}",ad.debug()];
         Ok(())
     }
-    #[instrument(level="debug")]
     pub async fn update_data(&self)->Result<()>{
-        if Sqlite::database_exists(&metadata_db_path).await.unwrap_or(false) {
-            create_metadata_db().await?
+        tracing::debug!["update_data called"];
+        if Sqlite::database_exists(&metadata_db_path).await? ==false {
+            create_metadata_db().await?;
+            tracing::debug!["Metadata DB created"];
         };
         let meta_pool = SqlitePool::connect(&metadata_db_path)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
-        let asset_list=load_asset_list(&meta_pool).await?;
+        download_asset_list_binance(&meta_pool).await?; //stuck on WTF exactly?
+        tracing::debug!["asset list updated"];
+        //let asset_list=load_asset_list(&meta_pool).await?;
+        let asset_list=dl_load_asset_list(&meta_pool).await?;
+        tracing::debug!["DL asset list loaded"];
         let current_timestamp_ms:i64=match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(n) => {
                 let r=n.as_millis().try_into();
@@ -1262,21 +1365,34 @@ impl SQLConn {
             }
             Err(e) => Err(anyhow!["{:?}",e]),
         }?;
-        for ( asset_symbol, exchange, extras, extras_multi, start_time_ms, end_time_ms ) in asset_list {
-            let db_path=format!["./databases2/Asset{}.db",asset_symbol];
-            if !Sqlite::database_exists(&db_path).await.unwrap_or(false) {
-                create_db(&db_path).await;
+        //NOTE - add check for  whether dl asset is still tradableloadable XXX
+        tracing::debug!["Current Timestamp {}",current_timestamp_ms];
+        //for ( asset_symbol, exchange, _, _, _, extras, extras_multi, start_time_ms, end_time_ms, _ ) in asset_list {
+        for ( asset_symbol, exchange) in asset_list {
+            let db_path=format!["./databases/Asset{}.db",asset_symbol];
+            if Sqlite::database_exists(&db_path).await? == false {
+                create_db(&db_path).await?;
+                let apool = connect_sqlite(&db_path)
+                    .await?;
+                cr_kl_tables(&apool).await?;
+                tracing::debug!["Created database {} and created tables", &db_path];
+
+                apool.close();
             };
-            let apool = connect_sqlite(format!["{}/AssetList.db", &db_path]).await?;
+            let (start_time_ms, end_time_ms) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+            tracing::debug!["Timestamps for: {} Start: {:?} End: {:?}",asset_symbol, start_time_ms, end_time_ms];
             let exch = Exchange::from(exchange.as_str());
+            let apool = connect_sqlite(&db_path)
+                .await?;
             let (full_dl,start_time):(bool,i64)=match start_time_ms{
                 Some(start_time_ms)=>(true,start_time_ms),
                 None =>(false,0),
             };
-            let end=end_time_ms.ok_or(anyhow!["START TIME BUT NO END TIME WTF"])?;
+            //let end=end_time_ms.ok_or(anyhow!["START TIME BUT NO END TIME WTF"])?;
+            tracing::debug!["Download asset data called!"];
             let klines=match full_dl{
-                true=>download_asset_data(&asset_symbol, &exch, Some(end)).await?,
-                false=>download_asset_data(&asset_symbol, &exch, None).await?,
+                true  => download_asset_data(&asset_symbol, &exch, end_time_ms ).await?,
+                false => download_asset_data(&asset_symbol, &exch, None).await?,
             };
             let res=klines.get_times2(true);
             let asset_metadata=match res{
@@ -1289,6 +1405,8 @@ impl SQLConn {
                         } else {
                             iter_size = ITER_SIZE
                         };
+
+                        tracing::debug!["sql_append_kline_iter called!"];
                         sql_append_kline_iter(&kline, &i, &iter_size, &apool).await?;
                     }
                     Ok(AssetMetadata{symbol:asset_symbol,data_start_ms:start_time,data_end_ms:end_time})

@@ -202,15 +202,27 @@ impl KlinePlot {
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
         data:&SymbolOutput
     ) -> Result<()> {
-        tracing::debug!["\x1b[93m  live_live ran \x1b[0m"];
+        //tracing::debug!["\x1b[93m  live_live ran \x1b[0m"];
 
         let k=if let Some(ck)=data.closed_klines.get(&intv){
             KlineTick::to_kline_vec(ck)
         }else{
             vec![]
         };
+        //self.live_from_ad(ad,symbol,intv,12_000,None);
+        //tracing::debug!["\x1b  AD klines \x1b[93m  = {:?}", &intv_klines];
 
-        tracing::debug!["\x1b  CLOSED klines GUI \x1b[93m  = {:?}", &k];
+        if let Some(symbol_klines)=ad.kline_data.get(symbol){
+            if let Some(intv_klines)=symbol_klines.dat.get(&intv){
+                tracing::debug!["\x1b  AD klines \x1b[93m  = {:?}", &intv_klines];
+            };
+            //KlineTick::to_kline_vec(ck)
+        }else{
+        };
+        /*
+         * */
+
+        //tracing::debug!["\x1b  CLOSED klines GUI \x1b[93m  = {:?}", &k];
         let ok=if let Some(ok)=data.all_klines.get(&intv){
             KlineTick::to_kline_vec(ok)
         }else{
@@ -720,7 +732,7 @@ impl Pane {
 
 impl egui_tiles::Behavior<Pane> for DesktopApp {
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
-        format!("Pane {}", pane.ty).into()
+        format!("{}", pane.ty).into()
     }
     fn top_bar_right_ui(
         &mut self,
@@ -1420,6 +1432,7 @@ impl ManualOrders {
                     ui.end_row();
                 });
             });
+        ui.ctx().request_repaint();
 
         ui.end_row();
         let pp: f64 = man_orders.price_string.parse()?;

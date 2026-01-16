@@ -16,6 +16,7 @@ use crate::{BinInstructs, BinResponse, GeneralError};
 
 use crate::data::AssetData;
 use crate::data::Klines;
+use crate::data::Kline as KlineMine;
 use crate::data::get_data_binance;
 
 use tokio::sync::mpsc::*;
@@ -47,48 +48,104 @@ use binance::model::{KlineSummaries, KlineSummary};
 
 use crate::trade::Order;
 
+
+use reqwest;
+use reqwest::multipart;
+
+#[derive(Deserialize, Debug)]
+pub struct SymbolInfo{
+    pub symbol: String,
+    pub status:	String,
+    pub baseAsset:	String,
+    pub baseAssetPrecision:	i64,
+    pub quoteAsset:	String,
+    pub quotePrecision:	i64,
+    pub quoteAssetPrecision:	i64,
+    pub baseCommissionPrecision:	i64,
+    pub quoteCommissionPrecision:	i64,
+    //filters: Value
+}
+
+pub async fn get_exchange_info()->Result<Vec<SymbolInfo>>{
+    let body = reqwest::get("https://api.binance.com/api/v3/exchangeInfo")
+    .await?
+    .text()
+    .await?;
+    let json_body:Value=serde_json::from_str(&body)?;
+    let sym=json_body["symbols"].clone();
+    let sym2= serde_json::to_string(&sym)?;
+    let symbols:Vec<SymbolInfo>=serde_json::from_str(&sym2)?;
+    Ok(symbols)
+}
+//Live data only for now ~ 20MB download
+/*
+[
+  [
+    1499040000000,      // Kline open time
+    "0.01634790",       // Open price
+    "0.80000000",       // High price
+    "0.01575800",       // Low price
+    "0.01577100",       // Close price
+    "148976.11427815",  // Volume
+    1499644799999,      // Kline Close time
+    "2434.19055334",    // Quote asset volume
+    308,                // Number of trades
+    "1756.87402397",    // Taker buy base asset volume
+    "28.46694368",      // Taker buy quote asset volume
+    "0"                 // Unused field, ignore.
+  ]
+]
+*/
+
+
+#[derive(Deserialize, Debug)]
+struct GetKline{
+    open_time:i64,
+    o:String,
+    h:String,
+    l:String,
+    c:String,
+    v:String,
+    close_time:i64,
+    q:String,
+    no:i64,
+    bb:String,
+    bq:String,
+    i:String,
+}
+impl GetKline{
+    fn to_kline(input:&[GetKline])->KlineMine{
+        let res:Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>=input.iter().map( | n | {
+            (chrono::NaiveDateTime::from_timestamp_millis(n.open_time).expect("GETKLINE NOPE NOPE NOPE"), n.o.as_str().parse().expect("Unable to parse value"), n.h.as_str().parse().expect("Unable to parse value"), n.l.as_str().parse().expect("Unable to parse value"), n.c.as_str().parse().expect("Unable to parse value"), n.v.as_str().parse().expect("Unable to parse value"))
+        }).collect();
+        KlineMine::new_sql(res)
+    }
+}
+
+async fn get_latest_wicks(client:&reqwest::Client, symbol:&str, interval:&str)->Result<Vec<GetKline>>{
+    let res:String = client.get(&format!["https://api.binance.com/api/v3/klines?symbol={}&interval={}", symbol, interval])
+    .send()
+    .await?
+    .text()
+    .await?;
+    if res.is_empty() != true {
+        //tracing::debug!["GET response:{}", &res];
+        let res=serde_json::from_str(&res);
+        match res{
+            Ok(symbols) => return Ok(symbols),
+            Err(e) =>  {
+                tracing::error!["Get latest wicks error {}", e]; 
+                return Err(e.into());
+            }
+        };
+    }else{
+        return Err(anyhow!["GET response empty (Get latest wicks)"])
+
+    };
+}
+
 const err_ctx: &str = "Binance client | websocket:";
 
-/*
-      "lastUpdateId": 1027024,
-      "E": 1589436922972,   // Message output time
-      "T": 1589436922959,   // Transaction time
-      "bids": [
-        [
-          "4.00000000",     // PRICE
-          "431.00000000"    // QTY
-        ]
-      ],
-      "asks": [
-        [
-          "4.00000200",
-          "12.00000000"
-        ]
-      ]
-    }
-{
-  "id": "9d32157c-a556-4d27-9866-66760a174b57",
-  "status": 200,
-  "result": {
-    "lastUpdateId": 1027024,
-    "symbol": "BTCUSDT",
-    "bidPrice": "4.00000000",
-    "bidQty": "431.00000000",
-    "askPrice": "4.00000200",
-    "askQty": "9.00000000",
-    "time": 1589437530011   // Transaction time
-  },
-  "rateLimits": [
-    {
-      "rateLimitType": "REQUEST_WEIGHT",
-      "interval": "MINUTE",
-      "intervalNum": 1,
-      "limit": 2400,
-      "count": 2
-    }
-  ]
-}
-* */
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct OrderBookWS {
     bid_price: f64,
@@ -396,11 +453,11 @@ impl WSTick {
                     .expect("(BINCLIENT) poisoned data collection mutex");
                 if let Some(mut queue) = cum_queue.get_mut(&symbol) {
                     if kline.x==true{
-                        tracing::debug!["\x1b  CLOSED kline \x1b[93m  = {:?}", &kline];
+                        tracing::trace!["\x1b  CLOSED kline \x1b[93m  = {:?}", &kline];
                         if let Some(mut kline_closed_queue)= queue.closed_klines.get_mut(&intv){
                             kline_closed_queue.push(kline.clone());
                             //clear the tick queue once the kline is closed
-                            tracing::debug!["\x1b kline_tick CLOSED queue size \x1b[93m  = {:?}", kline_closed_queue];
+                            tracing::trace!["\x1b kline_tick CLOSED queue size \x1b[93m  = {:?}", kline_closed_queue];
                             queue.all_klines.insert(intv.clone(),vec![]);
                             if let Some(mut kline_all_queue)= queue.all_klines.get_mut(&intv){
                                 kline_all_queue.clear();
@@ -538,13 +595,14 @@ impl WSTick {
 #[derive(Dbg)]
 pub struct BinanceClient {
     #[dbg(skip)]
-    binance_client: Binance,
+    pub binance_client: Binance,
     pub_key: String,
     sec_key: String,
     current_order_id: u64,
     ws_buffer_size: usize,
     ws_tick: WSTick,
     account_info: Option<AccountInformation>,
+    exchange_info: Vec<SymbolInfo>
 }
 
 impl Default for BinanceClient {
@@ -557,6 +615,7 @@ impl Default for BinanceClient {
             ws_buffer_size: 50,
             ws_tick: WSTick::default(),
             account_info: None,
+            exchange_info: vec![],
         }
     }
 }
@@ -576,6 +635,7 @@ impl BinanceClient {
             ws_buffer_size: 15,
             ws_tick: WSTick::new(collect, live_price_watch),
             account_info: None,
+            exchange_info: vec![] ,
         }
     }
     #[instrument(level = "debug")]
@@ -644,6 +704,7 @@ impl BinanceClient {
     #[instrument(level = "trace")]
     pub async fn connect_ws(&mut self, params: HashMap<String, Vec<String>>) -> Result<()> {
         //NOTE may have to get rid this self due to inter mutability,,,
+        self.exchange_info=get_exchange_info().await?;
         self.ws_tick.sub_params = params;
         self.ws_tick
             .run(self.ws_buffer_size)
@@ -659,24 +720,21 @@ impl BinanceClient {
         limit: usize,
         live_ad: Arc<Mutex<AssetData>>,
     ) -> Result<()> {
-        let client: Market = Binance2::new(None, None);
+        tracing::debug!["Get init client called!"];
         let mut klines = Klines::new_empty();
-        let kl_0 = get_data_binance(&client, &symbol, default_intv.clone(), None)?;
-        klines.insert_fat(&default_intv, kl_0);
-        let mut live_a = live_ad
-            .lock()
-            .expect("Poisoned live AD mutex at get_initial_data");
-        live_a.kline_data.insert(symbol.to_string(), klines);
-        let mut klines = Klines::new_empty();
+        let client = reqwest::Client::new();
         for i in Intv::iter() {
             if i != *default_intv {
-                let kl = get_data_binance(&client, &symbol, i, None)?;
-                klines.insert_fat(&i, kl);
+                let kl = get_latest_wicks(&client, &symbol, i.to_bin_str()).await?;
+                let kl_0 = GetKline::to_kline(&kl);
+                tracing::debug!["GET REQUEST KLINE INSERTED! {:?}", kl_0 ];
+                klines.insert(&i, kl_0);
             };
         }
         let mut live_b = live_ad
             .lock()
             .expect("Poisoned live AD mutex at get_initial_data");
+
         live_b.kline_data.insert(symbol.to_string(), klines);
         Ok(())
     }
