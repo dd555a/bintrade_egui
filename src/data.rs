@@ -480,6 +480,9 @@ impl Intv {
             Intv::Month1 => todo!(),
         }
     }
+    pub fn to_ms(&self) -> i64 {
+        &self.to_sec()*1000 as i64
+    }
     pub fn to_min(&self) -> u64 {
         match &self {
             Intv::Min1 => 1,
@@ -878,43 +881,72 @@ pub fn get_data_binance(
             out
             );
     }
-    let res=match part_download{
-        Some(timestamp)=>{
-            client.get_klines(symbol, intv.to_bin_str(), None, Some(timestamp as u64), None)
-        }
-        None=>client.get_klines(symbol, intv.to_bin_str(), None, None, None)
+    let timestamp=match part_download{
+        Some(timestamp)=> timestamp,
+        None=>0,
     };
-    match res {
-        Ok(kl_enum) => {
-            let klines = match kl_enum {
-                KlineSummaries::AllKlineSummaries(a) => a,
-            };
-            let kl: Result<
-                Vec<(
-                    i64,
-                    chrono::NaiveDateTime,
-                    f64,
-                    f64,
-                    f64,
-                    f64,
-                    f64,
-                    i64,
-                    chrono::NaiveDateTime,
-                    f64,
-                    u64,
-                    f64,
-                    f64,
-                )>,
-            > = klines.iter().map(|k| kline_conv(&k)).collect();
-            let kline = kl?;
-            return Ok(FatKline::new(kline));
-        }
-        Err(err) => Err(anyhow!("Binance error:{:?}", err)),
-    }
+    //+1 to avoid duplicates
+    let no_datapoints = (SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64 - timestamp)/intv.to_ms();
+    //Ceil division is default s + 1 iterations if fin
+    let no_iterations=no_datapoints/500;
+    //500 is the hard limit for non API key downloads... i think
+    //
+    let mut kline:Vec<(
+        i64,
+        chrono::NaiveDateTime,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        i64,
+        chrono::NaiveDateTime,
+        f64,
+        u64,
+        f64,
+        f64,
+        )>=vec![];
+    let mut progress_bar=Progress::new();
+    for n in (0..no_iterations) {
+        let res=client.get_klines(symbol, intv.to_bin_str(), None, Some((timestamp*n) as u64+1), Some((timestamp*(n+1)) as u64));
+        let kunt:Result<KlineSummaries>=match res{
+            Ok(k)=>Ok(k),
+            Err(err) => Err(anyhow!("Binance error:{:?}", err)),
+        };
+        let k=kunt?;
+        let klines=match k{
+            KlineSummaries::AllKlineSummaries(a) => a,
+        };
+        let kl: Result<
+            Vec<(
+                i64,
+                chrono::NaiveDateTime,
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                i64,
+                chrono::NaiveDateTime,
+                f64,
+                u64,
+                f64,
+                f64,
+            )>,
+        > = klines.iter().map(|k| kline_conv(&k)).collect();
+        let mut kline_chunk = kl?;
+        kline.append(&mut kline_chunk);
+        let bar: Bar = progress_bar
+            .bar(n as usize, format!("Downloading data for {}: {}/{}",&symbol, n, no_iterations));
+        progress_bar.inc_and_draw(&bar, 1);
+    };
+    return Ok(FatKline::new(kline));
 }
 //TODO test and make functions to load an asset into asset data by downloading it
 //
+//
 
+use linya::{Bar, Progress};
 async fn create_metadata_db()->Result<()>{
     create_db(&metadata_db_path)
         .await
