@@ -937,8 +937,13 @@ pub fn get_data_binance(
         let mut kline_chunk = kl?;
         kline.append(&mut kline_chunk);
         let bar: Bar = progress_bar
+<<<<<<< HEAD
             .bar(no_iterations as usize, format!("Downloading data for {} {}: {}/{}",&symbol, &intv.to_str(), n, no_iterations));
         progress_bar.inc_and_draw(&bar, n as usize);
+=======
+            .bar(n as usize, format!("Downloading data for {}: {}/{}",&symbol, n, no_iterations));
+        progress_bar.inc_and_draw(&bar, 1);
+>>>>>>> refs/remotes/origin/master
     };
     return Ok(FatKline::new(kline));
 }
