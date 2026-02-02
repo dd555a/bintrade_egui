@@ -65,6 +65,33 @@ pub struct SymbolInfo{
     pub quoteCommissionPrecision:	i64,
     //filters: Value
 }
+#[derive(Deserialize, Debug)]
+pub struct FutSymbolInfo{
+    pub symbol: String,
+    pub status:	String,
+    pub deliveryDate: i64,
+    pub onboardDate: i64,
+    pub baseAsset:	String,
+    pub baseAssetPrecision:	i64,
+    pub quoteAsset:	String,
+    pub quotePrecision:	i64,
+    pub quoteAssetPrecision:	i64,
+    pub baseCommissionPrecision:	i64,
+    pub quoteCommissionPrecision:	i64,
+    //filters: Value
+}
+
+pub async fn fut_get_exchange_info()->Result<Vec<FutSymbolInfo>>{
+    let body = reqwest::get("https://fapi.binance.com/fapi/v1/exchangeInfo")
+    .await?
+    .text()
+    .await?;
+    let json_body:Value=serde_json::from_str(&body)?;
+    let sym=json_body["symbols"].clone();
+    let sym2= serde_json::to_string(&sym)?;
+    let symbols:Vec<FutSymbolInfo>=serde_json::from_str(&sym2)?;
+    Ok(symbols)
+}
 
 pub async fn get_exchange_info()->Result<Vec<SymbolInfo>>{
     let body = reqwest::get("https://api.binance.com/api/v3/exchangeInfo")

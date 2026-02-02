@@ -695,12 +695,14 @@ enum PaneType {
     None,
     LiveTrade,
     HistTrade,
+    ManageData
 }
 impl fmt::Display for PaneType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             PaneType::LiveTrade => write!(f, "Live Trade"),
             PaneType::HistTrade => write!(f, "Hist Trade"),
+            PaneType::ManageData=> write!(f, "Manage Data"),
             PaneType::None => write!(f, "None"),
         }
     }
@@ -834,6 +836,18 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     Some(&mut h_plot.kline_plot.hlines),
                 );
             }
+            PaneType::ManageData=> {
+                let sql_resps: Option<&Vec<ClientResponse>> = match self.resp_buff.as_ref() {
+                    Some(a) => a.get(&ProcResp::SQLResp(SQLResponse::None)),
+                    None => None,
+                };
+                let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+
+                let data_manager_l= self.data_manager.clone();
+                let mut data_manager= data_manager_l.lock().expect("Data manager mutex posoned!");
+
+                DataManager::show(&mut data_manager, chan,  ui);
+            }
         };
         return response;
     }
@@ -855,6 +869,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                             self.hist_plot.remove(&pane.nr);
                             self.man_orders.remove(&pane.nr);
                         }
+                        PaneType::ManageData=> {}
                     }
                     let tab_title = self.tab_title_for_pane(pane);
                     log::debug!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
@@ -937,7 +952,9 @@ pub struct DesktopApp {
     hist_asset_data: Arc<Mutex<AssetData>>,
     collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
 
+    //Non-copy windows
     live_plot: Rc<Mutex<LivePlot>>,
+    data_manager: Rc<Mutex<DataManager>>,
 
     lp_chan_recv: watch::Receiver<f64>,
 
@@ -1042,6 +1059,7 @@ impl Default for DesktopApp {
             lp_chan_recv,
 
             live_plot: Rc::new(Mutex::new(LivePlot::default())),
+            data_manager: Rc::new(Mutex::new(DataManager::new())),
 
             //Channels
             send_to_cli: None,
@@ -1136,6 +1154,13 @@ impl eframe::App for DesktopApp {
                                 new_child = tree.tiles.insert_pane(Pane::new(
                                     self.pane_number + 1,
                                     PaneType::HistTrade,
+                                ));
+                                self.pane_number += 1;
+                            }
+                            PaneType::ManageData=> {
+                                new_child = tree.tiles.insert_pane(Pane::new(
+                                    self.pane_number + 1,
+                                    PaneType::ManageData,
                                 ));
                                 self.pane_number += 1;
                             }
@@ -2031,6 +2056,88 @@ impl Default for HistPlot {
         }
     }
 }
+
+
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+#[derive(Dbg, Default)]
+struct DataManager{
+    coin_list:Vec<String>, //load Assetlist (All binance assets)
+    downloaded_coin_list:Vec<String>, //load AssetlistDL (All binance assets)
+    search_coin_shortlist:Vec<String>,
+    downloaded_coin_shortlist:Vec<String>,
+
+    coin_search_string:String,
+    shortlist_max:usize,
+
+    selected_coin:String,
+
+    delete_selected_coin:String,
+
+    max_backdate_months:usize,
+
+    autoupdate_on_start:bool
+
+}
+
+impl DataManager{
+    fn new()->Self{
+        DataManager{
+            shortlist_max:10,
+            max_backdate_months:120,
+            ..Default::default()
+        }
+    }
+    fn show(
+        data_manager: &mut DataManager,
+        cli_chan: watch::Sender<ClientInstruct>,
+        ui: &mut egui::Ui,
+    ) {
+        egui::Grid::new("Data Manager DL")
+            .striped(true)
+            .show(ui, |ui| {
+                egui::ComboBox::from_label("Download historical data for an asset:")
+                    .selected_text(format!("Search result {}", data_manager.selected_coin))
+                    .show_ui(ui, |ui| {
+                        for i in data_manager.search_coin_shortlist.clone() {
+                            ui.selectable_value(&mut data_manager.selected_coin, i.clone() , i.clone());
+                        }
+                    });
+                ui.add(
+                    egui::TextEdit::singleline(&mut data_manager.coin_search_string)
+                        .hint_text("Search for asset on Binance"),
+                );
+                if ui.button("Download").clicked() {
+                    //NOTE Send client instruction
+                    //TODO add download proggress bar in the GUI
+                }
+            });
+        egui::Grid::new("Data Manager Deletet").striped(true).show(ui, |ui| {
+            egui::ComboBox::from_label("Delete historical data for an asset:")
+                .selected_text(format!("Search downloaded result {}", data_manager.delete_selected_coin))
+                .show_ui(ui, |ui| {
+                    for i in data_manager.search_coin_shortlist.clone() {
+                        ui.selectable_value(&mut data_manager.selected_coin, i.clone() , i.clone());
+                    }
+                });
+            ui.add(
+                egui::TextEdit::singleline(&mut data_manager.coin_search_string)
+                    .hint_text("Search for asset on Binance"),
+            );
+            if ui.button("Delete").clicked() {
+                //NOTE Send client instruction
+            }
+        });
+        ui.end_row();
+        if ui.button("Update all data").clicked() {
+            //NOTE Send client instruction
+
+        }
+        ui.end_row();
+    }
+}
+
+
 
 enum LineStyle {
     Solid(f32),

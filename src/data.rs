@@ -885,8 +885,9 @@ pub fn get_data_binance(
         Some(timestamp)=> timestamp,
         None=>0,
     };
-    //+1 to avoid duplicates
-    let no_datapoints = (SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64 - timestamp)/intv.to_ms();
+    //+1 to avoid duplicates)
+    let curr_timestamp=SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
+    let no_datapoints = (curr_timestamp - timestamp)/intv.to_ms();
     //Ceil division is default s + 1 iterations if fin
     let no_iterations=no_datapoints/500;
     //500 is the hard limit for non API key downloads... i think
@@ -913,6 +914,7 @@ pub fn get_data_binance(
             Ok(k)=>Ok(k),
             Err(err) => Err(anyhow!("Binance error:{:?}", err)),
         };
+        tracing::trace!["KLINE summaris: {:?}", kunt];
         let k=kunt?;
         let klines=match k{
             KlineSummaries::AllKlineSummaries(a) => a,
@@ -936,9 +938,11 @@ pub fn get_data_binance(
         > = klines.iter().map(|k| kline_conv(&k)).collect();
         let mut kline_chunk = kl?;
         kline.append(&mut kline_chunk);
+        let current_timestamp_naive=chrono::NaiveDateTime::from_timestamp_millis(curr_timestamp).ok_or(anyhow!["current timestamp couldn't be formatted"])?;
+        let timestamp_naive=chrono::NaiveDateTime::from_timestamp_millis(timestamp).ok_or(anyhow!["timestamp couldn't be formatted"])?;
         let bar: Bar = progress_bar
-            .bar(n as usize, format!("Downloading data for {}: {}/{}",&symbol, n, no_iterations));
-        progress_bar.inc_and_draw(&bar, 1);
+            .bar(no_iterations as usize, format!("Downloading data for {} {} between: {} and: {}: {}/{}",&symbol, &intv.to_str(), timestamp_naive, current_timestamp_naive, n, no_iterations));
+        progress_bar.inc_and_draw(&bar, n as usize);
     };
     return Ok(FatKline::new(kline));
 }
@@ -963,6 +967,16 @@ async fn create_metadata_db()->Result<()>{
         ON assets ( [Asset] )"
     );
     exec_query(&pool, &q).await?;
+
+    let q = format!(
+        "CREATE TABLE assets_fut ( [Asset] TEXT, [Exchange] TEXT, [Status] TEXT, [BaseAsset] TEXT, [QouteAsset] TEXT, [Extras] TEXT, [Extras Multi] TEXT, [onboardDate] INTEGER, [deliveryDate] INTEGER, [Market cap] REAL )"
+    );
+    exec_query(&pool, &q).await?;
+    let q=format!(
+        "CREATE UNIQUE INDEX AssetFut
+        ON assets_fut ( [Asset] )"
+    );
+    exec_query(&pool, &q).await?;
     let q = format!(
         "CREATE TABLE assets_dl ( [Asset] TEXT, [Exchange] TEXT)"
         //TODO make "default asset list for release version"
@@ -976,13 +990,19 @@ async fn create_metadata_db()->Result<()>{
     Ok(())
 }
 
-use crate::binance::{get_exchange_info, SymbolInfo};
+use crate::binance::{get_exchange_info, fut_get_exchange_info, SymbolInfo, FutSymbolInfo};
 
 async fn download_asset_list_binance(metadata_db:&Pool<Sqlite>)->Result<()>{
     tracing::debug!["Fetching exchange info"];
     let symbol_info_full=get_exchange_info().await?;
+    tracing::debug!["Fetching futures exchange info"];
+    let fut_symbol_info_full=fut_get_exchange_info().await?;
+
     let symbol_inf=symbol_info_full.chunks(100);
+    let fut_symbol_inf=fut_symbol_info_full.chunks(100);
     tracing::debug!["Symbol info: {:?}", symbol_inf];
+    tracing::debug!["Symbol fut info: {:?}", fut_symbol_inf];
+
     for symbol_info in symbol_inf{
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
             "INSERT OR REPLACE INTO assets(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset])"
@@ -995,6 +1015,26 @@ async fn download_asset_list_binance(metadata_db:&Pool<Sqlite>)->Result<()>{
                     .push_bind(si.status.clone())
                     .push_bind(si.baseAsset.clone())
                     .push_bind(si.quoteAsset.clone());
+            },
+        );
+        let mut query = query_builder.build();
+        let result = query.execute(metadata_db).await?;
+        log::info!("{:?}", result);
+    };
+    for fut_symbol_info in fut_symbol_inf{
+        let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
+            "INSERT OR REPLACE INTO assets_fut(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset])"
+        ));
+        query_builder.push_values(
+            fut_symbol_info.iter(),
+            |mut b, si|  {
+                b.push_bind(si.symbol.clone())
+                    .push_bind("Binance")
+                    .push_bind(si.status.clone())
+                    .push_bind(si.baseAsset.clone())
+                    .push_bind(si.quoteAsset.clone())
+                    .push_bind(si.onboardDate.clone())
+                    .push_bind(si.deliveryDate.clone());
             },
         );
         let mut query = query_builder.build();
@@ -1305,7 +1345,14 @@ async fn get_asset_timestamps(symbol:&str, metadata_db: &Pool<Sqlite>)->Result<(
         )
         .fetch_one(metadata_db)
         .await?;
-    Ok(k)
+    let qf=&format!["SELECT [onboardDate], [deliveryDate] FROM assets_fut WHERE Asset = '{}';", symbol];
+    let kf: (Option<i64>, Option<i64>) =
+        sqlx::query_as(
+            q
+        )
+        .fetch_one(metadata_db)
+        .await?;
+    Ok((kf.0,k.1))
 }
 
 async fn binance_get_metadata(symbol:&str)->Result<AssetMetadata>{
@@ -1402,6 +1449,7 @@ impl SQLConn {
         //for ( asset_symbol, exchange, _, _, _, extras, extras_multi, start_time_ms, end_time_ms, _ ) in asset_list {
         for ( asset_symbol, exchange) in asset_list {
             let db_path=format!["./databases/Asset{}.db",asset_symbol];
+            //NOTE end time of asset is based on the FUTURES date...
             if Sqlite::database_exists(&db_path).await? == false {
                 create_db(&db_path).await?;
                 let apool = connect_sqlite(&db_path)
