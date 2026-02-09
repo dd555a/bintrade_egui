@@ -1420,8 +1420,74 @@ impl SQLConn {
         tracing::debug!["Asset Data SQL CONNECT = {}",ad.debug()];
         Ok(())
     }
+    pub async fn dl_single_asset_bin_wrap(&self, asset_symbol:&str)->Result<()>{
+        let exchange="Binance";
+        let meta_pool = SqlitePool::connect(&metadata_db_path)
+            .await
+            .context(anyhow!("SQL::Unable to metadata connect to db"))?;
+        self.download_single_asset(asset_symbol, exchange, &meta_pool).await?;
+        Ok(())
+    }
+    pub async fn download_single_asset(&self, asset_symbol:&str, exchange:&str, meta_pool:&Pool<Sqlite>)->Result<()>{
+        let db_path=format!["./databases/Asset{}.db",asset_symbol];
+        if Sqlite::database_exists(&db_path).await? == false {
+            create_db(&db_path).await?;
+            let apool = connect_sqlite(&db_path)
+                .await?;
+            cr_kl_tables(&apool).await?;
+            tracing::debug!["Created database {} and created tables", &db_path];
+
+            apool.close();
+        };
+        let (start_time_ms, end_time_ms) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+        tracing::debug!["Timestamps for: {} Start: {:?} End: {:?}",asset_symbol, start_time_ms, end_time_ms];
+        let exch = Exchange::from(exchange);
+        let apool = connect_sqlite(&db_path)
+            .await?;
+        let (full_dl,start_time):(bool,i64)=match start_time_ms{
+            Some(start_time_ms)=>(true,start_time_ms),
+            None =>(false,0),
+        };
+
+
+        //NOTE update klines here
+        tracing::debug!["Download asset data called!"];
+        let klines=match full_dl{
+            true  => download_asset_data(&asset_symbol, &exch, end_time_ms ).await?,
+            false => download_asset_data(&asset_symbol, &exch, None).await?,
+        };
+        let res=klines.get_times2(true);
+        let asset_metadata=match res{
+            Some((_,end_time))=>{
+                for i in Intv::iter(){
+                    let kline=klines.full_dat.get(&i).ok_or(anyhow!["Kline interval not found!"])?;
+                    let iter_size;
+                    if kline.kline.len() < ITER_SIZE {
+                        iter_size = (kline.kline.len() - 1)
+                    } else {
+                        iter_size = ITER_SIZE
+                    };
+
+                    //NOTE KLINEs added here iteratively
+                    //TODO change klines to be appended as they download
+                    tracing::debug!["sql_append_kline_iter called!"];
+                    sql_append_kline_iter(&kline, &i, &iter_size, &apool).await?;
+                }
+                Ok(AssetMetadata{symbol:asset_symbol.to_string(),data_start_ms:start_time,data_end_ms:end_time})
+            }
+            None => {
+                Err(anyhow!["Unable to get start/end times from kline"])
+            }
+        }?;
+        tracing::debug!["Asset metadata: {:?}", asset_metadata];
+
+        //TODO append extra functions here, when metadata received
+        apool.close();
+        Ok(())
+    }
     pub async fn update_data(&self)->Result<()>{
-        tracing::debug!["update_data called"];
+        tracing::debug!["Update_data called"];
+        //check if database exists, create if not
         if Sqlite::database_exists(&metadata_db_path).await? ==false {
             create_metadata_db().await?;
             tracing::debug!["Metadata DB created"];
@@ -1429,9 +1495,12 @@ impl SQLConn {
         let meta_pool = SqlitePool::connect(&metadata_db_path)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
-        download_asset_list_binance(&meta_pool).await?; //stuck on WTF exactly?
-        tracing::debug!["asset list updated"];
-        //let asset_list=load_asset_list(&meta_pool).await?;
+        download_asset_list_binance(&meta_pool).await?; 
+
+
+        //NOTE download both asset lists
+        //locally handle the above error 
+        tracing::debug!["Asset list updated"];
         let asset_list=dl_load_asset_list(&meta_pool).await?;
         tracing::debug!["DL asset list loaded"];
         let current_timestamp_ms:i64=match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -1444,58 +1513,15 @@ impl SQLConn {
             }
             Err(e) => Err(anyhow!["{:?}",e]),
         }?;
-        //NOTE - add check for  whether dl asset is still tradableloadable XXX
         tracing::debug!["Current Timestamp {}",current_timestamp_ms];
-        //for ( asset_symbol, exchange, _, _, _, extras, extras_multi, start_time_ms, end_time_ms, _ ) in asset_list {
+
+
+        //NOTE the current system uses asset futures to get the onboarding date... why the v3 API
+        //doesn't have it... idk 
+        //
+        //Asset list loaded here, and operations executed for each asset
         for ( asset_symbol, exchange) in asset_list {
-            let db_path=format!["./databases/Asset{}.db",asset_symbol];
-            //NOTE end time of asset is based on the FUTURES date...
-            if Sqlite::database_exists(&db_path).await? == false {
-                create_db(&db_path).await?;
-                let apool = connect_sqlite(&db_path)
-                    .await?;
-                cr_kl_tables(&apool).await?;
-                tracing::debug!["Created database {} and created tables", &db_path];
-
-                apool.close();
-            };
-            let (start_time_ms, end_time_ms) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
-            tracing::debug!["Timestamps for: {} Start: {:?} End: {:?}",asset_symbol, start_time_ms, end_time_ms];
-            let exch = Exchange::from(exchange.as_str());
-            let apool = connect_sqlite(&db_path)
-                .await?;
-            let (full_dl,start_time):(bool,i64)=match start_time_ms{
-                Some(start_time_ms)=>(true,start_time_ms),
-                None =>(false,0),
-            };
-            //let end=end_time_ms.ok_or(anyhow!["START TIME BUT NO END TIME WTF"])?;
-            tracing::debug!["Download asset data called!"];
-            let klines=match full_dl{
-                true  => download_asset_data(&asset_symbol, &exch, end_time_ms ).await?,
-                false => download_asset_data(&asset_symbol, &exch, None).await?,
-            };
-            let res=klines.get_times2(true);
-            let asset_metadata=match res{
-                Some((_,end_time))=>{
-                    for i in Intv::iter(){
-                        let kline=klines.full_dat.get(&i).ok_or(anyhow!["Kline interval not found!"])?;
-                        let iter_size;
-                        if kline.kline.len() < ITER_SIZE {
-                            iter_size = (kline.kline.len() - 1)
-                        } else {
-                            iter_size = ITER_SIZE
-                        };
-
-                        tracing::debug!["sql_append_kline_iter called!"];
-                        sql_append_kline_iter(&kline, &i, &iter_size, &apool).await?;
-                    }
-                    Ok(AssetMetadata{symbol:asset_symbol,data_start_ms:start_time,data_end_ms:end_time})
-                }
-                None => {
-                    Err(anyhow!["Unable to get start/end times from kline"])
-                }
-            }?;
-            apool.close();
+            self.download_single_asset(&asset_symbol, &exchange, &meta_pool).await;
         };
         meta_pool.close();
         Ok(())
@@ -1559,6 +1585,40 @@ impl SQLConn {
             }
             SQLInstructs::None => {
                 todo!()
+            }
+            SQLInstructs::UpdateDataBinance {symbol:ref symbol} => {
+                let res=self.dl_single_asset_bin_wrap(&symbol).await;
+                let resp=match res {
+                    Ok(_) => {
+                         SQLResponse::Success
+                    },
+                    Err(e) => {
+                        let err_string=format!["{}",e];
+                        log::error!(
+                            "{}",
+                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                        );
+                        SQLResponse::Failure((err_string, GeneralError::Generic))
+                    }
+                };
+                resp
+            }
+            SQLInstructs::UpdateDataAll=> {
+                let res=self.update_data().await;
+                let resp=match res {
+                    Ok(_) => {
+                         SQLResponse::Success
+                    },
+                    Err(e) => {
+                        let err_string=format!["{}",e];
+                        log::error!(
+                            "{}",
+                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                        );
+                        SQLResponse::Failure((err_string, GeneralError::Generic))
+                    }
+                };
+                resp
             }
         }
     }

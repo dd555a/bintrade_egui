@@ -70,6 +70,11 @@ pub enum SQLInstructs {
     LoadTradeRecord {
         id: u32,
     },
+    UpdateDataBinance{
+        symbol: String,
+    },
+    UpdateDataAll
+    ,
 }
 impl SQLInstructs {
     pub fn to_str(&self) -> &str {
@@ -78,6 +83,8 @@ impl SQLInstructs {
             SQLInstructs::LoadHistData { symbol: _ } => "SQLInstructs: Load Hist Data",
             SQLInstructs::UnloadHistData { symbol: _ } => "SQLInstructs: Unload Hist Data",
             SQLInstructs::LoadTradeRecord { id: _ } => "SQLInstructs: Load Trade Record",
+            SQLInstructs::UpdateDataBinance{ symbol: _ } => "SQLInstructs: Update data binance",
+            SQLInstructs::UpdateDataAll => "SQLInstructs: Update all data",
         }
     }
 }
@@ -179,13 +186,16 @@ impl ClientInstruct {
             ClientInstruct::Stop => "Stop",
             ClientInstruct::Start => "Start",
             ClientInstruct::Terminate => "Terminate",
+
             ClientInstruct::RestartRemote => "Restart Remote",
             ClientInstruct::StartBinCli => "Start Bin Client",
             ClientInstruct::StopBinCli => "Stop Bin Client",
             ClientInstruct::SendBinInstructs(_) => "Send Bin Instructs",
+
             ClientInstruct::StartSQL => "Start SQL",
             ClientInstruct::StopSQL => "Stop SQL",
             ClientInstruct::SendSQLInstructs(_) => "Send SQL Instructs",
+
             ClientInstruct::Ping(_) => "Ping",
             ClientInstruct::Pong(_) => "Pong",
         }

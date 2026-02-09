@@ -2113,8 +2113,8 @@ impl DataManager{
                         .hint_text("Search for asset on Binance"),
                 );
                 if ui.button("Download").clicked() {
-                    //NOTE Send client instruction
-                    //TODO add download proggress bar in the GUI
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::UpdateDataBinance{symbol: data_manager.selected_coin.clone()});
+                    cli_chan.send(msg);
                 }
             });
         egui::Grid::new("Data Manager Deletet").striped(true).show(ui, |ui| {
@@ -2165,10 +2165,8 @@ impl DataManager{
             }
         };
         if ui.button("Update all data").clicked() {
-            //NOTE Send client instruction
-            //TODO add a progress bar and result
-            //
-
+            let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::UpdateDataAll);
+            cli_chan.send(msg);
         }
 
         toggle_ui_compact(ui,&mut data_manager.update_success);
