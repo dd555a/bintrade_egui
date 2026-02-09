@@ -75,9 +75,11 @@ pub struct FutSymbolInfo{
     pub baseAssetPrecision:	i64,
     pub quoteAsset:	String,
     pub quotePrecision:	i64,
+    /*
     pub quoteAssetPrecision:	i64,
     pub baseCommissionPrecision:	i64,
     pub quoteCommissionPrecision:	i64,
+    */
     //filters: Value
 }
 
@@ -90,6 +92,7 @@ pub async fn fut_get_exchange_info()->Result<Vec<FutSymbolInfo>>{
     let sym=json_body["symbols"].clone();
     let sym2= serde_json::to_string(&sym)?;
     let symbols:Vec<FutSymbolInfo>=serde_json::from_str(&sym2)?;
+    //TODO add progress bars
     Ok(symbols)
 }
 

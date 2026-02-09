@@ -75,6 +75,9 @@ pub enum SQLInstructs {
     },
     UpdateDataAll
     ,
+    DelAsset{symbol:String},
+    DelAll ,
+
 }
 impl SQLInstructs {
     pub fn to_str(&self) -> &str {
@@ -85,6 +88,8 @@ impl SQLInstructs {
             SQLInstructs::LoadTradeRecord { id: _ } => "SQLInstructs: Load Trade Record",
             SQLInstructs::UpdateDataBinance{ symbol: _ } => "SQLInstructs: Update data binance",
             SQLInstructs::UpdateDataAll => "SQLInstructs: Update all data",
+            SQLInstructs::DelAsset{ symbol: _ } => "SQLInstructs: Delete data for an asset",
+            SQLInstructs::DelAll => "SQLInstructs: Delete all data",
         }
     }
 }

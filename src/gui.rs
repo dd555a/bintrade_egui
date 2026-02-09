@@ -2131,6 +2131,8 @@ impl DataManager{
             );
             if ui.button("Delete").clicked() {
                 //NOTE Send client instruction
+                let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::DelAsset{symbol:data_manager.delete_selected_coin.clone()});
+                cli_chan.send(msg);
             }
         });
         ui.style_mut().visuals.selection.bg_fill = Color32::GREEN;
@@ -2169,7 +2171,7 @@ impl DataManager{
             cli_chan.send(msg);
         }
 
-        toggle_ui_compact(ui,&mut data_manager.update_success);
+        //NOTE add this but not clickable toggle_ui_compact(ui,&mut data_manager.update_success);
         ui.end_row();
     }
 }
