@@ -750,22 +750,26 @@ impl BinanceClient {
         limit: usize,
         live_ad: Arc<Mutex<AssetData>>,
     ) -> Result<()> {
-        tracing::debug!["Get init client called!"];
+        tracing::trace!["Get init client called!"];
         let mut klines = Klines::new_empty();
         let client = reqwest::Client::new();
         for i in Intv::iter() {
-            if i != *default_intv {
-                let kl = get_latest_wicks(&client, &symbol, i.to_bin_str()).await?;
-                let kl_0 = GetKline::to_kline(&kl);
-                tracing::debug!["GET REQUEST KLINE INSERTED! {:?}", kl_0 ];
-                klines.insert(&i, kl_0);
-            };
+            let kl = get_latest_wicks(&client, &symbol, i.to_bin_str()).await?;
+            let kl_0 = GetKline::to_kline(&kl);
+            tracing::trace!["GET REQUEST KLINE INSERTED for {:?}", &i ];
+            //Kline is inserted properly
+            klines.insert(&i, kl_0);
         }
         let mut live_b = live_ad
             .lock()
             .expect("Poisoned live AD mutex at get_initial_data");
 
+        tracing::trace!["Insert kline ad ID! {:?}", live_b.id ];
+        tracing::trace!["Insert klines {:?}", klines];
+
         live_b.kline_data.insert(symbol.to_string(), klines);
+        //tracing::debug!["Insert kline_data ad ID! {:?}, {:?}", live_b.id, &live_b.kline_data ];
+        //NOTE insert into the hashmap, not the fn
         Ok(())
     }
     #[instrument(level = "debug")]

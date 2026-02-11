@@ -1,3 +1,4 @@
 1. API V3 has no onboardingDate and deliveryDate. Using futres API to determine onboarding date as a hotfix, need to find a better way to find asset onboarding date
 2. The chart code is horrible, forked EGUI plot and some modifications need to be done to make the chart a lot more suited to the task
 3. Add a display for DL coins list - add/remove via GUI
+4. Tick price color doesn't change to red when price drops...

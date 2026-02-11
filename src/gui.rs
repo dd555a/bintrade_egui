@@ -91,8 +91,12 @@ impl KlinePlot {
         collected_data: &HashMap<String, SymbolOutput>,
     ) -> Result<()> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
+
+        let chart_ad_id =ad.id.clone();
+
         let symbol=self.symbol.clone();
         if let Some(data)=collected_data.get(&symbol){
+            //tracing::debug!["Show live SOME for {}, chart_ad_id:{}", &symbol, &chart_ad_id];
             self.live_live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None, &data);
         };
         self.live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None);
@@ -203,6 +207,7 @@ impl KlinePlot {
         data:&SymbolOutput
     ) -> Result<()> {
         //tracing::debug!["\x1b[93m  live_live ran \x1b[0m"];
+        //initial_klines
 
         let k=if let Some(ck)=data.closed_klines.get(&intv){
             KlineTick::to_kline_vec(ck)
@@ -213,8 +218,13 @@ impl KlinePlot {
         //tracing::debug!["\x1b  AD klines \x1b[93m  = {:?}", &intv_klines];
 
         if let Some(symbol_klines)=ad.kline_data.get(symbol){
+            tracing::trace!["\x1b  Symbol klines::SOME \x1b[93m"];
             if let Some(intv_klines)=symbol_klines.dat.get(&intv){
-                tracing::debug!["\x1b  AD klines \x1b[93m  = {:?}", &intv_klines];
+                tracing::trace!["\x1b  LIVE ad klines SOME \x1b[93m"];
+
+            }else{
+                tracing::trace!["\x1b  LIVE ad klines NONE for: {}, intv: {:?}, ad_id: {} \x1b[93m", &symbol, &intv, &ad.id];
+
             };
             //KlineTick::to_kline_vec(ck)
         }else{
@@ -224,6 +234,8 @@ impl KlinePlot {
 
         //tracing::debug!["\x1b  CLOSED klines GUI \x1b[93m  = {:?}", &k];
         let ok=if let Some(ok)=data.all_klines.get(&intv){
+            //NOTE this is the TICK klines, not the initial GET klines...
+            //tracing::debug!["\x1b  CLOSED klines GUI \x1b[93m  = {:?}", &k];
             KlineTick::to_kline_vec(ok)
         }else{
             vec![]
@@ -1978,6 +1990,16 @@ impl LivePlot {
         ui: &mut egui::Ui,
     ) {
 
+
+
+        //TODO clear this after debug
+        //
+        /*
+        let cl_unlocked=live_plot.live_asset_data.clone();
+        let unlocked=cl_unlocked.lock().expect("FFUCK");
+        let id2=unlocked.id.clone();
+        tracing::debug!["\x1b[36m Live asset data ID\x1b[0m: {:?}", &id2];
+         */
 
         live_plot.kline_plot.show_live(ui, plot_extras, live_plot.live_asset_data.clone(), collect_data);
 
