@@ -247,18 +247,16 @@ async fn sql_append_kline_iter(
     iter_size: &usize,
     pool: &Pool<Sqlite>,
 ) -> Result<()> {
-    let no_steps = (input.kline.len() - 1) % *iter_size;
-    let last_step = no_steps * (*iter_size);
     let table_name = format!("kline_{}", intv.to_str());
-    for i in (0..no_steps) {
+    let input_iter=input.kline.chunks(*iter_size); //sqlite max variables  - 999
+    for chunk in input_iter{
         append_kline(
             pool,
             &table_name,
-            &input.kline[iter_size * i..iter_size * (i + 1)],
+            &chunk,
         )
         .await?;
-    }
-    append_kline(pool, &table_name, &input.kline[last_step..]).await?;
+    };
     Ok(())
 }
 
@@ -1135,7 +1133,8 @@ async fn download_asset_data(symbol:&str, exchange:&Exchange, start_time:Option<
     Ok(klines)
 }
 
-const ITER_SIZE:usize=4_000;
+const ITER_SIZE:usize=100;
+//for 11 variables max is 999/11
 
 
 
@@ -1173,16 +1172,12 @@ async fn intv_dl_klines(
             let mut err_occured = false;
             for i in Intv::iter() {
                 let kl = get_data_binance(&client, &s, i, start_time, end_time)?;
-                tracing::debug!["Klines ressult {:?}", kl];
                 if kl.kline.is_empty() {
-                    err_occured = true;
-                    tracing::error!["Klines EMPTY"];
-                    res = Err(anyhow![
+                    tracing::info![
                         "Kline empty: {:?}, for interval {}",
                         &kl,
                         i.to_str()
-                    ]);
-                    break;
+                    ];
                 }
                 klines.insert_fat(&i, kl);
             }
@@ -1456,6 +1451,9 @@ impl SQLConn {
             apool.close().await;
         };
         let (start_time_ms, end_time_ms) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+
+        let start_time_ms=Some(1769950725000 as i64); //1st Feb 2026 NOTE testing only remov
+                                         //
         let st:String=if let Some(start_time_ms)=start_time_ms{
             let t=chrono::NaiveDateTime::from_timestamp_millis(start_time_ms).ok_or(anyhow!["HAS TO BE SOME HERE!"]).expect("HAS TO BE SOME HERE");
             format!["{}",t]
@@ -1485,15 +1483,19 @@ impl SQLConn {
             Some((_,end_time))=>{
                 for i in Intv::iter(){
                     let kline=klines.full_dat.get(&i).ok_or(anyhow!["Kline interval not found!"])?;
-                    let iter_size;
-                    if kline.kline.len() < ITER_SIZE {
-                        iter_size = (kline.kline.len() - 1)
-                    } else {
-                        iter_size = ITER_SIZE
-                    };
-
-                    tracing::debug!["sql_append_kline_iter called!"];
-                    sql_append_kline_iter(&kline, &i, &iter_size, &apool).await?;
+                    tracing::debug!["sql_append_kline_iter called on length of: {}, interval: {:?}", &kline.kline.len(), &i];
+                    if kline.kline.is_empty() == false{
+                        let res=sql_append_kline_iter(&kline, &i, &ITER_SIZE, &apool).await;
+                        match res{
+                            Ok(_) => Ok(()),
+                            Err(e) =>{
+                                tracing::error!["Download asset binance SQL error: {}",e];
+                                Err(e)
+                            }
+                        }?;
+                    }else{
+                        tracing::info!["SQL append kline empty, doing nothing"]
+                    }
                 }
                 Ok(())
             }
