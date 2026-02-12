@@ -742,6 +742,62 @@ impl AssetData {
         });
     }
     //#[instrument(level="debug")]
+    pub fn find_slice_n(
+        &self,
+        symbol: &str,
+        intv: &Intv,
+        start_time: &i64,
+        next_wicks: u16,
+    ) -> Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
+        let kk: &Klines;
+        let klines = self.kline_data.get(symbol);
+        match klines {
+            Some(k) => kk = k,
+            None => { tracing::error!["Find slice error: out of bounds!"]; return None},
+        }
+        let kline = kk.dat.get(intv);
+        let kl=match kline {
+            Some(ki) => ki,
+            None => {tracing::error!["Kline not found for interval!"]; return None},
+        };
+        let step: i64 = intv.to_ms();
+        let end_time = step*(next_wicks as i64) + start_time;
+
+        assert!(end_time > *start_time, "Start time must be greater than end time!");
+        let dur= (end_time - start_time);
+
+
+        let (start_index,end_index):(usize,usize) = if kl.kline.is_empty() ==false{
+            //NOTE this is to avoid using let index = vec.iter().position(|&r| r == "n").unwrap();
+            let kline_start_t=kl.kline[0].0.timestamp_millis();
+            let kline_end_t=kl.kline[kl.kline.len()-1].0.timestamp_millis();
+            let kline_length=kl.kline.len();
+
+            let si=(start_time/(kline_end_t-kline_start_t)) as usize;
+            let start_index:usize=si*kline_length;
+            let confirm:i64=kl.kline[start_index].0.timestamp_millis();
+            let start_index=if confirm as usize !=start_index{
+                let ss=if start_index < confirm as usize{
+                    let s=start_index+1;
+                    s
+                }else{
+                    let s=start_index-1;
+                    s
+                };
+                ss
+            }else{
+                start_index
+            };
+            let end_index=start_index+(next_wicks as usize);
+            tracing::debug!["Start index:{}, End index:{}", start_index, end_index];
+            (start_index, end_index)
+        }else{
+            tracing::error!["Kline empty!"];
+            return None;
+        };
+
+        return Some(&kl.kline[start_index..end_index]);
+    }
     pub fn find_slice(
         &self,
         symbol: &str,
@@ -1452,8 +1508,24 @@ impl SQLConn {
         };
         let (start_time_ms, end_time_ms) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
 
-        let start_time_ms=Some(1769950725000 as i64); //1st Feb 2026 NOTE testing only remov
-                                         //
+        /////////////////////////////////////////////////////////////////////////////////////////////////////
+        ///
+        //NOTE debug
+        let start_t=if let Some(start_ti)=start_time_ms{
+            start_ti
+        }else{
+            0
+        };
+        let end_t=if let Some(end_ti)=end_time_ms{
+            end_ti
+        }else{
+            0
+        };
+
+        tracing::debug!["get start times for:{} \n Start: {} \n End: {}", asset_symbol, NaiveDateTime::from_timestamp_millis(start_t).ok_or(anyhow!["FFCUK"])?, NaiveDateTime::from_timestamp_millis(end_t).ok_or(anyhow!["FFCUK"])?];
+        //let start_time_ms=Some(1769950725000 as i64); //1st Feb 2026 NOTE testing only remov
+        /////////////////////////////////////////////////////////////////////////////////////////////////////
+        ///
         let st:String=if let Some(start_time_ms)=start_time_ms{
             let t=chrono::NaiveDateTime::from_timestamp_millis(start_time_ms).ok_or(anyhow!["HAS TO BE SOME HERE!"]).expect("HAS TO BE SOME HERE");
             format!["{}",t]

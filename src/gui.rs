@@ -813,6 +813,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     chan,
                     ui,
                     Some(&mut live_plot.kline_plot.hlines),
+                    None,
                 );
             }
             PaneType::HistTrade => {
@@ -830,7 +831,11 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                 if h_plot.hist_extras.is_some() != true {
                     h_plot.hist_extras = Some(hist_extras);
                 };
+
+                //let hist_trading=&mut h_plot.hist_trade;
+
                 HistPlot::show(&mut h_plot, &p_extras, chan, ui);
+
                 let mut man_orders = self
                     .man_orders
                     .get_mut(&pane.nr)
@@ -846,7 +851,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     chan,
                     ui,
                     Some(&mut h_plot.kline_plot.hlines),
-                );
+                    None);
             }
             PaneType::ManageData=> {
                 let sql_resps: Option<&Vec<ClientResponse>> = match self.resp_buff.as_ref() {
@@ -1399,6 +1404,7 @@ impl ManualOrders {
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
+        hist_trading: Option<&mut HistTradeRunner>,
     ) -> Result<()> {
 
         match hlines {
@@ -2059,6 +2065,14 @@ struct HistPlot {
     picked_date_end: chrono::NaiveDate,
     hist_extras: Option<HistExtras>,
     hist_trade: HistTrade,
+
+    navi_wicks:u16,
+    trade_wicks:u16,
+
+    navi_wicks_s:String,
+    trade_wicks_s:String,
+
+    pub trade_time:i64
 }
 
 impl Default for HistPlot {
@@ -2075,6 +2089,15 @@ impl Default for HistPlot {
             picked_date_end: chrono::NaiveDate::from_ymd(2025, 10, 10),
             hist_extras: None,
             hist_trade: HistTrade::default(),
+
+            navi_wicks:200,
+            trade_wicks:20,
+
+            navi_wicks_s:"200".to_string(),
+            trade_wicks_s:"20".to_string(),
+
+            trade_time: 0,
+
         }
     }
 }
@@ -2394,18 +2417,53 @@ impl HistPlot {
             }
         });
         egui::Grid::new("Hplot forwards:").show(ui, |ui| {
-            if ui.button("Forward").clicked() {
-                todo!()
+            if ui.button("<< Navi").clicked() {
+                let res:Result<u16, ParseIntError>=hist_plot.navi_wicks_s.parse();
+                let n_wicks=match res{
+                    Ok(n)=>n,
+                    Err(e)=> {tracing::error!["Parsing error for navigation wicks: {}", e]; 0},
+
+                };
             }
-            if ui.button("Backward").clicked() {
-                todo!()
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut hist_plot.navi_wicks_s)
+                    .hint_text("Navi N wicks")
+            );
+            if ui.button("Navi >>").clicked() {
+                let res:Result<u16, ParseIntError>=hist_plot.navi_wicks_s.parse();
+                let n_wicks=match res{
+                    Ok(n)=>n,
+                    Err(e)=> {tracing::error!["Parsing error for navigation wicks: {}", e]; 0},
+
+                };
             }
-            if ui.button("N Wicks").clicked() {
-                todo!()
+            if ui.button("Trade >>").clicked() {
+                let res:Result<u16, ParseIntError>=hist_plot.trade_wicks_s.parse();
+                let n_wicks=match res{
+                    Ok(n)=>n,
+                    Err(e)=> {tracing::error!["Parsing error for trade wicks: {}", e];0},
+
+                };
+                hist_plot.navi_wicks=n_wicks;
+                //TODO change trade time whenever symbol is changed to latest data point
+                //
+                hist_plot.hist_trade.trade_time=hist_plot.trade_time;
+                let res=hist_plot.hist_trade.trade_forward(n_wicks);
+                hist_plot.hist_trade.trade_time=hist_plot.trade_time+hist_plot.intv.to_ms()*(n_wicks as i64);
+
+
+
+
+
             }
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s)
+                    .hint_text("Trade N wicks")
+            );
         });
     }
 }
+use std::num::ParseIntError;
 
 use tracing::instrument;
 

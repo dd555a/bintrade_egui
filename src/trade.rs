@@ -534,39 +534,38 @@ fn hist_eval_kline(
 
 #[derive(Clone, Debug)]
 pub struct HistTrade {
-    asset_pair: String,
-    asset1: f64,
-    asset2: f64,
+    pub asset_pair: String,
+    pub asset1: f64,
+    pub asset2: f64,
 
-    last_ch_a1: f32,
-    last_ch_a2: f32,
+    pub last_ch_a1: f32,
+    pub last_ch_a2: f32,
 
-    trades_made: i32,
-    asset1_held: bool,
-    last_asset1: f64,
-    last_asset2: f64,
-    ch1: f64,
-    ch2: f64,
+    pub trades_made: i32,
+    pub asset1_held: bool,
+    pub last_asset1: f64,
+    pub last_asset2: f64,
+    pub ch1: f64,
+    pub ch2: f64,
 
-    start_time: chrono::NaiveDateTime,
-    trade_time: chrono::NaiveDateTime,
+    pub start_time: i64,
+    pub trade_time: i64,
 
-    current_intv: Intv,
+    pub current_intv: Intv,
 
-    trade_record: Vec<TradeRecord>,
+    pub trade_record: Vec<TradeRecord>,
 
-    current_data_end_index: usize,
+    pub current_data_end_index: usize,
 
-    current_index: usize,
+    pub current_index: usize,
     asset_data: Arc<Mutex<AssetData>>,
     current_order: Option<Order>,
 }
 impl Default for HistTrade {
     fn default() -> Self {
-        let start_time = chrono::NaiveDateTime::from_timestamp(0, 0);
         Self {
             asset_pair: "BTCUSDT".to_string(),
-            start_time,
+            start_time:0,
             asset_data: Arc::new(Mutex::new(AssetData::new(666))),
 
             asset1: 10_000.0,
@@ -581,7 +580,7 @@ impl Default for HistTrade {
             ch1: 0.0,
             ch2: 0.0,
 
-            trade_time: start_time,
+            trade_time: 0,
             trade_record: vec![],
             current_intv: Intv::Min15,
             current_data_end_index: 0,
@@ -600,13 +599,9 @@ impl HistTrade {
     pub fn place_order(&mut self, order: &Order) {
         self.current_order = Some(*order);
     }
-    //TODO
-    //1. link hist orders
-    //2. fix pythonshit
-    //3. Fix allshit
     pub fn start(
         asset_pair: String,
-        start_time: chrono::NaiveDateTime,
+        start_time: i64,
         asset_data: Arc<Mutex<AssetData>>,
     ) -> Self {
         Self {
@@ -616,42 +611,43 @@ impl HistTrade {
             ..Default::default()
         }
     }
-    fn get_trade_time(&mut self) {
+    pub fn get_trade_time(&mut self) {
         let timestep = self.current_intv.to_timedelta();
     }
-    #[instrument(level = "debug")]
-    fn trade_forward(&mut self, end_wick_time: chrono::NaiveDateTime) {
-        let ad = Arc::clone(&mut self.asset_data);
+    pub fn trade_forward(&mut self, next_wicks: u16) -> Result<()>{
+        let ad = Arc::clone(&self.asset_data);
         let asset_data = ad.lock().expect("(TRADE) ad mutex poisoned");
-        let trade_slice = asset_data.find_slice(
+        let trade_slice = asset_data.find_slice_n(
             &self.asset_pair,
             &self.current_intv,
             &self.trade_time,
-            &end_wick_time,
+            next_wicks,
         );
-        tracing::debug!["{:?}", trade_slice];
         let ts = match trade_slice {
-            Some(t) => t,
+            Some(t) => {
+                tracing::debug!["Trade slice start time {}", t[0].0];
+                t
+            }
             None => {
                 log::error!["Trade slice not found"];
-                return;
+                return Ok(());
             }
         };
         let o: Order;
         match self.current_order {
             Some(oo) => o = oo,
             None => {
-                log::info!["No order set"];
-                return;
+                log::error!["No order set"];
+                return Ok(());
             }
         }
-        self.trade_time = end_wick_time;
-        tracing::debug!["{:?}", self.trade_time];
+        tracing::debug!["HistTradingRunner {:?}", self.trade_time];
+        //TODO replace this with index
         let result = hist_eval_kline(ts, o, self.asset1, self.asset2);
-        tracing::debug!["{:?}", result];
+        tracing::debug!["Hist_eval_kline result: {:?}", result];
         match result {
             Some((transaction_time, asset1, asset2, order)) => {
-                tracing::debug!["{:?}", result];
+                tracing::debug!["Hist_Trade_Forward. Transaction Time: {}\n Asset1: {}\n Asset2: {} \n Order: {:?}", transaction_time, asset1, asset2, order];
                 let tr = TradeRecord {
                     transaction_time,
                     trades_made: self.trades_made,
@@ -667,15 +663,18 @@ impl HistTrade {
                 self.asset1 = asset1;
                 self.asset2 = asset2;
                 match order {
-                    Order::None => return,
-                    _ => self.current_order = Some(order),
+                    Order::None => return Ok(()),
+                    _ => 
+                    {
+                        self.current_order = Some(order);
+                        return Ok(());
+                    }
                 }
             }
-            None => return,
+            None => return Ok(()),
         }
     }
-    #[instrument(level = "debug")]
-    fn calculate_change(&mut self) {
+    pub fn calculate_change(&mut self) {
         self.trades_made += 1;
         if self.trades_made > 1 {
             if !self.asset1_held {
@@ -686,7 +685,7 @@ impl HistTrade {
                         tracing::debug!["{:?}", c];
                         self.ch2 = 100.0 * c;
                         self.last_asset2 = self.asset2;
-                        tracing::debug!["C:{:?}, CH2:{:?}, Asset1:{:?}", c, self.ch2, self.asset2];
+                        tracing::debug!["C:{:?}, CH1:{:?}, Asset1:{:?}", c, self.ch2, self.asset2];
                     }
                 }
             } else {
