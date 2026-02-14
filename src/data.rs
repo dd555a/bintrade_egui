@@ -1041,7 +1041,7 @@ async fn create_metadata_db()->Result<()>{
     );
     exec_query(&pool, &q).await?;
     let q = format!(
-        "CREATE TABLE assets_dl ( [Asset] TEXT, [Exchange] TEXT)"
+        "CREATE TABLE assets_dl ( [Asset] TEXT, [Exchange] TEXT, [Start Time] INTEGER, [End Time] INTEGER )"
         //TODO make "default asset list for release version"
     );
     exec_query(&pool, &q).await?;
@@ -1056,9 +1056,9 @@ async fn create_metadata_db()->Result<()>{
 use crate::binance::{get_exchange_info, fut_get_exchange_info, SymbolInfo, FutSymbolInfo};
 
 async fn download_asset_list_binance(metadata_db:&Pool<Sqlite>)->Result<()>{
-    tracing::debug!["Fetching exchange info"];
+    tracing::info!["Fetching exchange info"];
     let symbol_info_full=get_exchange_info().await?;
-    tracing::debug!["Fetching futures exchange info"];
+    tracing::info!["Fetching futures exchange info"];
     let fut_symbol_info_full=fut_get_exchange_info().await?;
 
     let symbol_inf=symbol_info_full.chunks(100);
@@ -1130,15 +1130,15 @@ async fn update_asset_metadata(metadata_pool:&Pool<Sqlite>, symbol:&str,  start_
     if let Some(start_time) = start_time{
         let q = format!(
             "
-        REPLACE INTO metadata ( Asset, [Start Time ms], [End Time ms])
-        VALUES({}, {}. {});",
+        INSERT OR REPLACE INTO metadata ( Asset, [Start Time ms], [End Time ms])
+        VALUES('{}', {}. {});",
         symbol, start_time, end_time
         );
         exec_query(metadata_pool, &q).await?;
     }else{
         let q = format!(
             "
-        REPLACE INTO metadata ( Asset, [End Time ms])
+        INSERT OR REPLACE INTO assets_dl ( Asset, [End Time ms])
         VALUES({}, {});",
         symbol, end_time
         );
@@ -1157,6 +1157,8 @@ impl From<&str> for Exchange{
         match input{
             "Binance" => Exchange::Binance,
             "Yahoo" => Exchange::Yahoo,
+            "0" => Exchange::Binance,
+            "1" => Exchange::Yahoo,
             _=> panic!["Unable to parse exchange name"],
         }
     }
@@ -1344,7 +1346,6 @@ async fn create_kline_tables(
         ON metadata ( Symbol )"
     );
     exec_query(&pool, &q).await?;
-    update_metadata_time(&pool,am);
     Ok(())
 }
 //MOVE metadata to a separate generalist db and make a (recreate) function - take the metadata
@@ -1379,14 +1380,26 @@ async fn get_metadata(pool:&Pool<Sqlite>, symbol:&str)->Result<AssetMetadata>{
             .await?;
     Ok(am)
 }
-async fn update_metadata_time(pool:&Pool<Sqlite>,am:AssetMetadata)->Result<()>{
+async fn update_asset_metadata_time(asset_pool:&Pool<Sqlite>, metadata_pool:&Pool<Sqlite>, symbol:&str, exchange:&str, st:i64, et:i64)->Result<()>{
+    let ex=match exchange{
+        "Binance" => Ok(0),
+        "Yahoo" => Ok(1),
+        _=>Err(anyhow!["Invalid exchange string"])
+    }?;
     let q = format!(
         "
-    REPLACE INTO metadata (Symbol, [End Time], [Start Time] )
-    VALUES({}, {}. {});",
-    am.symbol,am.data_start_ms,am.data_end_ms,
+    INSERT OR REPLACE INTO metadata (Symbol, Exchange, [End Time], [Start Time] )
+    VALUES('{}', '{}', {}, {});",
+    symbol, ex, et ,st,
     );
-    exec_query(&pool, &q).await?;
+    exec_query(&asset_pool, &q).await?;
+    let q2 = format!(
+        "
+    INSERT OR REPLACE INTO assets_dl ( Asset, Exchange, [End Time], [Start Time] )
+    VALUES('{}', '{}', {}, {});",
+    symbol, exchange, et ,st,
+    );
+    exec_query(&metadata_pool, &q2).await?;
     Ok(())
 }
 
@@ -1400,7 +1413,7 @@ async fn check_if_columns_exist(pool:&Pool<Sqlite>,columns:&str,table:&str)->Res
 //NOTE for text queries '' is needed... 
 
 async fn get_asset_timestamps(symbol:&str, metadata_db: &Pool<Sqlite>)->Result<(Option<i64>,Option<i64>)>{
-    let q=&format!["SELECT [Start time ms], [End time ms] FROM assets WHERE Asset = '{}';", symbol];
+    let q=&format!["SELECT [Start time], [End time] FROM assets_dl WHERE Asset = '{}';", symbol];
     let k: (Option<i64>, Option<i64>) =
         sqlx::query_as(
             q
@@ -1408,13 +1421,16 @@ async fn get_asset_timestamps(symbol:&str, metadata_db: &Pool<Sqlite>)->Result<(
         .fetch_one(metadata_db)
         .await?;
     let qf=&format!["SELECT [onboardDate], [deliveryDate] FROM assets_fut WHERE Asset = '{}';", symbol];
-    
     let kf: (Option<i64>, Option<i64>) =
         sqlx::query_as(
             qf
         )
         .fetch_one(metadata_db)
         .await?;
+    match k.0{
+        Some(_)=>return Ok((k.1, None)),
+        None =>()
+    };
     Ok((kf.0,k.1))
 }
 
@@ -1580,7 +1596,14 @@ impl SQLConn {
             None => 0,
         };
 
-        update_asset_metadata(&apool, asset_symbol,  start_time_ms,current_timestamp).await?;
+
+        let res=update_asset_metadata_time(&apool, &meta_pool, asset_symbol, "Binance", start_timestamp, current_timestamp ).await;
+        match res{
+            Ok(_)=>(),
+            Err(e)=>{
+                tracing::error!["Error dl_single_asset: {:?}",e]
+            }
+        };
 
         //TODO append extra functions here, when metadata received
         apool.close().await;
