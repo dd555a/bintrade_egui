@@ -565,7 +565,7 @@ impl Default for HistTrade {
     fn default() -> Self {
         Self {
             asset_pair: "BTCUSDT".to_string(),
-            start_time:0,
+            start_time: 0,
             asset_data: Arc::new(Mutex::new(AssetData::new(666))),
 
             asset1: 10_000.0,
@@ -599,11 +599,7 @@ impl HistTrade {
     pub fn place_order(&mut self, order: &Order) {
         self.current_order = Some(*order);
     }
-    pub fn start(
-        asset_pair: String,
-        start_time: i64,
-        asset_data: Arc<Mutex<AssetData>>,
-    ) -> Self {
+    pub fn start(asset_pair: String, start_time: i64, asset_data: Arc<Mutex<AssetData>>) -> Self {
         Self {
             asset_pair,
             start_time,
@@ -614,7 +610,7 @@ impl HistTrade {
     pub fn get_trade_time(&mut self) {
         let timestep = self.current_intv.to_timedelta();
     }
-    pub fn trade_forward(&mut self, next_wicks: u16) -> Result<()>{
+    pub fn trade_forward(&mut self, next_wicks: u16) -> Result<()> {
         let ad = Arc::clone(&self.asset_data);
         let asset_data = ad.lock().expect("(TRADE) ad mutex poisoned");
         let trade_slice = asset_data.find_slice_n(
@@ -647,7 +643,13 @@ impl HistTrade {
         tracing::debug!["Hist_eval_kline result: {:?}", result];
         match result {
             Some((transaction_time, asset1, asset2, order)) => {
-                tracing::debug!["Hist_Trade_Forward. Transaction Time: {}\n Asset1: {}\n Asset2: {} \n Order: {:?}", transaction_time, asset1, asset2, order];
+                tracing::debug![
+                    "Hist_Trade_Forward. Transaction Time: {}\n Asset1: {}\n Asset2: {} \n Order: {:?}",
+                    transaction_time,
+                    asset1,
+                    asset2,
+                    order
+                ];
                 let tr = TradeRecord {
                     transaction_time,
                     trades_made: self.trades_made,
@@ -664,8 +666,7 @@ impl HistTrade {
                 self.asset2 = asset2;
                 match order {
                     Order::None => return Ok(()),
-                    _ => 
-                    {
+                    _ => {
                         self.current_order = Some(order);
                         return Ok(());
                     }

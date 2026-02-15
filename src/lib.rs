@@ -70,15 +70,19 @@ pub enum SQLInstructs {
     LoadTradeRecord {
         id: u32,
     },
-    UpdateDataBinance{
+    UpdateDataBinance {
         symbol: String,
     },
-    UpdateDataAll
-    ,
-    DelAsset{symbol:String},
-    DelAll ,
+    UpdateDataAll,
+    DelAsset {
+        symbol: String,
+    },
+    DelAll,
     LoadDLAssetList,
-    InsertDLAsset{symbol:String, exchange:String},
+    InsertDLAsset {
+        symbol: String,
+        exchange: String,
+    },
 }
 impl SQLInstructs {
     pub fn to_str(&self) -> &str {
@@ -87,12 +91,15 @@ impl SQLInstructs {
             SQLInstructs::LoadHistData { symbol: _ } => "SQLInstructs: Load Hist Data",
             SQLInstructs::UnloadHistData { symbol: _ } => "SQLInstructs: Unload Hist Data",
             SQLInstructs::LoadTradeRecord { id: _ } => "SQLInstructs: Load Trade Record",
-            SQLInstructs::UpdateDataBinance{ symbol: _ } => "SQLInstructs: Update data binance",
+            SQLInstructs::UpdateDataBinance { symbol: _ } => "SQLInstructs: Update data binance",
             SQLInstructs::UpdateDataAll => "SQLInstructs: Update all data",
-            SQLInstructs::DelAsset{ symbol: _ } => "SQLInstructs: Delete data for an asset",
+            SQLInstructs::DelAsset { symbol: _ } => "SQLInstructs: Delete data for an asset",
             SQLInstructs::DelAll => "SQLInstructs: Delete all data",
             SQLInstructs::LoadDLAssetList => "Load downloaded asset list",
-            SQLInstructs::InsertDLAsset{ symbol: _, exchange:_ } => "SQLInstructs: Insert symbol for download",
+            SQLInstructs::InsertDLAsset {
+                symbol: _,
+                exchange: _,
+            } => "SQLInstructs: Insert symbol for download",
         }
     }
 }
