@@ -693,12 +693,20 @@ impl Klines {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
+pub struct DLAsset{
+    pub asset:String,
+    pub exchange:String,
+    pub dat_start_t:i64,
+    pub dat_end_t:i64,
+}
+
+#[derive(Debug, Default)]
 pub struct AssetData {
     pub id:usize,
     pub size: usize,
     pub kline_data: HashMap<String, Klines>,
-
+    pub downloaded_assets:Vec<DLAsset>
 }
 
 impl AssetData {
@@ -716,6 +724,7 @@ impl AssetData {
             id,
             size: 0,
             kline_data: HashMap::new(),
+            downloaded_assets:vec![]
         }
     }
     //#[instrument(level="debug")]
@@ -1106,7 +1115,7 @@ async fn download_asset_list_binance(metadata_db:&Pool<Sqlite>)->Result<()>{
     };
     Ok(())
 }
-async fn dl_load_asset_list(pool:&Pool<Sqlite>)->Result<Vec<(String, String)>>{
+async fn dl_load_asset_list(pool:&Pool<Sqlite>)->Result<Vec<(String,String)>>{
     let out:Vec<(String, String)> = sqlx::query_as(format!("SELECT 
 [Asset] , [Exchange] FROM assets_dl;"
             
@@ -1114,6 +1123,23 @@ async fn dl_load_asset_list(pool:&Pool<Sqlite>)->Result<Vec<(String, String)>>{
         .fetch_all(pool)
         .await?;
     Ok(out)
+}
+async fn load_asset_list_ad(pool:&Pool<Sqlite>)->Result<Vec<DLAsset>>{
+    let out:Vec<(String, String, i64, i64)> = sqlx::query_as(format!("SELECT 
+[Asset] , [Exchange], [Start Time], [End Time] FROM assets_dl;"
+            
+            ).as_str())
+        .fetch_all(pool)
+        .await?;
+    let oo:Vec<DLAsset>=out.iter().map(| (symbol, exchange, start_ms, end_ms) | {
+        DLAsset{
+            asset:symbol.to_string(),
+            exchange:exchange.to_string(),
+            dat_start_t:*start_ms,
+            dat_end_t:*end_ms,
+        }
+    }).collect();
+    Ok(oo)
 }
 
 async fn load_asset_list(pool:&Pool<Sqlite>)->Result<Vec<(String, String, String, String, String, Option<String>, Option<String>, Option<i64>, Option<i64>, Option<f64>)>>{
@@ -1414,24 +1440,24 @@ async fn check_if_columns_exist(pool:&Pool<Sqlite>,columns:&str,table:&str)->Res
 
 async fn get_asset_timestamps(symbol:&str, metadata_db: &Pool<Sqlite>)->Result<(Option<i64>,Option<i64>)>{
     let q=&format!["SELECT [Start time], [End time] FROM assets_dl WHERE Asset = '{}';", symbol];
-    let k: (Option<i64>, Option<i64>) =
+    let timestamps_meta: (Option<i64>, Option<i64>) =
         sqlx::query_as(
             q
         )
         .fetch_one(metadata_db)
         .await?;
     let qf=&format!["SELECT [onboardDate], [deliveryDate] FROM assets_fut WHERE Asset = '{}';", symbol];
-    let kf: (Option<i64>, Option<i64>) =
+    let timestamps_fut: (Option<i64>, Option<i64>) =
         sqlx::query_as(
             qf
         )
         .fetch_one(metadata_db)
         .await?;
-    match k.0{
-        Some(_)=>return Ok((k.1, None)),
+    match timestamps_meta.0{
+        Some(_)=>return Ok((timestamps_meta.0,timestamps_meta.1)),
         None =>()
     };
-    Ok((kf.0,k.1))
+    Ok((timestamps_fut.0,timestamps_fut.1))
 }
 
 impl SQLConn {
@@ -1538,7 +1564,7 @@ impl SQLConn {
             0
         };
 
-        tracing::debug!["get start times for:{} \n Start: {} \n End: {}", asset_symbol, NaiveDateTime::from_timestamp_millis(start_t).ok_or(anyhow!["FFCUK"])?, NaiveDateTime::from_timestamp_millis(end_t).ok_or(anyhow!["FFCUK"])?];
+        tracing::trace!["get start times for:{} \n Start: {} \n End: {}", asset_symbol, NaiveDateTime::from_timestamp_millis(start_t).ok_or(anyhow!["FFCUK"])?, NaiveDateTime::from_timestamp_millis(end_t).ok_or(anyhow!["FFCUK"])?];
         //let start_time_ms=Some(1769950725000 as i64); //1st Feb 2026 NOTE testing only remov
         /////////////////////////////////////////////////////////////////////////////////////////////////////
         ///
@@ -1554,46 +1580,36 @@ impl SQLConn {
         }else{
             "None".to_string()
         };
-        tracing::debug!["Start end timestamps for: {} Start: {:?} End: {:?}",asset_symbol, st, et];
+        tracing::trace!["Start end timestamps for: {} Start: {:?} End: {:?}",asset_symbol, st, et];
         let exch = Exchange::from(exchange);
 
 
-        let klines=download_asset_data(&asset_symbol, &exch, start_time_ms, Some(current_timestamp)).await?;
+        let klines=download_asset_data(&asset_symbol, &exch, end_time_ms, Some(current_timestamp)).await?;
 
-        let res=klines.get_times2(true);
         let apool = connect_sqlite(&db_path)
             .await?;
-        let (full_dl,start_time):(bool,i64)=match start_time_ms{
-            Some(start_time_ms)=>(true,start_time_ms),
-            None =>(false,0),
-        };
-        match res{
-            Some((_,end_time))=>{
-                for i in Intv::iter(){
-                    let kline=klines.full_dat.get(&i).ok_or(anyhow!["Kline interval not found!"])?;
-                    tracing::debug!["sql_append_kline_iter called on length of: {}, interval: {:?}", &kline.kline.len(), &i];
-                    if kline.kline.is_empty() == false{
-                        let res=sql_append_kline_iter(&kline, &i, &ITER_SIZE, &apool).await;
-                        match res{
-                            Ok(_) => Ok(()),
-                            Err(e) =>{
-                                tracing::error!["Download asset binance SQL error: {}",e];
-                                Err(e)
-                            }
-                        }?;
-                    }else{
-                        tracing::info!["SQL append kline empty, doing nothing"]
+        for i in Intv::iter(){
+            let kline=klines.full_dat.get(&i).ok_or(anyhow!["Kline interval not found!"])?;
+            tracing::trace!["sql_append_kline_iter called on length of: {}, interval: {:?}", &kline.kline.len(), &i];
+            if kline.kline.is_empty() == false{
+                let res=sql_append_kline_iter(&kline, &i, &ITER_SIZE, &apool).await;
+                match res{
+                    Ok(_) => Ok(()),
+                    Err(e) =>{
+                        tracing::error!["Download asset binance SQL error: {}",e];
+                        Err(e)
                     }
-                }
-                Ok(())
+                }?;
+            }else{
+                tracing::info!["SQL append kline empty, doing nothing"]
             }
-            None => {
-                Err(anyhow!["Unable to get start/end times from kline"])
-            }
-        }?;
+        }
         let start_timestamp=match start_time_ms{
             Some(start_timestamp) => start_timestamp,
-            None => 0,
+            None => {
+                tracing::error!["WRONG START TIME: NONE"];
+                0
+            },
         };
 
 
@@ -1668,6 +1684,58 @@ impl SQLConn {
             }
             None => return Ok(()),
         }
+    }
+    async fn load_asset_list(&mut self) -> Result<()> {
+        let ad_a = Arc::clone(&mut self.hist_asset_data);
+        let meta_pool = SqlitePool::connect(&metadata_db_path)
+            .await
+            .context(anyhow!("SQL::Unable to metadata connect to db"))?;
+        let dl_list=load_asset_list_ad(&meta_pool).await?;
+        let mut ad = ad_a.lock().expect("Posioned AD mutex! (DATA)");
+        let result = ad.downloaded_assets=dl_list;
+        Ok(())
+    }
+    async fn insert_dl_asset(&self, symbol:&str, exchange:&str)->Result<()>{
+        let meta_pool = SqlitePool::connect(&metadata_db_path)
+            .await
+            .context(anyhow!("SQL::Unable to metadata connect to db"))?;
+
+
+        let validate=self.validate_asset_binance(&meta_pool,symbol,exchange).await?;
+        match validate{
+            true=>(),
+            false=>
+            {
+                tracing::error!["Asset symbol:{} not found on Binance!",symbol];
+                meta_pool.close().await;
+                return Ok(())
+            }
+        };
+        let q = format!(
+            "
+        INSERT OR REPLACE INTO metadata (Symbol, Exchange, [End Time], [Start Time] )
+        VALUES('{}', '{}');",
+        symbol, exchange
+        );
+        exec_query(&meta_pool, &q).await?;
+        meta_pool.close().await;
+        Ok(())
+    }
+    async fn validate_asset_binance(&self, meta_pool:&Pool<Sqlite>, symbol:&str, exchange:&str)->Result<bool>{
+        let res:(Option<String>,)= sqlx::query_as(format!("SELECT 
+    [Asset] FROM assets WHERE Asset = {};",
+                symbol
+                
+                ).as_str())
+            .fetch_one(meta_pool)
+            .await?;
+        match res.0{
+            Some(_)=>Ok(true),
+            None=>Ok(false)
+        }
+    //NOTE this return a bug that will need to be fixed later, when addint
+    //YAHOO. bit is fine for now. Maybe make a different asset list for
+    //each exhcange...or simply append yahoo
     }
     async fn insert_ad_intosql(&self, ad: Arc<Mutex<AssetData>>) {}
     #[instrument(level="debug")]
@@ -1750,6 +1818,40 @@ impl SQLConn {
                         log::error!(
                             "{}",
                             anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                        );
+                        SQLResponse::Failure((err_string, GeneralError::Generic))
+                    }
+                };
+                resp
+            }
+            SQLInstructs::LoadDLAssetList=> {
+                let res=self.load_asset_list().await;
+                let resp=match res {
+                    Ok(_) => {
+                         SQLResponse::Success
+                    },
+                    Err(e) => {
+                        let err_string=format!["{}",e];
+                        log::error!(
+                            "{}",
+                            anyhow!["{:?} SQL::load_asset_list:{:?}", i, e.context(err_ctx)]
+                        );
+                        SQLResponse::Failure((err_string, GeneralError::Generic))
+                    }
+                };
+                resp
+            }
+            SQLInstructs::InsertDLAsset{ref symbol,ref exchange}=> {
+                let res=self.insert_dl_asset(&symbol, &exchange).await;
+                let resp=match res {
+                    Ok(_) => {
+                         SQLResponse::Success
+                    },
+                    Err(e) => {
+                        let err_string=format!["{}",e];
+                        log::error!(
+                            "{}",
+                            anyhow!["{:?} SQL::load_asset_list:{:?}", i, e.context(err_ctx)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }

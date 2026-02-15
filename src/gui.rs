@@ -931,13 +931,6 @@ enum PlotExtras {
 #[derive(Dbg)]
 struct DataAsset {}
 
-//NOTE simply load the SQL asset table and see which studies are completed on which data...
-//load asset list...
-//search asset and get info...
-//start asset download process
-//load assset
-//unload asset
-
 use derive_debug::Dbg;
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -1070,13 +1063,13 @@ impl Default for DesktopApp {
             //Cli refs
             live_price: lp,
             asset_data,
-            hist_asset_data,
+            hist_asset_data:hist_asset_data.clone(),
             collect_data: cd,
 
             lp_chan_recv,
 
             live_plot: Rc::new(Mutex::new(LivePlot::default())),
-            data_manager: Rc::new(Mutex::new(DataManager::new())),
+            data_manager: Rc::new(Mutex::new(DataManager::new(hist_asset_data))),
 
             //Channels
             send_to_cli: None,
@@ -1100,6 +1093,7 @@ impl DesktopApp {
     ) -> Self {
         cc.storage;
         let live_plot = Rc::new(Mutex::new(LivePlot::new(asset_data.clone())));
+        let data_manager = Rc::new(Mutex::new(DataManager::new(hist_asset_data.clone())));
         Self {
             send_to_cli: Some(schan),
             recv_from_cli: Some(rchan),
@@ -1108,6 +1102,7 @@ impl DesktopApp {
             collect_data,
             asset_data,
             hist_asset_data,
+            data_manager,
             ..Default::default()
         }
     }
@@ -2103,6 +2098,8 @@ impl Default for HistPlot {
 }
 
 
+use crate::data::DLAsset;
+
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 #[derive(Dbg, Default)]
@@ -2126,15 +2123,25 @@ struct DataManager{
     update_ran:bool,
     update_status:String,
 
+    asset_list_loaded:bool,
+    asset_list_imported:bool,
+
+    asset_list:Vec<DLAsset>,
+
+    hist_asset_data:Arc<Mutex<AssetData>>
+
 }
 
 impl DataManager{
-    fn new()->Self{
+    fn new(hist_asset_data:Arc<Mutex<AssetData>>)->Self{
         DataManager{
             shortlist_max:10,
             max_backdate_months:120,
             update_status:"Not ran".to_string(),
             update_ran:false,
+            asset_list_loaded:false,
+            asset_list_imported:false,
+            hist_asset_data,
             ..Default::default()
         }
     }
@@ -2145,7 +2152,9 @@ impl DataManager{
     ) {
         egui::Grid::new("Data Manager DL")
             .striped(true)
+            .min_col_width(30.0)
             .show(ui, |ui| {
+                /*
                 egui::ComboBox::from_label("Download historical data for an asset:")
                     .selected_text(format!("Search result {}", data_manager.selected_coin))
                     .show_ui(ui, |ui| {
@@ -2153,15 +2162,31 @@ impl DataManager{
                             ui.selectable_value(&mut data_manager.selected_coin, i.clone() , i.clone());
                         }
                     });
+                */
+                ui.add_sized(egui::vec2(250.0,20.0), egui::TextEdit::singleline(&mut data_manager.coin_search_string).hint_text("Add asset to download list for binance"));
+                /*
                 ui.add(
                     egui::TextEdit::singleline(&mut data_manager.coin_search_string)
-                        .hint_text("Search for asset on Binance"),
+                        .hint_text("Add asset to download list for binance"),
                 );
-                if ui.button("Download").clicked() {
-                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::UpdateDataBinance{symbol: data_manager.selected_coin.clone()});
+                 * */
+                if ui.button("Add").clicked() {
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::InsertDLAsset{symbol: data_manager.coin_search_string.clone(), exchange:"Binance".to_string()});
                     cli_chan.send(msg);
-                }
+                    data_manager.asset_list_loaded=false;
+                };
+                ui.end_row();
+                if ui.button("Update all data").clicked() {
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::UpdateDataAll);
+                    cli_chan.send(msg);
+                    data_manager.update_ran=true;
+                    data_manager.update_success=true;
+                    //TODO connect proper error handling...
+                    data_manager.update_status="Ran".to_string();
+
+                };
             });
+        /*
         egui::Grid::new("Data Manager Deletet").striped(true).show(ui, |ui| {
             egui::ComboBox::from_label("Delete historical data for an asset:")
                 .selected_text(format!("Search downloaded result {}", data_manager.delete_selected_coin))
@@ -2180,10 +2205,7 @@ impl DataManager{
                 cli_chan.send(msg);
             }
         });
-        ui.style_mut().visuals.selection.bg_fill = Color32::GREEN;
-        ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::RED;
-        ui.style_mut().visuals.widgets.hovered.bg_fill = Color32::RED;
-        ui.style_mut().visuals.widgets.active.bg_fill = Color32::RED;
+        */
 
 
         ui.end_row();
@@ -2211,13 +2233,88 @@ impl DataManager{
                 }
             }
         };
-        if ui.button("Update all data").clicked() {
-            let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::UpdateDataAll);
+        if data_manager.asset_list_loaded==false {
+            let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadDLAssetList);
             cli_chan.send(msg);
-        }
-
+            //problem here is timing... this repeats the signal several times... but it works so
+            //wtf...
+            let ad=data_manager.hist_asset_data.lock().expect("Unable to unlock mutex: DATA MANAGER");
+            if ad.downloaded_assets.is_empty() ==true{
+            }else{
+                data_manager.asset_list=ad.downloaded_assets.clone();
+                data_manager.asset_list_loaded=true;
+            };
+        };
+        if ui.button("Reload asset list").clicked() {
+            data_manager.asset_list_loaded=false;
+        };
         //NOTE add this but not clickable toggle_ui_compact(ui,&mut data_manager.update_success);
         ui.end_row();
+
+        ui.label(
+            RichText::new(format!["All assets"])
+                .color(Color32::WHITE),
+        );
+        ui.end_row();
+        ui.vertical(|ui| {
+            let available_height = ui.available_height();
+            let mut table = TableBuilder::new(ui)
+                .resizable(true)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .min_scrolled_height(0.0)
+                .max_scroll_height(available_height);
+            table
+                .header(20.0, |mut header| {
+                    header.col(|ui| {
+                        ui.strong("Asset");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Exchange");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Data Start Time");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Data End Time");
+                    });
+                })
+                .body(|mut body| {
+                    for (asset) in data_manager.asset_list.iter() {
+                        let row_height = 18.0;
+                        body.row(row_height, |mut row| {
+                            row.col(|ui| {
+                                ui.label(format!["{}", asset.asset]);
+                            });
+                            row.col(|ui| {
+                                ui.label(format!["{}", asset.exchange]);
+                            });
+                            row.col(|ui| {
+                                if let Some(start_time)=chrono::NaiveDateTime::from_timestamp_millis(asset.dat_start_t){
+                                    ui.label(format!["{}", start_time]);
+                                }else{
+                                    ui.label(format!["NaN"]);
+                                };
+                            });
+                            row.col(|ui| {
+                                if let Some(end_time)=chrono::NaiveDateTime::from_timestamp_millis(asset.dat_end_t){
+                                    ui.label(format!["{}", end_time]);
+                                }else{
+                                    ui.label(format!["NaN"]);
+                                };
+                            });
+                            row.col(|ui| {
+                                if ui.button("Delete").clicked() {
+                                }
+                            });
+                        });
+                    }
+                });
+            });
     }
 }
 
