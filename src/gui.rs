@@ -62,6 +62,9 @@ struct KlinePlot {
     hlines: Vec<HLine>,
     navi_wicks_s:String,
     navi_wicks:usize,
+
+    ticks:usize,
+    offset:i64,
     x_bounds_set:bool,
 }
 impl Default for KlinePlot {
@@ -87,6 +90,8 @@ impl Default for KlinePlot {
             navi_wicks_s: "30".to_string(),
 
             navi_wicks:30,
+            ticks:0,
+            offset:0,
             x_bounds_set:false,
         }
     }
@@ -138,10 +143,7 @@ impl KlinePlot {
                         NAVI_WICKS_DEFAULT
                     }
                 };
-                let w=(self.intv.to_sec() as f64)*(n_wicks as f64);
-                if self.x_bounds_set==true{
-                    self.x_bounds=(self.x_bounds.0-w, self.x_bounds.1-w);
-                };
+                self.offset-= (n_wicks as i64);
             };
             let search = ui.add(
                 egui::TextEdit::singleline(&mut self.navi_wicks_s).hint_text("Navi N wicks"),
@@ -155,12 +157,15 @@ impl KlinePlot {
                         NAVI_WICKS_DEFAULT
                     }
                 };
-                let w=(self.intv.to_sec() as f64)*(n_wicks as f64);
-                if self.x_bounds_set==true{
-                    self.x_bounds=(self.x_bounds.0+w, self.x_bounds.1+w);
-                };
+                self.offset+= (n_wicks as i64);
+            }
+            if ui.button("Reset offset").clicked() {
+                self.offset=0;
+
             }
         });
+        /*
+         * */
         Ok(())
     }
     fn mk_plt(&self) -> (Plot,Plot) {
@@ -193,10 +198,12 @@ impl KlinePlot {
         };
         let t1 = kline_input[kline_input.len() - 1].0;
         if self.x_bounds_set==false{
-            let w=(self.intv.to_sec() as f64)*(CHART_FORWARD as f64);
+            let w=(self.intv.to_sec() as f64)*(CHART_FORWARD as f64 );
+            let u=(self.intv.to_sec() as f64)*((self.ticks as f64)+(self.offset as f64));
+            tracing::debug!["ticks count:{}", self.ticks];
             self.x_bounds = (
-                (t0.timestamp() as f64) / self.chart_params.0,
-                ((t1.timestamp() as f64)+w) / self.chart_params.0,
+                ((t0.timestamp() as f64)+u) / self.chart_params.0,
+                ((t1.timestamp() as f64)+w+u) / self.chart_params.0,
             );
             self.x_bounds_set==true;
         };
@@ -222,7 +229,10 @@ impl KlinePlot {
                 self.l_tick_boxplot.push(boxe);
                 self.l_tick_barchart.push(bar);
             };
-        }
+        };
+        if tick==true{
+            self.ticks=kline_input.len();
+        };
         self.v_bound=v_highest;
         self.y_bounds = (lowest, highest);
     }
@@ -399,6 +409,7 @@ impl KlinePlot {
             ])?,
             None => ad.load_full_intv(symbol, &intv)?,
         };
+        tracing::trace!["Kline intv (live_from_ad) {}", intv.to_str()];
         let (div, width) = get_chart_params(&intv);
         self.chart_params = (div, width);
         if k.len() <= max_load_points {
@@ -696,7 +707,16 @@ fn make_plot(name: &str, intv: Intv, y_lower: f64, y_higher: f64, x_lower: f64, 
             x_higher,
             v_higher
         ),
-        Intv::Month1 => todo!(),
+        Intv::Month1 => make_p2!(
+            name,
+            x_format_1mo,
+            grid_spacer_1mo,
+            y_lower,
+            y_higher,
+            x_lower,
+            x_higher,
+            v_higher
+        ),
     }
 }
 
@@ -731,6 +751,7 @@ const h12_div: i64 = 60 * 4 * 4 * 12;
 const d1_div: i64 = 60 * 4 * 4 * 6;
 const d3_div: i64 = 60 * 4 * 4 * 6;
 const w1_div: i64 = 60 * 4 * 4 * 6;
+const mo1_div: i64 = 60 * 4 * 4 * 6;
 
 const gap1: f64 = 0.8 ;
 const gap2: f64 = 0.8 * 4.0;
@@ -750,7 +771,7 @@ fn get_chart_params(intv: &Intv) -> (f64, f64) {
         Intv::Day1 => (d1_div as f64, gap2),
         Intv::Day3 => (d3_div as f64, gap2),
         Intv::Week1 => (w1_div as f64, gap2),
-        Intv::Month1 => todo!(), //with reference to 1970 1,1 00:00 perhaps?
+        Intv::Month1 => (mo1_div as f64, gap2), //with reference to 1970 1,1 00:00 perhaps?
     }
 }
 //TODO convert to macros or fork egui_plot library and make a better implementation yourself...
@@ -877,6 +898,15 @@ fn grid_spacer_1w(input: GridInput) -> [f64; 3] {
 
 fn x_format_1w(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * w1_div;
+    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    format!["{}", date_time]
+}
+fn grid_spacer_1mo(input: GridInput) -> [f64; 3] {
+    [1.0, 1.0, 1.0]
+}
+
+fn x_format_1mo(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
+    let fixed_gridmark = (gridmark.value as i64) * mo1_div;
     let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
     format!["{}", date_time]
 }
@@ -1675,7 +1705,7 @@ impl ManualOrders {
 
                 ui.end_row();
                 let mut dummy: Option<f64> = None;
-                ui.style_mut().visuals.selection.bg_fill = Color32::ORANGE;
+                ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40,40,40);
 
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut man_orders.quant, Quant::Q25, "25%");
@@ -2170,7 +2200,9 @@ struct LivePlot {
     search_string: String,
     symbol: String,
     intv: Intv,
+    last_intv: Intv,
     lines: Vec<HLine>,
+    reload:bool,
 }
 
 impl Default for LivePlot {
@@ -2182,7 +2214,9 @@ impl Default for LivePlot {
             search_string: "".to_string(),
             symbol: "BTCUSDT".to_string(),
             intv: Intv::Min1,
+            last_intv: Intv::Min1,
             lines: vec![],
+            reload:false,
         }
     }
 }
@@ -2221,6 +2255,14 @@ impl LivePlot {
         tracing::trace!["\x1b[36m Collected Data\x1b[0m: {:?}", &collect_data];
 
         ui.end_row();
+        if live_plot.intv != live_plot.last_intv{
+            live_plot.reload=true;
+            tracing::debug!["\x1b[36m Live chart reloaded\x1b[0m: "];
+            
+            live_plot.last_intv=live_plot.intv;
+            live_plot.kline_plot.intv=live_plot.intv;
+            live_plot.reload=false;
+        };
         egui::Grid::new("Hplot order assets:")
             .striped(true)
             .show(ui, |ui| {
@@ -2237,11 +2279,20 @@ impl LivePlot {
                 ui.label("Search for asset symbol");
                 let s = &live_plot.search_string.clone();
                 let i = live_plot.intv;
-                let ad = live_plot
-                    .live_asset_data
-                    .lock()
-                    .expect("Live AD mutex poisoned! - LivePlot::show()");
-                let res = live_plot.kline_plot.live_from_ad(&ad, s, i, 1_000, None);
+
+                if ui.button("Search").clicked() {
+
+                };
+                
+                if live_plot.reload ==false{
+                    //let ad = live_plot
+                    //    .live_asset_data
+                    //    .lock()
+                    //    .expect("Live AD mutex poisoned! - LivePlot::show()");
+                    //tracing::debug!["\x1b[36m Live chart reloaded intv: {}\x1b[0m: ", &i.to_str()];
+                    //tracing::debug!["\x1b[36m Live chart reloaded intv: {}\x1b[0m: ", &live_plot.intv.to_str()];
+                    //let res = live_plot.kline_plot.live_from_ad(&ad, s, i, 1_000, None);
+                };
             });
     }
 }
