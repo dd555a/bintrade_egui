@@ -23,7 +23,7 @@ use crate::binance::KlineTick;
 use egui::{Color32, ComboBox, epaint};
 use egui_plot_bintrade::{
     Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, Legend, Line, Plot,
-    PlotPoints, PlotUi, uniform_grid_spacer,
+    PlotPoints, PlotUi, uniform_grid_spacer, AxisHints, HPlacement
 };
 use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
@@ -258,11 +258,6 @@ impl KlinePlot {
             .element_formatter(Box::new(time_format));
         let bc_tick2 = BarChart::new(&self.name, self.l_tick_barchart.clone());
 
-        if self.l_barchart.is_empty()==false{
-            tracing::debug!["Bar chart not empty"];
-        };
-        tracing::trace!["Bar chart tick: {:?} \n -------" , self.l_tick_barchart];
-
         let hlines = self.hlines.clone();
         if let Some(tick_kline) = self.tick_kline {
             let (tick_box_e, tick_vol) =
@@ -305,7 +300,6 @@ impl KlinePlot {
                     //plot_ui.bar_chart(bc);
                 });
                 plot_volume.show(ui, |plot_ui| {
-                    tracing::debug!["Plot volume called!"];
                     plot_ui.bar_chart(bc);
                     plot_ui.bar_chart(bc_tick2);
                 });
@@ -526,12 +520,19 @@ macro_rules! make_p2{
     ( $($name:ident, $formatter:ident, $formatter2:ident, $y_lower:ident, $y_upper:ident, $x_lower:ident, $x_higher:ident, $v_higher:ident),* ) => {
         {
             let id=format!["{}",format!["plot_id_{}",$($name.to_string())*]];
+            let mut axis_hints=AxisHints::new_y();
+            axis_hints.clone().placement(HPlacement::Right);
+            //TODO - to togle percentage change the x axis formatter
+            //TODO - find a way to place the chart labels on the right... the above obviously
+            //TODO - add a tick wick and a tick line...
+            //doesn't work...
             let candle_plot = Plot::new($($name.to_string())*)
                 .legend(Legend::default())
                 .link_cursor(id.clone(), [true,false])
                 .link_axis(id.clone(), [true,false])
                 .width(560.0)
                 .height(250.0)
+                .custom_y_axes(vec![])
                 .x_axis_formatter($($formatter)*)
                 //.set_margin_fraction([0.1,0.1].into())
                 .default_y_bounds($($y_lower)*,$($y_upper)*)
@@ -545,6 +546,7 @@ macro_rules! make_p2{
                 //.set_margin_fraction([0.1,0.1].into())
                 //.default_x_bounds($($x_lower)*,$($x_higher)*)
                 .default_y_bounds(0.0,$($v_higher)*)
+                .custom_y_axes(vec![])
                 .x_axis_formatter($($formatter)*);
                 //.default_x_bounds($($x_lower)*,$($x_higher)*);
 
