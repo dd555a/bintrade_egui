@@ -42,6 +42,10 @@ use crate::binance::SymbolOutput;
 struct KlinePlot {
     l_boxplot: Vec<BoxElem>,
     l_barchart: Vec<Bar>,
+
+    l_tick_boxplot: Vec<BoxElem>,
+    l_tick_barchart: Vec<Bar>,
+
     tick_kline: Option<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>,
 
     intv: Intv,
@@ -51,16 +55,22 @@ struct KlinePlot {
     chart_params: (f64, f64),
     x_bounds: (f64, f64),
     y_bounds: (f64, f64),
+    v_bound:f64,
 
     symbol: String,
 
     hlines: Vec<HLine>,
+    navi_wicks_s:String,
+    navi_wicks:usize,
+    x_bounds_set:bool,
 }
 impl Default for KlinePlot {
     fn default() -> Self {
         Self {
             l_boxplot: vec![],
             l_barchart: vec![],
+            l_tick_boxplot: vec![],
+            l_tick_barchart: vec![],
             tick_kline: None,
             intv: Intv::Min1,
             name: "".to_string(),
@@ -69,21 +79,33 @@ impl Default for KlinePlot {
             chart_params: (1.0, 1.0),
             x_bounds: (0.0, 100.0),
             y_bounds: (0.0, 100.0),
+            v_bound:100.0,
             symbol: "BTCUSDT".to_string(),
 
             hlines: vec![],
+
+            navi_wicks_s: "30".to_string(),
+
+            navi_wicks:30,
+            x_bounds_set:false,
         }
     }
 }
 
-const WICKS_VISIBLE:usize=45;
+const WICKS_VISIBLE:usize=90;
+const NAVI_WICKS_DEFAULT:u16=30;
+const CHART_FORWARD:u16=40;
 
 impl KlinePlot {
     fn show_empty(&self, ui: &mut egui::Ui) {
-        let plot = self.mk_plt();
+        let (plot_candles,plot_volume) = self.mk_plt();
         let bp = BoxPlot::new(&self.name, vec![]);
-        plot.show(ui, |plot_ui| {
+        plot_candles.show(ui, |plot_ui| {
             plot_ui.box_plot(bp);
+        });
+        let bc = BarChart::new(&self.name, vec![]);
+        plot_volume.show(ui, |plot_ui| {
+            plot_ui.bar_chart(bc);
         });
     }
     fn show_live(
@@ -99,27 +121,70 @@ impl KlinePlot {
 
         let symbol = self.symbol.clone();
         if let Some(data) = collected_data.get(&symbol) {
+            tracing::trace!["Collected data non empty"];
             //tracing::debug!["Show live SOME for {}, chart_ad_id:{}", &symbol, &chart_ad_id];
             self.live_live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None, &data);
         };
         self.live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None);
         self.show(ui, plot_extras);
+
+        egui::Grid::new("Kline navi:").show(ui, |ui| {
+            if ui.button("<< Navi").clicked() {
+                let res: Result<u16, ParseIntError> = self.navi_wicks_s.parse();
+                let n_wicks = match res {
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::error!["Parsing error for navigation wicks: {}", e];
+                        NAVI_WICKS_DEFAULT
+                    }
+                };
+                let w=(self.intv.to_sec() as f64)*(n_wicks as f64);
+                if self.x_bounds_set==true{
+                    self.x_bounds=(self.x_bounds.0-w, self.x_bounds.1-w);
+                };
+            };
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut self.navi_wicks_s).hint_text("Navi N wicks"),
+            );
+            if ui.button("Navi >>").clicked() {
+                let res: Result<u16, ParseIntError> = self.navi_wicks_s.parse();
+                let n_wicks = match res {
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::error!["Parsing error for navigation wicks: {}", e];
+                        NAVI_WICKS_DEFAULT
+                    }
+                };
+                let w=(self.intv.to_sec() as f64)*(n_wicks as f64);
+                if self.x_bounds_set==true{
+                    self.x_bounds=(self.x_bounds.0+w, self.x_bounds.1+w);
+                };
+            }
+        });
         Ok(())
     }
-    fn mk_plt(&self) -> Plot {
+    fn mk_plt(&self) -> (Plot,Plot) {
         let (x_lower, x_higher) = self.x_bounds;
         let (y_lower, y_higher) = self.y_bounds;
-        make_plot(&self.name, self.intv, y_lower, y_higher, x_lower, x_higher)
+        let v_higher = self.v_bound;
+        make_plot(&self.name, self.intv, y_lower, y_higher, x_lower, x_higher, v_higher)
     }
     fn add_live(
         &mut self,
         kline_input: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
         divider: &f64,
         width: &f64,
+        tick:bool,
     ) {
-        self.l_boxplot = vec![];
-        self.l_barchart = vec![];
+        if tick==false{
+            self.l_boxplot = vec![];
+            self.l_barchart = vec![];
+        }else{
+            self.l_tick_boxplot = vec![];
+            self.l_tick_barchart = vec![];
+        };
         let mut highest: f64 = 0.0;
+        let mut v_highest: f64 = 0.0;
         let mut lowest: f64 = kline_input[0].3;;
         let t0= if kline_input.len() > WICKS_VISIBLE + 1{
             kline_input[kline_input.len() - 1-WICKS_VISIBLE].0 //NOTE out of bounds error
@@ -127,22 +192,38 @@ impl KlinePlot {
             kline_input[0].0
         };
         let t1 = kline_input[kline_input.len() - 1].0;
-        self.x_bounds = (
-            (t0.timestamp() as f64) / self.chart_params.0,
-            (t1.timestamp() as f64) / self.chart_params.0,
-        );
+        if self.x_bounds_set==false{
+            let w=(self.intv.to_sec() as f64)*(CHART_FORWARD as f64);
+            self.x_bounds = (
+                (t0.timestamp() as f64) / self.chart_params.0,
+                ((t1.timestamp() as f64)+w) / self.chart_params.0,
+            );
+            self.x_bounds_set==true;
+        };
         for kline in kline_input.iter() {
-            let (_, _, h, l, _, _) = kline;
+            let (_, _, h, l, _, v) = kline;
             if h > &highest {
                 highest = h.clone();
+            };
+            if v > &v_highest {
+                tracing::trace!["V highest: {:?} \n", v];
+                v_highest = v.clone();
             };
             if l < &lowest{
                 lowest= l.clone();
             };
+            tracing::trace!["V: {:?} \n", v];
             let (boxe, bar) = box_element(kline, divider, width);
-            self.l_boxplot.push(boxe);
-            self.l_barchart.push(bar);
+
+            if tick==false{
+                self.l_boxplot.push(boxe);
+                self.l_barchart.push(bar);
+            }else{
+                self.l_tick_boxplot.push(boxe);
+                self.l_tick_barchart.push(bar);
+            };
         }
+        self.v_bound=v_highest;
         self.y_bounds = (lowest, highest);
     }
     fn add_live_single(
@@ -163,12 +244,25 @@ impl KlinePlot {
         self.l_boxplot.push(boxe);
         self.l_barchart.push(bar);
     }
+    fn reset_chart(&mut self)->Result<()>{
+        Ok(())
+    }
     fn show(&mut self, ui: &mut egui::Ui, plot_extras: &PlotExtras) -> Result<()> {
-        let plot = self.mk_plt();
+        let (plot_candles,plot_volume) = self.mk_plt();
         //Handle live tick as separate box...
         let bp = BoxPlot::new(&self.name, self.l_boxplot.clone())
             .element_formatter(Box::new(time_format));
         let bc = BarChart::new(&self.name, self.l_barchart.clone());
+
+        let bp_tick2 = BoxPlot::new(&self.name, self.l_tick_boxplot.clone())
+            .element_formatter(Box::new(time_format));
+        let bc_tick2 = BarChart::new(&self.name, self.l_tick_barchart.clone());
+
+        if self.l_barchart.is_empty()==false{
+            tracing::debug!["Bar chart not empty"];
+        };
+        tracing::trace!["Bar chart tick: {:?} \n -------" , self.l_tick_barchart];
+
         let hlines = self.hlines.clone();
         if let Some(tick_kline) = self.tick_kline {
             let (tick_box_e, tick_vol) =
@@ -176,20 +270,29 @@ impl KlinePlot {
             let tick_box_plot = vec![tick_box_e];
             let tick_bar_vol = vec![tick_vol];
             let bp_tick = BoxPlot::new("Tick", tick_box_plot);
+            tracing::trace!["Tick bar vol:{:?}",tick_bar_vol];
             let bc_tick = BarChart::new("Tick Vol", tick_bar_vol);
             if self.loading == false && self.static_loaded == true {
-                plot.show(ui, |plot_ui| {
+                plot_candles.show(ui, |plot_ui| {
                     plot_ui.box_plot(bp);
-                    plot_ui.bar_chart(bc);
+                    //plot_ui.bar_chart(bc);
                     plot_ui.box_plot(bp_tick);
+                    plot_ui.box_plot(bp_tick2);
+                    //plot_ui.bar_chart(bc_tick);
+                });
+                plot_volume.show(ui, |plot_ui| {
+                    //plot_ui.box_plot(bp);
+                    plot_ui.bar_chart(bc);
+                    //plot_ui.box_plot(bp_tick);
                     plot_ui.bar_chart(bc_tick);
+                    plot_ui.bar_chart(bc_tick2);
                 });
             } else {
                 self.show_empty(ui);
             }
         } else {
             if self.loading == false && self.static_loaded == true {
-                plot.show(ui, |plot_ui| {
+                plot_candles.show(ui, |plot_ui| {
                     log::trace!["Hlines in plot: {:?}", &hlines];
                     if hlines != [] {
                         for h in hlines {
@@ -198,7 +301,13 @@ impl KlinePlot {
                         }
                     };
                     plot_ui.box_plot(bp);
+                    plot_ui.box_plot(bp_tick2);
+                    //plot_ui.bar_chart(bc);
+                });
+                plot_volume.show(ui, |plot_ui| {
+                    tracing::debug!["Plot volume called!"];
                     plot_ui.bar_chart(bc);
+                    plot_ui.bar_chart(bc_tick2);
                 });
             } else {
                 self.show_empty(ui);
@@ -225,6 +334,7 @@ impl KlinePlot {
         } else {
             vec![]
         };
+        tracing::trace!["live live k:{:?}",k];
         //self.live_from_ad(ad,symbol,intv,12_000,None);
         //tracing::debug!["\x1b  AD klines \x1b[93m  = {:?}", &intv_klines];
 
@@ -241,7 +351,6 @@ impl KlinePlot {
                 ];
             };
             //KlineTick::to_kline_vec(ck)
-        } else {
         };
         /*
          * */
@@ -257,20 +366,23 @@ impl KlinePlot {
         let (div, width) = get_chart_params(&intv);
         self.chart_params = (div, width);
         if k.len() <= max_load_points {
-            self.loading = true;
+            //self.loading = true;
             if k.is_empty() == false {
-                self.add_live(&k, &div, &width);
+                tracing::trace!["Live KLINES added 1"];
+                self.add_live(&k, &div, &width, true);
+                tracing::trace!["Live KLINES added {:?}",self.l_boxplot];
             };
-            self.loading = false;
+            //self.loading = false;
         } else {
             //tracing::debug!["max load points separation{:?}",k];
             let kl = &k[(k.len() - max_load_points)..];
             //tracing::debug!["max load points separation{:?}",kl];
-            self.loading = true;
-            if k.is_empty() == false {
-                self.add_live(&k, &div, &width);
+            //self.loading = true;
+            if kl.is_empty() == false {
+                tracing::trace!["Live KLINES added 2"];
+                self.add_live(&kl, &div, &width, true);
             };
-            self.loading = false;
+            //self.loading = false;
         }
         self.static_loaded = true;
         return Ok(());
@@ -284,7 +396,7 @@ impl KlinePlot {
         max_load_points: usize,
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
     ) -> Result<()> {
-        //tracing::debug!["Show live data from AD asset data={:?}",ad.debug()];
+        tracing::trace!["GUI Live from AD called!"];
         let k = match timestamps {
             Some((start, end)) => ad.find_slice(symbol, &intv, &start, &end).ok_or(anyhow![
                 "Unable to find slice in the period:{} to {}",
@@ -297,14 +409,14 @@ impl KlinePlot {
         self.chart_params = (div, width);
         if k.len() <= max_load_points {
             self.loading = true;
-            self.add_live(k, &div, &width);
+            self.add_live(k, &div, &width, false);
             self.loading = false;
         } else {
             //tracing::debug!["max load points separation{:?}",k];
             let kl = &k[(k.len() - max_load_points)..];
             //tracing::debug!["max load points separation{:?}",kl];
             self.loading = true;
-            self.add_live(kl, &div, &width);
+            self.add_live(kl, &div, &width, false);
             self.loading = false;
         }
         self.static_loaded = true;
@@ -333,11 +445,10 @@ fn box_element(
     width: &f64,
 ) -> (BoxElem, Bar) {
     let (time, open, high, low, close, volume) = slice.clone();
-    let a1 = (high - low) / 2.0;
+    let a1 = (high + low) / 2.0;
     let red = Color32::from_rgb(255, 0, 0);
     let green = Color32::from_rgb(0, 255, 0);
     let width = width.clone();
-    let volume_mod = 2.5; //TODO get rid of this...
     if open >= close {
         let bb: BoxElem = BoxElem::new(
             (time.timestamp() as f64) / divider,
@@ -348,8 +459,9 @@ fn box_element(
         .stroke(Stroke::new(2.0, red))
         .name(format!["{}", time])
         .box_width(width);
-        let b = Bar::new(time.timestamp() as f64, volume * volume_mod)
+        let b = Bar::new(time.timestamp() as f64 / divider, volume)
             .fill(red)
+            .vertical()
             .stroke(Stroke::new(1.0, red))
             .width(width);
         return (bb, b);
@@ -363,8 +475,9 @@ fn box_element(
         .stroke(Stroke::new(2.0, green))
         .name(format!["{}", time])
         .box_width(width);
-        let b = Bar::new(time.timestamp() as f64, volume * volume_mod)
+        let b = Bar::new(time.timestamp() as f64 / divider, volume)
             .fill(green)
+            .vertical()
             .stroke(Stroke::new(1.0, green))
             .width(width);
         return (bb, b);
@@ -393,186 +506,193 @@ macro_rules! make_p{
             let plot = Plot::new($($name.to_string())*)
                 .legend(Legend::default())
                 .x_axis_formatter($($formatter)*)
-                //.x_grid_spacer(uniform_grid_spacer($($formatter2)*))
-                //TODO BUG if this is not here... the gui doesn't crash...
                 .set_margin_fraction([0.1,0.1].into())
                 .default_y_bounds($($y_lower)*,$($y_upper)*)
-                //.clamp_grid(true)
                 .default_x_bounds($($x_lower)*,$($x_higher)*)
+                .height(320.0)
+                .view_aspect(2.0);
+                //.x_grid_spacer(uniform_grid_spacer($($formatter2)*))
+                //TODO BUG if this is not here... the gui doesn't crash...
+                //.clamp_grid(true)
                 //add bounds with ability to plot
                 //Make volume a separate chart?
                 //.auto_bounds([true,true])
-                .height(320.0)
-                .view_aspect(2.0);
 
             plot
         }
     };
 }
 macro_rules! make_p2{
-    ( $($name:ident, $formatter:ident, $formatter2:ident, $y_lower:ident, $y_upper:ident, $x_lower:ident, $x_higher:ident),* ) => {
+    ( $($name:ident, $formatter:ident, $formatter2:ident, $y_lower:ident, $y_upper:ident, $x_lower:ident, $x_higher:ident, $v_higher:ident),* ) => {
         {
-            let id=format![format!["plot_id_{}",$($name.to_string())*]];
+            let id=format!["{}",format!["plot_id_{}",$($name.to_string())*]];
             let candle_plot = Plot::new($($name.to_string())*)
                 .legend(Legend::default())
-                //.x_axis_formatter($($formatter)*)
-                //.x_grid_spacer(uniform_grid_spacer($($formatter2)*))
-                //TODO BUG if this is not here... the gui doesn't crash...
-                //.default_y_bounds($($y_lower)*,$($y_upper)*)
-                //.clamp_grid(true)
-                //.default_x_bounds($($x_lower)*,$($x_higher)*)
-                //add bounds with ability to plot
-                //Make volume a separate chart?
-                .link_cursor(id, [true,false])
-                .link_axis(id, [true,false])
-                .width(160.0)
-                .view_aspect(3.0);
+                .link_cursor(id.clone(), [true,false])
+                .link_axis(id.clone(), [true,false])
+                .width(560.0)
+                .height(250.0)
+                .x_axis_formatter($($formatter)*)
+                //.set_margin_fraction([0.1,0.1].into())
+                .default_y_bounds($($y_lower)*,$($y_upper)*)
+                .default_x_bounds($($x_lower)*,$($x_higher)*);
             let volume_plot = Plot::new(format!["{}_volume",$($name.to_string())*])
                 .legend(Legend::default())
-                //.x_axis_formatter($($formatter)*)
-                //.x_grid_spacer(uniform_grid_spacer($($formatter2)*))
-                //TODO BUG if this is not here... the gui doesn't crash...
-                //.default_y_bounds($($y_lower)*,$($y_upper)*)
-                //.clamp_grid(true)
+                .link_cursor(id.clone(), [true,false])
+                .link_axis(id.clone(), [true,false])
+                .width(560.0)
+                .height(80.0)
+                //.set_margin_fraction([0.1,0.1].into())
                 //.default_x_bounds($($x_lower)*,$($x_higher)*)
-                //add bounds with ability to plot
-                //Make volume a separate chart?
-                .link_cursor(id, [true,false])
-                .link_axis(id, [true,false])
-                .width(160.0)
-                .view_aspect(1.0);
+                .default_y_bounds(0.0,$($v_higher)*)
+                .x_axis_formatter($($formatter)*);
+                //.default_x_bounds($($x_lower)*,$($x_higher)*);
 
             (candle_plot,volume_plot)
         }
     };
 }
-fn make_plot(name: &str, intv: Intv, y_lower: f64, y_higher: f64, x_lower: f64, x_higher: f64) -> Plot {
+fn make_plot(name: &str, intv: Intv, y_lower: f64, y_higher: f64, x_lower: f64, x_higher: f64, v_higher: f64) -> (Plot, Plot) {
     match intv {
-        Intv::Min1 => make_p!(
+        Intv::Min1 => make_p2!(
             name,
             x_format_1min,
             grid_spacer_1min,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Min3 => make_p!(
+        Intv::Min3 => make_p2!(
             name,
             x_format_3min,
             grid_spacer_3min,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Min5 => make_p!(
+        Intv::Min5 => make_p2!(
             name,
             x_format_5min,
             grid_spacer_5min,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Min15 => make_p!(
+        Intv::Min15 => make_p2!(
             name,
             x_format_15min,
             grid_spacer_15min,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Min30 => make_p!(
+        Intv::Min30 => make_p2!(
             name,
             x_format_30min,
             grid_spacer_30min,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Hour1 => make_p!(
+        Intv::Hour1 => make_p2!(
             name,
             x_format_1h,
             grid_spacer_1h,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Hour2 => make_p!(
+        Intv::Hour2 => make_p2!(
             name,
             x_format_2h,
             grid_spacer_2h,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Hour4 => make_p!(
+        Intv::Hour4 => make_p2!(
             name,
             x_format_4h,
             grid_spacer_4h,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Hour6 => make_p!(
+        Intv::Hour6 => make_p2!(
             name,
             x_format_6h,
             grid_spacer_6h,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Hour8 => make_p!(
+        Intv::Hour8 => make_p2!(
             name,
             x_format_8h,
             grid_spacer_8h,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Hour12 => make_p!(
+        Intv::Hour12 => make_p2!(
             name,
             x_format_12h,
             grid_spacer_12h,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Day1 => make_p!(
+        Intv::Day1 => make_p2!(
             name,
             x_format_1d,
             grid_spacer_1d,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Day3 => make_p!(
+        Intv::Day3 => make_p2!(
             name,
             x_format_3d,
             grid_spacer_3d,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
-        Intv::Week1 => make_p!(
+        Intv::Week1 => make_p2!(
             name,
             x_format_1w,
             grid_spacer_1w,
             y_lower,
             y_higher,
             x_lower,
-            x_higher
+            x_higher,
+            v_higher
         ),
         Intv::Month1 => todo!(),
     }
@@ -760,9 +880,15 @@ fn x_format_1w(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
 }
 
 fn time_format(input: &BoxElem, plot: &BoxPlot) -> String {
+    let red = Color32::from_rgb(255, 0, 0);
+    let green = Color32::from_rgb(0, 255, 0);
+    let (o,c) = match input.fill{
+        red => (input.spread.quartile1, input.spread.quartile3),
+        green => (input.spread.quartile3, input.spread.quartile1),
+    };
     format!(
-        "Time: {} \n High: {} \n Low: {} \n Average: {}",
-        input.name, input.spread.upper_whisker, input.spread.lower_whisker, input.spread.median
+        "Time: {} \n Open: {} \n High: {} \n Low: {} \n Close: {} \n Average: {}",
+        input.name, o, input.spread.upper_whisker, input.spread.lower_whisker, c, input.spread.median
     )
 }
 
@@ -1997,9 +2123,10 @@ fn test_chart2(ui: &mut egui::Ui) {
         .link_axis(id, [true,false])
         .x_grid_spacer(uniform_grid_spacer(grid_spacer_1d))
         .width(360.0)
-        .height(150.0);
+        .height(150.0)
+        .default_x_bounds(59576.0, 59618.0)
 
-        //.default_y_bounds(0.0, 5.0);
+        .default_y_bounds(0.0, 5.0);
 
     let plot2 = Plot::new("candlestick chart- boxchart")
         .legend(Legend::default())
@@ -2009,6 +2136,7 @@ fn test_chart2(ui: &mut egui::Ui) {
         .x_grid_spacer(uniform_grid_spacer(grid_spacer_1d))
         .width(360.0)
         .height(50.0)
+        .default_x_bounds(59576.0, 59618.0)
         .default_y_bounds(0.0, 5.0);
 
     //Check if update is true and if it is update the chart
