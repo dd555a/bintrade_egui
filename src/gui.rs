@@ -57,6 +57,9 @@ struct KlinePlot {
     y_bounds: (f64, f64),
     v_bound:f64,
 
+    tick_highest:f64,
+    tick_lowest:f64,
+
     symbol: String,
 
     hlines: Vec<HLine>,
@@ -65,6 +68,9 @@ struct KlinePlot {
 
     ticks:usize,
     offset:i64,
+    y_offset:i64,
+    y_offset_s:String,
+    y_increment:f64,
     x_bounds_set:bool,
 }
 impl Default for KlinePlot {
@@ -85,13 +91,19 @@ impl Default for KlinePlot {
             v_bound:100.0,
             symbol: "BTCUSDT".to_string(),
 
+            tick_highest:0.0,
+            tick_lowest:0.0,
+
             hlines: vec![],
 
             navi_wicks_s: "30".to_string(),
+            y_offset_s: "3".to_string(),
 
             navi_wicks:30,
             ticks:0,
             offset:0,
+            y_offset:0,
+            y_increment:0.0033,
             x_bounds_set:false,
         }
     }
@@ -159,9 +171,36 @@ impl KlinePlot {
                 };
                 self.offset+= (n_wicks as i64);
             }
-            if ui.button("Reset offset").clicked() {
+            if ui.button("Reset offset x").clicked() {
                 self.offset=0;
-
+            }
+            if ui.button("Y+").clicked() {
+                let res: Result<u16, ParseIntError> = self.y_offset_s.parse();
+                let n_wicks = match res {
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::error!["Parsing error for navigation wicks: {}", e];
+                        NAVI_WICKS_DEFAULT
+                    }
+                };
+                self.y_offset+= (n_wicks as i64);
+            }
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut self.y_offset_s).hint_text("Y IncrementN wicks"),
+            );
+            if ui.button("Y-").clicked() {
+                let res: Result<u16, ParseIntError> = self.y_offset_s.parse();
+                let n_wicks = match res {
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::error!["Parsing error for navigation wicks: {}", e];
+                        NAVI_WICKS_DEFAULT
+                    }
+                };
+                self.y_offset-= (n_wicks as i64);
+            }
+            if ui.button("Reset offset y").clicked() {
+                self.y_offset=0;
             }
         });
         /*
@@ -210,14 +249,14 @@ impl KlinePlot {
         for kline in kline_input.iter() {
             let (_, _, h, l, _, v) = kline;
             if h > &highest {
-                highest = h.clone();
+                highest = *h;
             };
             if v > &v_highest {
                 tracing::trace!["V highest: {:?} \n", v];
-                v_highest = v.clone();
+                v_highest = *v;
             };
             if l < &lowest{
-                lowest= l.clone();
+                lowest= *l;
             };
             tracing::trace!["V: {:?} \n", v];
             let (boxe, bar) = box_element(kline, divider, width);
@@ -228,13 +267,24 @@ impl KlinePlot {
             }else{
                 self.l_tick_boxplot.push(boxe);
                 self.l_tick_barchart.push(bar);
+                if h > &self.tick_highest {
+                    self.tick_highest = *h;
+                };
+                if l < &self.tick_lowest{
+                    self.tick_lowest= *l;
+                };
             };
         };
         if tick==true{
             self.ticks=kline_input.len();
         };
         self.v_bound=v_highest;
-        self.y_bounds = (lowest, highest);
+        let (v_y,u_y)=((1.0+self.y_increment*self.y_offset as f64),(1.0+self.y_increment*self.y_offset as f64));
+        if (self.tick_highest >= highest || self.tick_lowest <= lowest) && tick==true {
+            self.y_bounds = (self.tick_lowest*v_y, self.tick_highest*u_y);
+        }else{
+            self.y_bounds = (lowest*v_y,highest*u_y);
+        };
     }
     fn add_live_single(
         &mut self,
@@ -543,6 +593,7 @@ macro_rules! make_p2{
                 .link_axis(id.clone(), [true,false])
                 .width(560.0)
                 .height(250.0)
+                .custom_x_axes(vec![])
                 .custom_y_axes(vec![])
                 .x_axis_formatter($($formatter)*)
                 //.set_margin_fraction([0.1,0.1].into())
