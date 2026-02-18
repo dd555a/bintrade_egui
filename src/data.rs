@@ -2,6 +2,9 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Tim
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env, path::Path, result::Result as OCResult, str::FromStr};
 
+
+use tokio::sync::oneshot;
+
 use std::sync::{Arc, Mutex};
 use time::{OffsetDateTime, macros::datetime};
 
@@ -653,6 +656,7 @@ pub struct AssetData {
     pub size: usize,
     pub kline_data: HashMap<String, Klines>,
     pub downloaded_assets: Vec<DLAsset>,
+    pub temp_kline:Option<Klines>
 }
 
 impl AssetData {
@@ -675,6 +679,7 @@ impl AssetData {
             size: 0,
             kline_data: HashMap::new(),
             downloaded_assets: vec![],
+            temp_kline:None
         }
     }
     //#[instrument(level="debug")]
@@ -1470,6 +1475,25 @@ impl SQLConn {
     ) -> Result<()> {
         todo!()
     }
+    async fn load_part_data(&mut self, symbol: &str, start_time:&i64, end_time:&i64) -> Result<()> {
+        let s: String = symbol.to_string();
+        let pool = connect_sqlite(format!["{}/Asset{}.db", &self.db_path, &symbol])
+            .await
+            .context("SQL : unable to connect to db")?;
+        let mut klines = Klines::new_empty();
+        for intv in Intv::iter() {
+            let s: &str = intv.to_str();
+            println!("Loading data for:{} interval:{}", symbol, s);
+            let k: Kline = kfrom_sql(&pool, &format!["kline_{}", &s], Some((*start_time, *end_time)))
+                .await
+                .context("SQL : unable to connect to db")?;
+            klines.dat.insert(intv, k);
+        }
+        let ad_a = Arc::clone(&mut self.hist_asset_data);
+        let mut ad = ad_a.lock().expect("Posioned AD mutex! (DATA)");
+        ad.temp_kline=Some(klines);
+        Ok(())
+    }
     #[instrument(level = "debug")]
     async fn load_all_data(&mut self, symbol: &str) -> Result<()> {
         let s: String = symbol.to_string();
@@ -1503,7 +1527,7 @@ impl SQLConn {
         std::fs::remove_file(file_path)?;
         Ok(())
     }
-    pub async fn del_all_assets(&self, asset_symbol: &str) -> Result<()> {
+    pub async fn del_all_assets(&self) -> Result<()> {
         todo!()
     }
     pub async fn dl_single_asset_bin_wrap(&self, asset_symbol: &str) -> Result<()> {
@@ -1743,6 +1767,26 @@ impl SQLConn {
         meta_pool.close().await;
         Ok(())
     }
+    async fn validate_asset_dl(
+        &self,
+        meta_pool: &Pool<Sqlite>,
+        symbol: &str,
+    ) -> Result<bool> {
+        let res: (Option<String>,) = sqlx::query_as(
+            format!(
+                "SELECT 
+    [Asset] FROM assets_dl WHERE Asset = {};",
+                symbol
+            )
+            .as_str(),
+        )
+        .fetch_one(meta_pool)
+        .await?;
+        match res.0 {
+            Some(_) => Ok(true),
+            None => Ok(false),
+        }
+    }
     async fn validate_asset_binance(
         &self,
         meta_pool: &Pool<Sqlite>,
@@ -1768,12 +1812,52 @@ impl SQLConn {
         //each exhcange...or simply append yahoo
     }
     async fn insert_ad_intosql(&self, ad: Arc<Mutex<AssetData>>) {}
-    #[instrument(level = "debug")]
     pub async fn parse_sql_instructs(&mut self, i: SQLInstructs) -> SQLResponse {
         match i {
             SQLInstructs::LoadHistData { symbol: ref s } => {
                 log::info!("Loading historical data for:{}", s);
                 let resp = match self.load_all_data(&s).await {
+                    Ok(_) => SQLResponse::Success,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!(
+                            "{}",
+                            anyhow!["{:?} SQL::load_all_data : {:?}", i, e.context(err_ctx)]
+                        );
+                        SQLResponse::Failure((err_string, GeneralError::Generic))
+                    }
+                };
+                resp
+            }
+            SQLInstructs::LoadHistDataPart { symbol: ref s, start: ref st, end: ref et} => {
+                log::info!("Loading historical data for:{}", s);
+
+                let meta_pool = SqlitePool::connect(&metadata_db_path)
+                    .await
+                    .context(anyhow!("SQL::Unable to metadata connect to db"));
+                let meta_pool = match meta_pool{
+                    Ok(pool)=>pool,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!("{}", err_string);
+                        return SQLResponse::Failure((err_string, GeneralError::Generic));
+                    }
+                };
+                let res=self.validate_asset_dl(&meta_pool, s).await;
+                let valid=match res{
+                    Ok(v)=>v,
+                    Err(e)=>{
+                        let err_string = format!["{}", e];
+                        log::error!("{}", err_string);
+                        return SQLResponse::Failure((err_string, GeneralError::Generic));
+                    }
+                };
+                if valid==false{
+                    let err_string="ERROR:Asset not in asset list!".to_string();
+                    log::error!("{}", err_string);
+                    return SQLResponse::Failure((err_string, GeneralError::Generic));
+                };
+                let resp = match self.load_part_data(&s, &st, &et).await {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
@@ -1805,13 +1889,38 @@ impl SQLConn {
                 todo!()
             }
             SQLInstructs::None => {
-                todo!()
+                SQLResponse::None
             }
             SQLInstructs::DelAsset { symbol: ref symbol } => {
-                todo!()
+                let res=self.del_single_asset(symbol).await;
+                //TODO - clean this up and turn bellow into a macro
+                let resp = match res {
+                    Ok(_) => SQLResponse::Success,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!(
+                            "{}",
+                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                        );
+                        SQLResponse::Failure((err_string, GeneralError::Generic))
+                    }
+                };
+                resp
             }
             SQLInstructs::DelAll => {
-                todo!()
+                let res=self.del_all_assets().await;
+                let resp = match res {
+                    Ok(_) => SQLResponse::Success,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!(
+                            "{}",
+                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                        );
+                        SQLResponse::Failure((err_string, GeneralError::Generic))
+                    }
+                };
+                resp
             }
             SQLInstructs::UpdateDataBinance { symbol: ref symbol } => {
                 let res = self.dl_single_asset_bin_wrap(&symbol).await;

@@ -13,6 +13,7 @@ use anyhow::{Context, Result, anyhow};
 use std::result::Result as OCResult;
 
 use tokio::sync::watch;
+use tokio::sync::oneshot;
 
 use eframe::egui::{self, DragValue, Event, Vec2};
 
@@ -66,6 +67,9 @@ struct KlinePlot {
     navi_wicks_s:String,
     navi_wicks:usize,
 
+
+    get_data_timestamp:Option<i64>,
+
     ticks:usize,
     offset:i64,
     y_offset:i64,
@@ -94,16 +98,18 @@ impl Default for KlinePlot {
             tick_highest:0.0,
             tick_lowest:0.0,
 
+            get_data_timestamp:None,
+
             hlines: vec![],
 
             navi_wicks_s: "30".to_string(),
-            y_offset_s: "3".to_string(),
+            y_offset_s: "10".to_string(),
 
             navi_wicks:30,
             ticks:0,
             offset:0,
             y_offset:0,
-            y_increment:0.0033,
+            y_increment:0.001,
             x_bounds_set:false,
         }
     }
@@ -213,6 +219,19 @@ impl KlinePlot {
         let v_higher = self.v_bound;
         make_plot(&self.name, self.intv, y_lower, y_higher, x_lower, x_higher, v_higher)
     }
+    fn add_hist(&mut self, klines:&Klines){
+        let res=klines.dat.get(&self.intv);
+        match res{
+            Some(kline)=>{
+                let (divider,width) = get_chart_params(&self.intv);
+                self.add_live(&kline.kline, &divider, &width, false )
+            }
+            None =>{
+                tracing::info!["Kline empty for intv:{}", &self.intv.to_str()]
+
+            }
+        }
+    }
     fn add_live(
         &mut self,
         kline_input: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
@@ -236,10 +255,13 @@ impl KlinePlot {
             kline_input[0].0
         };
         let t1 = kline_input[kline_input.len() - 1].0;
+        if tick==false{
+            self.get_data_timestamp=Some(t1.timestamp());
+        };
         if self.x_bounds_set==false{
             let w=(self.intv.to_sec() as f64)*(CHART_FORWARD as f64 );
             let u=(self.intv.to_sec() as f64)*((self.ticks as f64)+(self.offset as f64));
-            tracing::debug!["ticks count:{}", self.ticks];
+            tracing::trace!["ticks count:{}", self.ticks];
             self.x_bounds = (
                 ((t0.timestamp() as f64)+u) / self.chart_params.0,
                 ((t1.timestamp() as f64)+w+u) / self.chart_params.0,
@@ -247,7 +269,7 @@ impl KlinePlot {
             self.x_bounds_set==true;
         };
         for kline in kline_input.iter() {
-            let (_, _, h, l, _, v) = kline;
+            let (t, _, h, l, _, v) = kline;
             if h > &highest {
                 highest = *h;
             };
@@ -265,8 +287,17 @@ impl KlinePlot {
                 self.l_boxplot.push(boxe);
                 self.l_barchart.push(bar);
             }else{
-                self.l_tick_boxplot.push(boxe);
-                self.l_tick_barchart.push(bar);
+                if let Some(init_timestamp) = self.get_data_timestamp{
+                    if t.timestamp() == init_timestamp{
+
+                    }else{
+                        self.l_tick_boxplot.push(boxe);
+                        self.l_tick_barchart.push(bar);
+                    };
+                }else{
+                    self.l_tick_boxplot.push(boxe);
+                    self.l_tick_barchart.push(bar);
+                };
                 if h > &self.tick_highest {
                     self.tick_highest = *h;
                 };
@@ -369,7 +400,7 @@ impl KlinePlot {
         }
         Ok(())
     }
-    fn live_from_sql() { //TODO load a designated period directly from sql... maybe better...
+    fn live_from_sql() { 
     }
     fn live_live_from_ad(
         &mut self,
@@ -2382,7 +2413,11 @@ struct HistPlot {
     trade_wicks_s: String,
 
     pub trade_time: i64,
+    pub att_klines:Option<Klines>,
+    pub part_loaded:bool,
 }
+
+use crate::data::Klines;
 
 impl Default for HistPlot {
     fn default() -> Self {
@@ -2406,6 +2441,8 @@ impl Default for HistPlot {
             trade_wicks_s: "20".to_string(),
 
             trade_time: 0,
+            att_klines:None,
+            part_loaded:false
         }
     }
 }
@@ -2767,6 +2804,11 @@ impl HistPlot {
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
     ) {
+        if hist_plot.part_loaded==true{
+            if let Some(ref klines)= hist_plot.att_klines{
+                hist_plot.kline_plot.add_hist(&klines);
+            };
+        };
         hist_plot.kline_plot.show(ui, plot_extras);
 
         ui.end_row();
@@ -2797,18 +2839,21 @@ impl HistPlot {
                         .hint_text("Search for loaded asset"),
                 );
                 if ui.button("Show").clicked() {
-                    let s = &hist_plot.search_string.clone();
-                    let ad = hist_plot
-                        .hist_asset_data
-                        .lock()
-                        .expect("Posoned mutex! - Hist asset data");
-                    let i = hist_plot.intv;
-                    let time =
-                        chrono::NaiveTime::from_hms_milli_opt(0, 0, 0, 0).expect("Really?...");
-                    let res = hist_plot.kline_plot.live_from_ad(
-                        &ad, s, i, 1_000,
-                        None, //hist_plot.picked_date.and_time(time), hist_plot.picked_date_end.and_time(time))
-                    );
+                    if hist_plot.part_loaded==false{
+                        let s = &hist_plot.search_string.clone();
+                        let ad = hist_plot
+                            .hist_asset_data
+                            .lock()
+                            .expect("Posoned mutex! - Hist asset data");
+                        let i = hist_plot.intv;
+                        let time =
+                            chrono::NaiveTime::from_hms_milli_opt(0, 0, 0, 0).expect("Really?...");
+                        let res = hist_plot.kline_plot.live_from_ad(
+                            &ad, s, i, 1_000,
+                            None, //hist_plot.picked_date.and_time(time), hist_plot.picked_date_end.and_time(time))
+                        );
+
+                    };
                 }
             });
         egui::Grid::new("HistLoad").striped(true).show(ui, |ui| {
@@ -2816,37 +2861,35 @@ impl HistPlot {
                 egui::TextEdit::singleline(&mut hist_plot.search_load_string)
                     .hint_text("Asset to Load"),
             );
-            if ui.button("Load Asset").clicked() {
+            if ui.button("Load Asset - all data").clicked() {
                 let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistData {
                     symbol: hist_plot.search_load_string.clone(),
                 });
                 cli_chan.send(msg);
             }
+            if ui.button("Load Asset - part data").clicked() {
+                let st=match hist_plot.picked_date.and_hms_opt(0, 0, 0){
+                    Some(st)=>st,
+                    None => {
+                        tracing::error!["GUI: could not parse picked date!"];
+                        chrono::NaiveDateTime::default()
+                    }
+                }.timestamp_millis();
+                let et=match hist_plot.picked_date_end.and_hms_opt(0, 0, 0){
+                    Some(st)=>st,
+                    None => {
+                        tracing::error!["GUI: could not parse picked date!"];
+                        chrono::NaiveDateTime::default()
+                    }
+                }.timestamp_millis();
+                let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart {
+                    symbol: hist_plot.search_load_string.clone(), start:st, end:et
+                });
+                hist_plot.part_loaded=true;
+                cli_chan.send(msg);
+            }
         });
         egui::Grid::new("Hplot forwards:").show(ui, |ui| {
-            if ui.button("<< Navi").clicked() {
-                let res: Result<u16, ParseIntError> = hist_plot.navi_wicks_s.parse();
-                let n_wicks = match res {
-                    Ok(n) => n,
-                    Err(e) => {
-                        tracing::error!["Parsing error for navigation wicks: {}", e];
-                        0
-                    }
-                };
-            }
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut hist_plot.navi_wicks_s).hint_text("Navi N wicks"),
-            );
-            if ui.button("Navi >>").clicked() {
-                let res: Result<u16, ParseIntError> = hist_plot.navi_wicks_s.parse();
-                let n_wicks = match res {
-                    Ok(n) => n,
-                    Err(e) => {
-                        tracing::error!["Parsing error for navigation wicks: {}", e];
-                        0
-                    }
-                };
-            }
             if ui.button("Trade >>").clicked() {
                 let res: Result<u16, ParseIntError> = hist_plot.trade_wicks_s.parse();
                 let n_wicks = match res {

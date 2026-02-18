@@ -64,6 +64,9 @@ pub enum SQLInstructs {
     LoadHistData {
         symbol: String,
     },
+    LoadHistDataPart {
+        symbol: String, start:i64, end:i64, 
+    },
     UnloadHistData {
         symbol: String,
     },
@@ -89,6 +92,7 @@ impl SQLInstructs {
         match &self {
             SQLInstructs::None => "SQLInstructs: None",
             SQLInstructs::LoadHistData { symbol: _ } => "SQLInstructs: Load Hist Data",
+            SQLInstructs::LoadHistDataPart { symbol: _, start:_, end:_ } => "SQLInstructs: Load Hist Data partially",
             SQLInstructs::UnloadHistData { symbol: _ } => "SQLInstructs: Unload Hist Data",
             SQLInstructs::LoadTradeRecord { id: _ } => "SQLInstructs: Load Trade Record",
             SQLInstructs::UpdateDataBinance { symbol: _ } => "SQLInstructs: Update data binance",
