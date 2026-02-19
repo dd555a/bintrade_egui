@@ -1016,6 +1016,8 @@ enum PaneType {
     LiveTrade,
     HistTrade,
     ManageData,
+    Account,
+    Settings,
 }
 impl fmt::Display for PaneType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1023,6 +1025,8 @@ impl fmt::Display for PaneType {
             PaneType::LiveTrade => write!(f, "Live Trade"),
             PaneType::HistTrade => write!(f, "Hist Trade"),
             PaneType::ManageData => write!(f, "Manage Data"),
+            PaneType::Account=> write!(f, "Account"),
+            PaneType::Settings=> write!(f, "Settings"),
             PaneType::None => write!(f, "None"),
         }
     }
@@ -1174,6 +1178,22 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 DataManager::show(&mut data_manager, chan, ui);
             }
+            PaneType::Account => {
+                let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+
+                let account_l = self.account.clone();
+                let mut account = account_l.lock().expect("Data manager mutex posoned!");
+
+                Account::show(&mut account, chan, ui);
+            }
+            PaneType::Settings => {
+                let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+
+                let settings_l = self.settings.clone();
+                let mut settings = settings_l.lock().expect("Data manager mutex posoned!");
+
+                Settings::show(&mut settings, chan, ui);
+            }
         };
         return response;
     }
@@ -1195,7 +1215,15 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                             self.hist_plot.remove(&pane.nr);
                             self.man_orders.remove(&pane.nr);
                         }
-                        PaneType::ManageData => {}
+                        PaneType::ManageData => {
+
+                        }
+                        PaneType::Account=> {
+
+                        }
+                        PaneType::Settings=> {
+
+                        }
                     }
                     let tab_title = self.tab_title_for_pane(pane);
                     log::debug!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
@@ -1274,6 +1302,8 @@ pub struct DesktopApp {
     //Non-copy windows
     live_plot: Rc<Mutex<LivePlot>>,
     data_manager: Rc<Mutex<DataManager>>,
+    account: Rc<Mutex<Account>>,
+    settings: Rc<Mutex<Settings>>,
 
     lp_chan_recv: watch::Receiver<f64>,
 
@@ -1380,6 +1410,9 @@ impl Default for DesktopApp {
             live_plot: Rc::new(Mutex::new(LivePlot::default())),
             data_manager: Rc::new(Mutex::new(DataManager::new(hist_asset_data))),
 
+            account: Rc::new(Mutex::new(Account::new())),
+            settings: Rc::new(Mutex::new(Settings::new())),
+
             //Channels
             send_to_cli: None,
             recv_from_cli: None,
@@ -1429,10 +1462,22 @@ impl eframe::App for DesktopApp {
             ui.heading("Bintrade_egui 0.1.0");
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    if ui.button("Load settings").clicked() {
+                        //TODO - save settings  to file and load them
+                    }
+                    if ui.button("Save settings").clicked() {
+                    }
                     if ui.button("Quit").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        //TODO cose the rest of the program from here by sending cancel token and
-                        //saving everything
+                        let chan=match self.send_to_cli.clone(){
+                            Some(chan)=>{
+                                let msg=ClientInstruct::Terminate;
+                                chan.send(msg);
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
+                            None => {
+                                tracing::error!["Gui send to cliL None"]
+                            }
+                        };
                     }
                 });
                 ui.add_space(16.0);
@@ -1482,6 +1527,20 @@ impl eframe::App for DesktopApp {
                                 new_child = tree.tiles.insert_pane(Pane::new(
                                     self.pane_number + 1,
                                     PaneType::ManageData,
+                                ));
+                                self.pane_number += 1;
+                            }
+                            PaneType::Account => {
+                                new_child = tree.tiles.insert_pane(Pane::new(
+                                    self.pane_number + 1,
+                                    PaneType::Account,
+                                ));
+                                self.pane_number += 1;
+                            }
+                            PaneType::Settings => {
+                                new_child = tree.tiles.insert_pane(Pane::new(
+                                    self.pane_number + 1,
+                                    PaneType::Settings,
                                 ));
                                 self.pane_number += 1;
                             }
@@ -2452,6 +2511,58 @@ use crate::data::DLAsset;
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 #[derive(Dbg, Default)]
+struct Account{
+}
+
+impl Account{
+    fn new() -> Self {
+        Account{
+            ..Default::default()
+        }
+    }
+    fn show(
+        account: &mut Account,
+        cli_chan: watch::Sender<ClientInstruct>,
+        ui: &mut egui::Ui,
+    ) {
+        egui::Grid::new("Account")
+            .striped(true)
+            .min_col_width(30.0)
+            .show(ui, |ui| {
+                if ui.button("Refresh balances").clicked() {
+                };
+            });
+    }
+}
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+#[derive(Dbg, Default)]
+struct Settings{
+}
+impl Settings{
+    fn new() -> Self {
+        Settings{
+            ..Default::default()
+        }
+    }
+    fn show(
+        settings: &mut Settings,
+        cli_chan: watch::Sender<ClientInstruct>,
+        ui: &mut egui::Ui,
+    ) {
+        egui::Grid::new("Account")
+            .striped(true)
+            .min_col_width(30.0)
+            .show(ui, |ui| {
+                if ui.button("Settings").clicked() {
+                };
+            });
+    }
+}
+
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+#[derive(Dbg, Default)]
 struct DataManager {
     coin_list: Vec<String>,            //load Assetlist (All binance assets)
     downloaded_coin_list: Vec<String>, //load AssetlistDL (All binance assets)
@@ -2824,8 +2935,11 @@ impl HistPlot {
                     });
                 ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.search_string)
-                        .hint_text("Enter date or pick period"),
+                        .hint_text("Search for asset"),
                 );
+                if ui.button("Search").clicked() {
+                    todo!()
+                }
                 ui.add(
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date)
                         .id_salt("hist_start"),
@@ -2834,6 +2948,34 @@ impl HistPlot {
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
                         .id_salt("hist_end"),
                 );
+                if ui.button("Load Asset - part data").clicked() {
+                    let st=match hist_plot.picked_date.and_hms_opt(0, 0, 0){
+                        Some(st)=>st,
+                        None => {
+                            tracing::error!["GUI: could not parse picked date!"];
+                            chrono::NaiveDateTime::default()
+                        }
+                    }.timestamp_millis();
+                    let et=match hist_plot.picked_date_end.and_hms_opt(0, 0, 0){
+                        Some(st)=>st,
+                        None => {
+                            tracing::error!["GUI: could not parse picked date!"];
+                            chrono::NaiveDateTime::default()
+                        }
+                    }.timestamp_millis();
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart {
+                        symbol: hist_plot.search_load_string.clone(), start:st, end:et
+                    });
+                    hist_plot.part_loaded=true;
+                    cli_chan.send(msg);
+                }
+                if ui.button("Load Asset - all data").clicked() {
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistData {
+                        symbol: hist_plot.search_load_string.clone(),
+                    });
+                    cli_chan.send(msg);
+                }
+                ui.end_row();
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.search_string)
                         .hint_text("Search for loaded asset"),
@@ -2856,39 +2998,6 @@ impl HistPlot {
                     };
                 }
             });
-        egui::Grid::new("HistLoad").striped(true).show(ui, |ui| {
-            let search_load = ui.add(
-                egui::TextEdit::singleline(&mut hist_plot.search_load_string)
-                    .hint_text("Asset to Load"),
-            );
-            if ui.button("Load Asset - all data").clicked() {
-                let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistData {
-                    symbol: hist_plot.search_load_string.clone(),
-                });
-                cli_chan.send(msg);
-            }
-            if ui.button("Load Asset - part data").clicked() {
-                let st=match hist_plot.picked_date.and_hms_opt(0, 0, 0){
-                    Some(st)=>st,
-                    None => {
-                        tracing::error!["GUI: could not parse picked date!"];
-                        chrono::NaiveDateTime::default()
-                    }
-                }.timestamp_millis();
-                let et=match hist_plot.picked_date_end.and_hms_opt(0, 0, 0){
-                    Some(st)=>st,
-                    None => {
-                        tracing::error!["GUI: could not parse picked date!"];
-                        chrono::NaiveDateTime::default()
-                    }
-                }.timestamp_millis();
-                let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart {
-                    symbol: hist_plot.search_load_string.clone(), start:st, end:et
-                });
-                hist_plot.part_loaded=true;
-                cli_chan.send(msg);
-            }
-        });
         egui::Grid::new("Hplot forwards:").show(ui, |ui| {
             if ui.button("Trade >>").clicked() {
                 let res: Result<u16, ParseIntError> = hist_plot.trade_wicks_s.parse();
