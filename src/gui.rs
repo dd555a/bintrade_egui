@@ -136,17 +136,19 @@ impl KlinePlot {
         ui: &mut egui::Ui,
         plot_extras: &PlotExtras,
         live_ad: Arc<Mutex<AssetData>>,
-        collected_data: &HashMap<String, SymbolOutput>,
+        collected_data: Option<&HashMap<String, SymbolOutput>>,
     ) -> Result<()> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
 
         let chart_ad_id = ad.id.clone();
 
         let symbol = self.symbol.clone();
-        if let Some(data) = collected_data.get(&symbol) {
-            tracing::trace!["Collected data non empty"];
-            //tracing::debug!["Show live SOME for {}, chart_ad_id:{}", &symbol, &chart_ad_id];
-            self.live_live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None, &data);
+        if let Some(col_data)=collected_data{
+            if let Some(data) = col_data.get(&symbol) {
+                tracing::trace!["Collected data non empty"];
+                //tracing::debug!["Show live SOME for {}, chart_ad_id:{}", &symbol, &chart_ad_id];
+                self.live_live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None, &data);
+            };
         };
         self.live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None);
         self.show(ui, plot_extras);
@@ -1146,7 +1148,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 //let hist_trading=&mut h_plot.hist_trade;
 
-                HistPlot::show(&mut h_plot, &p_extras, chan, ui);
+                HistPlot::show(&mut h_plot, &p_extras, chan, self.hist_asset_data.clone(), ui);
 
                 let mut man_orders = self
                     .man_orders
@@ -2390,7 +2392,7 @@ impl LivePlot {
             ui,
             plot_extras,
             live_plot.live_asset_data.clone(),
-            collect_data,
+            Some(collect_data),
         );
 
         tracing::trace!["\x1b[36m Collected Data\x1b[0m: {:?}", &collect_data];
@@ -2398,7 +2400,7 @@ impl LivePlot {
         ui.end_row();
         if live_plot.intv != live_plot.last_intv{
             live_plot.reload=true;
-            tracing::debug!["\x1b[36m Live chart reloaded\x1b[0m: "];
+            tracing::debug!["\x1b[36m live chart reloaded\x1b[0m: "];
             
             live_plot.last_intv=live_plot.intv;
             live_plot.kline_plot.intv=live_plot.intv;
@@ -2457,9 +2459,13 @@ struct HistPlot {
     hist_asset_data: Arc<Mutex<AssetData>>,
     kline_plot: KlinePlot,
     search_string: String,
+    loaded_search_string: String,
+    unload_search_string: String,
+
     search_date: String,
     search_load_string: String,
     intv: Intv,
+    last_intv: Intv,
     picked_date: chrono::NaiveDate,
     picked_date_end: chrono::NaiveDate,
     hist_extras: Option<HistExtras>,
@@ -2478,18 +2484,30 @@ struct HistPlot {
 
 use crate::data::Klines;
 
+use std::time::{SystemTime, UNIX_EPOCH};
+use chrono::Datelike;
+
 impl Default for HistPlot {
     fn default() -> Self {
+        let curr_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Unable to get unix timestamp!").as_millis() as i64;
+        let curr_date=chrono::NaiveDateTime::from_timestamp_millis(curr_timestamp).expect("Unable to parse current time").date();
+        let current_year=chrono::Utc::now().year() as i32;
         Self {
             kline_plot: KlinePlot::default(),
             hist_asset_data: Arc::new(Mutex::new(AssetData::new(666))),
 
             search_string: "".to_string(),
             search_date: "".to_string(),
+            unload_search_string: "".to_string(),
+            loaded_search_string: "".to_string(),
             search_load_string: "".to_string(),
+
             intv: Intv::Min1,
-            picked_date: chrono::NaiveDate::from_ymd(2024, 10, 1),
-            picked_date_end: chrono::NaiveDate::from_ymd(2025, 10, 10),
+            last_intv: Intv::Min1,
+
+            picked_date: chrono::NaiveDate::from_ymd(current_year-1, 1, 1),
+            picked_date_end: curr_date,
+
             hist_extras: None,
             hist_trade: HistTrade::default(),
 
@@ -2512,6 +2530,34 @@ use crate::data::DLAsset;
 #[cfg_attr(feature = "serde", serde(default))]
 #[derive(Dbg, Default)]
 struct Account{
+    pub enc_pub_key:Vec<u8>,
+    pub enc_priv_key:Vec<u8>,
+
+    api_key_enter_string:String,
+    priv_api_key_enter_string:String,
+    
+    key_status:KeysStatus,
+
+    balances:Vec<(String,f64)>
+}
+
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+#[derive(Dbg, Default)]
+pub enum KeysStatus{
+    #[default]
+    NotAdded,
+    Invalid,
+    Valid
+}
+impl KeysStatus{
+    fn to_str(&self)->String{
+        match self{
+            KeysStatus::NotAdded=> "Keys not added".to_string(),
+            KeysStatus::Invalid=> "Keys invalid".to_string(),
+            KeysStatus::Valid=> "Keys valid".to_string(),
+        }
+    }
 }
 
 impl Account{
@@ -2529,20 +2575,126 @@ impl Account{
             .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format![
+                        "BINANCE KEYS",
+                    ])
+                    .color(Color32::YELLOW),
+                );
+                ui.end_row();
+                ui.add_sized(
+                    egui::vec2(400.0, 20.0),
+                    egui::TextEdit::singleline(&mut account.api_key_enter_string)
+                        .hint_text("pub_key"),
+                );
+                ui.end_row();
+                ui.add_sized(
+                    egui::vec2(400.0, 20.0),
+                    egui::TextEdit::singleline(&mut account.priv_api_key_enter_string)
+                        .hint_text("priv_key"),
+                );
+                ui.end_row();
+                if ui.button("Add keys").clicked() {
+                    //TODO - add a function that stores keys securely here
+                    account.api_key_enter_string="".to_string();
+                    account.priv_api_key_enter_string="".to_string();
+
+                };
+                ui.end_row();
+                if ui.button("Remove keys").clicked() {
+                    //TODO - add a function that stores keys securely here
+                    account.api_key_enter_string="".to_string();
+                    account.priv_api_key_enter_string="".to_string();
+
+                };
+                //TODO get return status from validate_keys functon here and display it as such.
+                //Save encrypted keys and settings in a savefile, that can be opened with password
+                ui.end_row();
+                match account.key_status{
+                    KeysStatus::NotAdded=> {
+                        ui.label(
+                            RichText::new(format![
+                                "Add binance API keys",
+                            ])
+                            .color(Color32::ORANGE),
+                        );
+                    }
+                    KeysStatus::Invalid=> {
+                        ui.label(
+                            RichText::new(format![
+                                "Keys Invalid",
+                            ])
+                            .color(Color32::RED),
+                        );
+
+                    }
+                    KeysStatus::Valid=> {
+                        ui.label(
+                            RichText::new(format![
+                                "Keys Valid",
+                            ])
+                            .color(Color32::RED),
+                        );
+
+
+                    }
+                };
+            });
+        ui.vertical(|ui| {
+            let available_height = ui.available_height();
+            let mut table = TableBuilder::new(ui)
+                .resizable(true)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .min_scrolled_height(0.0)
+                .max_scroll_height(available_height);
+            table
+                .header(20.0, |mut header| {
+                    header.col(|ui| {
+                        ui.strong("Asset");
+                    });
+                    header.col(|ui| {
+                        ui.strong("BalanceExchange");
+                    });
+                })
+                .body(|mut body| {
+                    for (asset, balance) in account.balances.iter() {
+                        let row_height = 18.0;
+                        body.row(row_height, |mut row| {
+                            row.col(|ui| {
+                                ui.label(format!["{}", asset]);
+                            });
+                            row.col(|ui| {
+                                ui.label(format!["{}", balance]);
+                            });
+                        });
+                    }
+                });
+        });
+        egui::Grid::new("Account_balances")
+            .striped(true)
+            .min_col_width(30.0)
+            .show(ui, |ui| {
                 if ui.button("Refresh balances").clicked() {
+                    //TODO if api keys installed call get_assets kind of function
+
                 };
             });
     }
 }
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "serde", serde(default))]
-#[derive(Dbg, Default)]
+#[derive(Dbg )]
 struct Settings{
+    default_asset:String,
+    default_intv:Intv
 }
 impl Settings{
     fn new() -> Self {
         Settings{
-            ..Default::default()
+            default_asset:"BTCUSDT".to_string(),
+            default_intv:Intv::Min1
         }
     }
     fn show(
@@ -2913,6 +3065,7 @@ impl HistPlot {
         hist_plot: &mut HistPlot,
         plot_extras: &PlotExtras,
         cli_chan: watch::Sender<ClientInstruct>,
+        hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
     ) {
         if hist_plot.part_loaded==true{
@@ -2920,7 +3073,13 @@ impl HistPlot {
                 hist_plot.kline_plot.add_hist(&klines);
             };
         };
-        hist_plot.kline_plot.show(ui, plot_extras);
+        hist_plot.kline_plot.show_live(ui, plot_extras, hist_ad, None);
+
+        if hist_plot.intv != hist_plot.last_intv{
+            hist_plot.last_intv=hist_plot.intv;
+            hist_plot.kline_plot.intv=hist_plot.intv;
+        };
+
 
         ui.end_row();
         egui::Grid::new("Hplot order assets:")
@@ -2934,12 +3093,16 @@ impl HistPlot {
                         }
                     });
                 ui.add(
-                    egui::TextEdit::singleline(&mut hist_plot.search_string)
+                    egui::TextEdit::singleline(&mut hist_plot.search_load_string)
                         .hint_text("Search for asset"),
                 );
+                /*
                 if ui.button("Search").clicked() {
-                    todo!()
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistFull{
+                        symbol: hist_plot.search_load_string.clone(), start:st, end:et
+                    });
                 }
+                 * */
                 ui.add(
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date)
                         .id_salt("hist_start"),
@@ -2948,6 +3111,7 @@ impl HistPlot {
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
                         .id_salt("hist_end"),
                 );
+                ui.end_row();
                 if ui.button("Load Asset - part data").clicked() {
                     let st=match hist_plot.picked_date.and_hms_opt(0, 0, 0){
                         Some(st)=>st,
@@ -2970,33 +3134,72 @@ impl HistPlot {
                     cli_chan.send(msg);
                 }
                 if ui.button("Load Asset - all data").clicked() {
-                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistData {
-                        symbol: hist_plot.search_load_string.clone(),
-                    });
-                    cli_chan.send(msg);
+                    let s=hist_plot.search_load_string.clone();
+                    let ad = hist_plot
+                        .hist_asset_data
+                        .lock()
+                        .expect("Posoned mutex! - Hist asset data");
+
+                    let res=ad.kline_data.get(&s.clone());
+                    match res{
+                        Some(_) => {
+                            tracing::error!["Data for asset {} already loaded!", &s];
+                        },
+                        None => {
+                            let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistData {
+                                symbol: hist_plot.search_load_string.clone(),
+                            });
+                            cli_chan.send(msg);
+                        }
+                    };
+
                 }
                 ui.end_row();
+                /*
                 let search = ui.add(
-                    egui::TextEdit::singleline(&mut hist_plot.search_string)
+                    egui::TextEdit::singleline(&mut hist_plot.loaded_search_string)
                         .hint_text("Search for loaded asset"),
                 );
                 if ui.button("Show").clicked() {
                     if hist_plot.part_loaded==false{
-                        let s = &hist_plot.search_string.clone();
+                        tracing::debug!["Part loaded: false show ran!"];
+                        let s = &hist_plot.loaded_search_string.clone();
                         let ad = hist_plot
                             .hist_asset_data
                             .lock()
                             .expect("Posoned mutex! - Hist asset data");
-                        let i = hist_plot.intv;
-                        let time =
-                            chrono::NaiveTime::from_hms_milli_opt(0, 0, 0, 0).expect("Really?...");
+                        let i = hist_plot.kline_plot.intv;
                         let res = hist_plot.kline_plot.live_from_ad(
                             &ad, s, i, 1_000,
                             None, //hist_plot.picked_date.and_time(time), hist_plot.picked_date_end.and_time(time))
                         );
-
+                        match res{
+                            Ok(_)=>{},
+                            Err(e)=>tracing::error!["Load all data error: {}",e],
+                        }
                     };
                 }
+                 * */
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut hist_plot.unload_search_string)
+                        .hint_text("Unload asset"),
+                );
+                if ui.button("Unload").clicked() {
+                        let s = &hist_plot.unload_search_string.clone();
+                        let mut ad = hist_plot
+                            .hist_asset_data
+                            .lock()
+                            .expect("Posoned mutex! - Hist asset data");
+                        let res=ad.kline_data.get(&s.clone());
+                        match res{
+                            Some(_) => {
+                                tracing::info!["Remove data for asset {}", &s];
+                                ad.kline_data.remove(s);
+                            },
+                            None => tracing::error!["Data for asset {} not loaded!", &s],
+                        };
+
+                };
             });
         egui::Grid::new("Hplot forwards:").show(ui, |ui| {
             if ui.button("Trade >>").clicked() {

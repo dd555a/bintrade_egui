@@ -1233,7 +1233,7 @@ impl Default for SQLConn {
     fn default() -> Self {
         Self {
             asset_dbs: HashMap::new(),
-            db_path: "./src/databases".to_string(),
+            db_path: "./databases".to_string(),
 
             hist_asset_data: Arc::new(Mutex::new(AssetData::new(666))),
         }
@@ -1494,7 +1494,7 @@ impl SQLConn {
         ad.temp_kline=Some(klines);
         Ok(())
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn load_all_data(&mut self, symbol: &str) -> Result<()> {
         let s: String = symbol.to_string();
         let pool = connect_sqlite(format!["{}/Asset{}.db", &self.db_path, &symbol])
@@ -1772,10 +1772,11 @@ impl SQLConn {
         meta_pool: &Pool<Sqlite>,
         symbol: &str,
     ) -> Result<bool> {
+
         let res: (Option<String>,) = sqlx::query_as(
             format!(
                 "SELECT 
-    [Asset] FROM assets_dl WHERE Asset = {};",
+    [Asset] FROM assets_dl WHERE [Asset] = '{}';",
                 symbol
             )
             .as_str(),
@@ -1816,6 +1817,33 @@ impl SQLConn {
         match i {
             SQLInstructs::LoadHistData { symbol: ref s } => {
                 log::info!("Loading historical data for:{}", s);
+                let meta_pool = SqlitePool::connect(&metadata_db_path)
+                    .await
+                    .context(anyhow!("SQL::Unable to metadata connect to db"));
+                let meta_pool = match meta_pool{
+                    Ok(pool)=>pool,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!("{}", err_string);
+                        return SQLResponse::Failure((err_string, GeneralError::Generic));
+                    }
+                };
+
+                let res=self.validate_asset_dl(&meta_pool, s).await;
+                let valid=match res{
+                    Ok(v)=>v,
+                    Err(e)=>{
+                        let err_string = format!["{}", e];
+                        log::error!("Asset validation failed {}", err_string);
+                        return SQLResponse::Failure((err_string, GeneralError::Generic));
+                    }
+                };
+                if valid==false{
+                    let err_string="ERROR:Asset not in asset list!".to_string();
+                    log::error!("{}", err_string);
+                    return SQLResponse::Failure((err_string, GeneralError::Generic));
+                };
+
                 let resp = match self.load_all_data(&s).await {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
@@ -2000,7 +2028,7 @@ mod tests {
         println!("--------------------------------------");
         let mut asset_data = AssetData::new(333);
         let symb: &str = "BTCUSDT";
-        let db_path: &str = "./src/databases";
+        let db_path: &str = "./databases";
         let p = connect_sqlite(format!["{}/Asset{}.db", &db_path, &symb])
             .await
             .unwrap();
