@@ -105,14 +105,14 @@ async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Re
         None => {
             log::info!("Load all data:{}", intv);
             &format!(
-                "SELECT [Open Time], Open, High, Low, Close, Volume  FROM {};",
+                "SELECT [Timestamp MS], Open, High, Low, Close, Volume  FROM {};",
                 intv
             )
         }
         Some((ts, te)) => {
             log::info!("Load data between {} and {}", ts, te);
             &format!(
-                "SELECT [Open Time], Open, High, Low, Close, Volume  FROM {} WHERE {} <= [Timestamp ms] <= {};",
+                "SELECT [Timestamp MS], Open, High, Low, Close, Volume  FROM {} WHERE {} <= [Timestamp ms] <= {};",
                 intv, ts, te,
             )
         }
@@ -386,6 +386,25 @@ impl Intv {
             Intv::Month1 => {
                 self.month_to_timedelta(DateTime::naive_local(&chrono::offset::Utc::now()))
             }
+        }
+    }
+    pub fn to_view_window(&self) -> usize {
+        match &self {
+            Intv::Min1 =>   1440,
+            Intv::Min3 =>   1440,
+            Intv::Min5 =>   1440,
+            Intv::Min15 =>  1440,
+            Intv::Min30 =>  775,
+            Intv::Hour1 =>  775,
+            Intv::Hour2 =>  775,
+            Intv::Hour4 =>  775,
+            Intv::Hour6 =>  775,
+            Intv::Hour8 =>  775,
+            Intv::Hour12 => 775,
+            Intv::Day1 =>   250,
+            Intv::Day3 =>   300,
+            Intv::Week1 =>  300,
+            Intv::Month1 => 300,
         }
     }
     pub fn month_to_timedelta(&self, from_reference: NaiveDateTime) -> chrono::TimeDelta {
@@ -1507,6 +1526,8 @@ impl SQLConn {
             let k: Kline = kfrom_sql(&pool, &format!["kline_{}", &s], None)
                 .await
                 .context("SQL : unable to connect to db")?;
+
+            tracing::debug!["LOAD ALL DATA - START:{} END:{}",k.kline[0].0, k.kline[k.kline.len()-1].0];
             klines.dat.insert(intv, k);
         }
         let ad_a = Arc::clone(&mut self.hist_asset_data);
@@ -1652,13 +1673,14 @@ impl SQLConn {
             }
         };
 
+        //NOTE see if the hack bellow works....
         let res = update_asset_metadata_time(
             &apool,
             &meta_pool,
             asset_symbol,
             "Binance",
             start_timestamp,
-            current_timestamp,
+            current_timestamp -6000*30,
         )
         .await;
         match res {

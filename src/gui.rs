@@ -118,6 +118,7 @@ impl Default for KlinePlot {
 const WICKS_VISIBLE:usize=90;
 const NAVI_WICKS_DEFAULT:u16=30;
 const CHART_FORWARD:u16=40;
+const VIEW_WINDOW:usize=3_000;
 
 impl KlinePlot {
     fn show_empty(&self, ui: &mut egui::Ui) {
@@ -147,12 +148,18 @@ impl KlinePlot {
             if let Some(data) = col_data.get(&symbol) {
                 tracing::trace!["Collected data non empty"];
                 //tracing::debug!["Show live SOME for {}, chart_ad_id:{}", &symbol, &chart_ad_id];
-                self.live_live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None, &data);
+                self.live_live_from_ad(&ad, &symbol, self.intv.clone(), self.intv.to_view_window(), None, &data);
             };
+            self.live_from_ad(&ad, &symbol, self.intv.clone(), self.intv.to_view_window(), None, false);
+        }else{
+            self.live_from_ad(&ad, &symbol, self.intv.clone(), self.intv.to_view_window(), None, true);
         };
-        self.live_from_ad(&ad, &symbol, self.intv.clone(), 12_000, None);
         self.show(ui, plot_extras);
 
+        ui.label(
+            RichText::new(format!["Current asset: {}", &symbol])
+                .color(Color32::WHITE)
+        );
         egui::Grid::new("Kline navi:").show(ui, |ui| {
             if ui.button("<< Navi").clicked() {
                 let res: Result<u16, ParseIntError> = self.navi_wicks_s.parse();
@@ -308,6 +315,7 @@ impl KlinePlot {
                 };
             };
         };
+
         if tick==true{
             self.ticks=kline_input.len();
         };
@@ -421,31 +429,7 @@ impl KlinePlot {
         } else {
             vec![]
         };
-        tracing::trace!["live live k:{:?}",k];
-        //self.live_from_ad(ad,symbol,intv,12_000,None);
-        //tracing::debug!["\x1b  AD klines \x1b[93m  = {:?}", &intv_klines];
-
-        if let Some(symbol_klines) = ad.kline_data.get(symbol) {
-            tracing::trace!["\x1b  Symbol klines::SOME \x1b[93m"];
-            if let Some(intv_klines) = symbol_klines.dat.get(&intv) {
-                tracing::trace!["\x1b  LIVE ad klines SOME \x1b[93m"];
-            } else {
-                tracing::trace![
-                    "\x1b  LIVE ad klines NONE for: {}, intv: {:?}, ad_id: {} \x1b[93m",
-                    &symbol,
-                    &intv,
-                    &ad.id
-                ];
-            };
-            //KlineTick::to_kline_vec(ck)
-        };
-        /*
-         * */
-
-        //tracing::debug!["\x1b  CLOSED klines GUI \x1b[93m  = {:?}", &k];
         let ok = if let Some(ok) = data.all_klines.get(&intv) {
-            //NOTE this is the TICK klines, not the initial GET klines...
-            //tracing::debug!["\x1b  CLOSED klines GUI \x1b[93m  = {:?}", &k];
             KlineTick::to_kline_vec(ok)
         } else {
             vec![]
@@ -453,23 +437,16 @@ impl KlinePlot {
         let (div, width) = get_chart_params(&intv);
         self.chart_params = (div, width);
         if k.len() <= max_load_points {
-            //self.loading = true;
             if k.is_empty() == false {
                 tracing::trace!["Live KLINES added 1"];
                 self.add_live(&k, &div, &width, true);
                 tracing::trace!["Live KLINES added {:?}",self.l_boxplot];
             };
-            //self.loading = false;
         } else {
-            //tracing::debug!["max load points separation{:?}",k];
             let kl = &k[(k.len() - max_load_points)..];
-            //tracing::debug!["max load points separation{:?}",kl];
-            //self.loading = true;
             if kl.is_empty() == false {
-                tracing::trace!["Live KLINES added 2"];
                 self.add_live(&kl, &div, &width, true);
             };
-            //self.loading = false;
         }
         self.static_loaded = true;
         return Ok(());
@@ -482,6 +459,7 @@ impl KlinePlot {
         intv: Intv,
         max_load_points: usize,
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
+        hist:bool,
     ) -> Result<()> {
         tracing::trace!["GUI Live from AD called!"];
         let k = match timestamps {
@@ -497,6 +475,11 @@ impl KlinePlot {
         self.chart_params = (div, width);
         if k.len() <= max_load_points {
             self.loading = true;
+
+            if hist ==true{
+                tracing::trace!["HIST k.len <<< {:?}", k.is_empty()];
+            };
+
             self.add_live(k, &div, &width, false);
             self.loading = false;
         } else {
@@ -504,6 +487,11 @@ impl KlinePlot {
             let kl = &k[(k.len() - max_load_points)..];
             //tracing::debug!["max load points separation{:?}",kl];
             self.loading = true;
+
+            if hist ==true{
+                tracing::trace!["HIST k.len >>>  {:?}", k.is_empty()];
+            };
+
             self.add_live(kl, &div, &width, false);
             self.loading = false;
         }
@@ -821,41 +809,61 @@ fn make_plot(name: &str, intv: Intv, y_lower: f64, y_higher: f64, x_lower: f64, 
 //    let divider=60.0;
 
 //TODO fuck with these to fix the graph or give up and fork
-const m1_div: i64 = 60;
-const m3_div: i64 = 60;
-const m5_div: i64 = 60;
-const m15_div: i64 = 60 * 4;
-const m30_div: i64 = 60 * 4;
-const h1_div: i64 = 60 * 4 * 4;
-const h2_div: i64 = 60 * 4 * 4 * 2;
-const h4_div: i64 = 60 * 4 * 4 * 4;
-const h6_div: i64 = 60 * 4 * 4 * 6;
-const h8_div: i64 = 60 * 4 * 4 * 8;
-const h12_div: i64 = 60 * 4 * 4 * 12;
-const d1_div: i64 = 60 * 4 * 4 * 6;
-const d3_div: i64 = 60 * 4 * 4 * 6;
-const w1_div: i64 = 60 * 4 * 4 * 6;
-const mo1_div: i64 = 60 * 4 * 4 * 6;
+//WTF is going on here... points are plotted on the chart by seconds...
+//1min interval = 60. 
+//So naturaly... 3min should be 180 or 3x60... but it's not...
+const m1_div: i64 = 60; // so the chart should plot every second...
+const m3_div: i64 = m1_div*3;
+const m5_div: i64 = m1_div*5;
+const m15_div: i64 = m1_div * 15;
+const m30_div: i64 = m1_div * 30;
+const h1_div: i64 = m1_div * 60;
+const h2_div: i64 = h1_div * 2;
+const h4_div: i64 = h1_div * 4;
+const h6_div: i64 = h1_div * 6;
+const h8_div: i64 = h1_div * 8;
+const h12_div: i64 = h1_div * 12;
+const d1_div: i64 = h1_div * 24;
+const d3_div: i64 = d1_div * 3;//FIXME
+const w1_div: i64 = d1_div * 7;//FIXME
+const mo1_div: i64 = d1_div *30; //FIXME
 
-const gap1: f64 = 0.8 ;
-const gap2: f64 = 0.8 * 4.0;
+const gap:f64=45.0;
+const extra_gap:f64=1.2;
+
+const m1_gap: f64 = gap/(m1_div as f64);
+const m3_gap: f64 = (gap*3.0)/(m3_div as f64);
+const m5_gap: f64 =(gap*5.0)/(m5_div as f64);
+const m15_gap: f64 =(gap*15.0)/(m15_div as f64);
+const m30_gap: f64 =(gap*30.0)/(m30_div as f64);
+const h1_gap: f64 =(gap*60.0)/(h1_div as f64);
+const h2_gap: f64 =(gap*60.0*2.0)/(h2_div as f64);
+const h4_gap: f64 =(gap*60.0*4.0)/(h4_div as f64);
+const h6_gap: f64 =(gap*60.0*6.0)/(h6_div as f64);
+const h8_gap: f64 =(gap*60.0*8.0)/(h8_div as f64);
+const h12_gap: f64 =(gap*60.0*12.0)/(h12_div as f64);
+const d1_gap: f64 =(gap*60.0*24.0)/(d1_div as f64);
+const d3_gap: f64 =(extra_gap*gap*60.0*72.0)/(d3_div as f64);
+const w1_gap: f64 =(extra_gap*gap*60.0*24.0*7.0)/(w1_div as f64);
+const mo1_gap: f64 =(extra_gap*gap*60.0*24.0*30.0)/(mo1_div as f64);
+
 fn get_chart_params(intv: &Intv) -> (f64, f64) {
     match intv {
-        Intv::Min1 => (m1_div as f64, gap1), //incorrect
-        Intv::Min3 => (m3_div as f64, gap1),
-        Intv::Min5 => (m5_div as f64, gap1),
-        Intv::Min15 => (m15_div as f64, gap2),
-        Intv::Min30 => (m30_div as f64, gap2),
-        Intv::Hour1 => (h1_div as f64, gap2),
-        Intv::Hour2 => (h2_div as f64, gap2),
-        Intv::Hour4 => (h4_div as f64, gap2),
-        Intv::Hour6 => (h6_div as f64, gap2),
-        Intv::Hour8 => (h8_div as f64, gap2),
-        Intv::Hour12 => (h12_div as f64, gap2),
-        Intv::Day1 => (d1_div as f64, gap2),
-        Intv::Day3 => (d3_div as f64, gap2),
-        Intv::Week1 => (w1_div as f64, gap2),
-        Intv::Month1 => (mo1_div as f64, gap2), //with reference to 1970 1,1 00:00 perhaps?
+        Intv::Min1 => (m1_div as f64, m1_gap), //incorrect
+        Intv::Min3 => (m3_div as f64, m3_gap),
+        Intv::Min5 => (m5_div as f64, m5_gap),
+        Intv::Min15 => (m15_div as f64, m15_gap),
+        Intv::Min30 => (m30_div as f64, m30_gap),
+        Intv::Hour1 => (h1_div as f64, h1_gap),
+        Intv::Hour2 => (h2_div as f64, h2_gap),
+        Intv::Hour4 => (h4_div as f64, h4_gap),
+        Intv::Hour6 => (h6_div as f64, h6_gap),
+        Intv::Hour8 => (h8_div as f64, h8_gap),
+        Intv::Hour12 => (h12_div as f64, h12_gap),
+        Intv::Day1 => (d1_div as f64,d1_gap),
+        Intv::Day3 => (d3_div as f64, d3_gap),
+        Intv::Week1 => (w1_div as f64, w1_gap),
+        Intv::Month1 => (mo1_div as f64, mo1_gap), //with reference to 1970 1,1 00:00 perhaps?
     }
 }
 //TODO convert to macros or fork egui_plot library and make a better implementation yourself...
@@ -1783,10 +1791,12 @@ impl ManualOrders {
             .striped(true)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    /*
                     ui.label(
                         RichText::new(format!["Current asset: {}", man_orders.current_symbol])
                             .color(Color32::WHITE),
                     );
+                    */
                     ui.end_row();
                 });
             });
@@ -3105,6 +3115,10 @@ impl HistPlot {
                  * */
                 ui.add(
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date)
+                        .id_salt("trade_time"),
+                );
+                ui.add(
+                    egui_extras::DatePickerButton::new(&mut hist_plot.picked_date)
                         .id_salt("hist_start"),
                 );
                 ui.add(
@@ -3112,6 +3126,9 @@ impl HistPlot {
                         .id_salt("hist_end"),
                 );
                 ui.end_row();
+                if ui.button("Trade time").clicked() {
+
+                }
                 if ui.button("Load Asset - part data").clicked() {
                     let st=match hist_plot.picked_date.and_hms_opt(0, 0, 0){
                         Some(st)=>st,
@@ -3139,6 +3156,9 @@ impl HistPlot {
                         .hist_asset_data
                         .lock()
                         .expect("Posoned mutex! - Hist asset data");
+
+                    //NOTE validate assed DL before checking
+                    hist_plot.kline_plot.symbol=s.clone();
 
                     let res=ad.kline_data.get(&s.clone());
                     match res{

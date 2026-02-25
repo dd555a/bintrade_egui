@@ -297,8 +297,7 @@ impl ClientTask {
                         .with_min_inner_size([300.0, 220.0]),
                     event_loop_builder,
                     persist_window: false,
-                    //NOTE remove this?
-                    persistence_path: Some(std::path::PathBuf::from("./bintrade_gui_save")),
+                    //persistence_path: Some(std::path::PathBuf::from("./bintrade_gui_save")),
                     ..Default::default()
                 };
 

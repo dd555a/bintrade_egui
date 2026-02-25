@@ -28,7 +28,7 @@ eframe = { version = "0.32", default-features = false, features = ["accesskit", 
 egui = { version = "0.32.0", features = ["persistence", "serde"] }
 winit = {version="0.30.12", default-features = false,features = ["wayland"] }
 egui_extras = { version = "0.32.0", features = ["datepicker", "image", "serde"] }
-egui_plot_bintrade = "0.33.0"
+egui_plot_bintrade = "0.33.1"
 egui_tiles = "0.13.0"
 futures = "0.3.31"
 log = { version = "0.4.27"}
