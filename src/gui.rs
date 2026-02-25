@@ -2861,7 +2861,7 @@ impl DataManager {
                 .hist_asset_data
                 .lock()
                 .expect("Unable to unlock mutex: DATA MANAGER");
-            if ad.download_assets.is_empty==true{
+            if ad.downloaded_assets.is_empty==true{
             }else{
                 data_manager.asset_list = ad.downloaded_assets.clone();
                 data_manager.asset_list_loaded = true;
