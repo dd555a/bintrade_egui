@@ -5,6 +5,8 @@ edition = "2024"
 authors = ["DB <dd555@protonmail.com>"]
 description = "GUI binance trade program using egui. Do live trading, historic data and simulate trading, plot historic data"
 license= "MIT"
+include =["/src","LICENSE.md", "Settings.toml", "Cargo.toml"]
+exclude =["Cargo.lock"]
 
 [profile.release]
 strip=true 
