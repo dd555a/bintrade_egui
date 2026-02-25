@@ -517,7 +517,7 @@ impl ClientTask {
         sleep_notify: Arc<Notify>,
         live_collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         live_price: Arc<Mutex<f64>>,
-        live_ad: Arc<Mutex<AssetData>>, 
+        live_ad: Arc<Mutex<AssetData>>,
     ) {
         let (mut send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
@@ -715,7 +715,7 @@ pub fn cli_run() -> Result<()> {
         let frontend = Frontend::Desktop;
         log::info!("Bintrade starting");
         let mut main_struct = ClientTask::new(frontend, conf);
-        let cancel_all_token=main_struct.cancel_all.clone();
+        let cancel_all_token = main_struct.cancel_all.clone();
         select! {
             _ = main_struct.run_main(tasks) => {
             }

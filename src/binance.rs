@@ -51,10 +51,6 @@ use crate::trade::Order;
 use reqwest;
 use reqwest::multipart;
 
-
-
-
-
 #[derive(Deserialize, Debug)]
 pub struct SymbolInfo {
     pub symbol: String,

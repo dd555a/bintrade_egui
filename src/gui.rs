@@ -12,8 +12,8 @@ use strum_macros::EnumIter;
 use anyhow::{Context, Result, anyhow};
 use std::result::Result as OCResult;
 
-use tokio::sync::watch;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 use eframe::egui::{self, DragValue, Event, Vec2};
 
@@ -23,8 +23,8 @@ use crate::binance::KlineTick;
 
 use egui::{Color32, ComboBox, epaint};
 use egui_plot_bintrade::{
-    Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, Legend, Line, Plot,
-    PlotPoints, PlotUi, uniform_grid_spacer, AxisHints, HPlacement
+    AxisHints, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, HPlacement,
+    Legend, Line, Plot, PlotPoints, PlotUi, uniform_grid_spacer,
 };
 use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
@@ -56,26 +56,25 @@ struct KlinePlot {
     chart_params: (f64, f64),
     x_bounds: (f64, f64),
     y_bounds: (f64, f64),
-    v_bound:f64,
+    v_bound: f64,
 
-    tick_highest:f64,
-    tick_lowest:f64,
+    tick_highest: f64,
+    tick_lowest: f64,
 
     symbol: String,
 
     hlines: Vec<HLine>,
-    navi_wicks_s:String,
-    navi_wicks:usize,
+    navi_wicks_s: String,
+    navi_wicks: usize,
 
+    get_data_timestamp: Option<i64>,
 
-    get_data_timestamp:Option<i64>,
-
-    ticks:usize,
-    offset:i64,
-    y_offset:i64,
-    y_offset_s:String,
-    y_increment:f64,
-    x_bounds_set:bool,
+    ticks: usize,
+    offset: i64,
+    y_offset: i64,
+    y_offset_s: String,
+    y_increment: f64,
+    x_bounds_set: bool,
 }
 impl Default for KlinePlot {
     fn default() -> Self {
@@ -92,37 +91,37 @@ impl Default for KlinePlot {
             chart_params: (1.0, 1.0),
             x_bounds: (0.0, 100.0),
             y_bounds: (0.0, 100.0),
-            v_bound:100.0,
+            v_bound: 100.0,
             symbol: "BTCUSDT".to_string(),
 
-            tick_highest:0.0,
-            tick_lowest:0.0,
+            tick_highest: 0.0,
+            tick_lowest: 0.0,
 
-            get_data_timestamp:None,
+            get_data_timestamp: None,
 
             hlines: vec![],
 
             navi_wicks_s: "30".to_string(),
             y_offset_s: "10".to_string(),
 
-            navi_wicks:30,
-            ticks:0,
-            offset:0,
-            y_offset:0,
-            y_increment:0.001,
-            x_bounds_set:false,
+            navi_wicks: 30,
+            ticks: 0,
+            offset: 0,
+            y_offset: 0,
+            y_increment: 0.001,
+            x_bounds_set: false,
         }
     }
 }
 
-const WICKS_VISIBLE:usize=90;
-const NAVI_WICKS_DEFAULT:u16=30;
-const CHART_FORWARD:u16=40;
-const VIEW_WINDOW:usize=3_000;
+const WICKS_VISIBLE: usize = 90;
+const NAVI_WICKS_DEFAULT: u16 = 30;
+const CHART_FORWARD: u16 = 40;
+const VIEW_WINDOW: usize = 3_000;
 
 impl KlinePlot {
     fn show_empty(&self, ui: &mut egui::Ui) {
-        let (plot_candles,plot_volume) = self.mk_plt();
+        let (plot_candles, plot_volume) = self.mk_plt();
         let bp = BoxPlot::new(&self.name, vec![]);
         plot_candles.show(ui, |plot_ui| {
             plot_ui.box_plot(bp);
@@ -144,22 +143,40 @@ impl KlinePlot {
         let chart_ad_id = ad.id.clone();
 
         let symbol = self.symbol.clone();
-        if let Some(col_data)=collected_data{
+        if let Some(col_data) = collected_data {
             if let Some(data) = col_data.get(&symbol) {
                 tracing::trace!["Collected data non empty"];
                 //tracing::debug!["Show live SOME for {}, chart_ad_id:{}", &symbol, &chart_ad_id];
-                self.live_live_from_ad(&ad, &symbol, self.intv.clone(), self.intv.to_view_window(), None, &data);
+                self.live_live_from_ad(
+                    &ad,
+                    &symbol,
+                    self.intv.clone(),
+                    self.intv.to_view_window(),
+                    None,
+                    &data,
+                );
             };
-            self.live_from_ad(&ad, &symbol, self.intv.clone(), self.intv.to_view_window(), None, false);
-        }else{
-            self.live_from_ad(&ad, &symbol, self.intv.clone(), self.intv.to_view_window(), None, true);
+            self.live_from_ad(
+                &ad,
+                &symbol,
+                self.intv.clone(),
+                self.intv.to_view_window(),
+                None,
+                false,
+            );
+        } else {
+            self.live_from_ad(
+                &ad,
+                &symbol,
+                self.intv.clone(),
+                self.intv.to_view_window(),
+                None,
+                true,
+            );
         };
         self.show(ui, plot_extras);
 
-        ui.label(
-            RichText::new(format!["Current asset: {}", &symbol])
-                .color(Color32::WHITE)
-        );
+        ui.label(RichText::new(format!["Current asset: {}", &symbol]).color(Color32::WHITE));
         egui::Grid::new("Kline navi:").show(ui, |ui| {
             if ui.button("<< Navi").clicked() {
                 let res: Result<u16, ParseIntError> = self.navi_wicks_s.parse();
@@ -170,11 +187,10 @@ impl KlinePlot {
                         NAVI_WICKS_DEFAULT
                     }
                 };
-                self.offset-= (n_wicks as i64);
+                self.offset -= (n_wicks as i64);
             };
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut self.navi_wicks_s).hint_text("Navi N wicks"),
-            );
+            let search = ui
+                .add(egui::TextEdit::singleline(&mut self.navi_wicks_s).hint_text("Navi N wicks"));
             if ui.button("Navi >>").clicked() {
                 let res: Result<u16, ParseIntError> = self.navi_wicks_s.parse();
                 let n_wicks = match res {
@@ -184,10 +200,10 @@ impl KlinePlot {
                         NAVI_WICKS_DEFAULT
                     }
                 };
-                self.offset+= (n_wicks as i64);
+                self.offset += (n_wicks as i64);
             }
             if ui.button("Reset offset x").clicked() {
-                self.offset=0;
+                self.offset = 0;
             }
             if ui.button("Y+").clicked() {
                 let res: Result<u16, ParseIntError> = self.y_offset_s.parse();
@@ -198,7 +214,7 @@ impl KlinePlot {
                         NAVI_WICKS_DEFAULT
                     }
                 };
-                self.y_offset+= (n_wicks as i64);
+                self.y_offset += (n_wicks as i64);
             }
             let search = ui.add(
                 egui::TextEdit::singleline(&mut self.y_offset_s).hint_text("Y IncrementN wicks"),
@@ -212,32 +228,33 @@ impl KlinePlot {
                         NAVI_WICKS_DEFAULT
                     }
                 };
-                self.y_offset-= (n_wicks as i64);
+                self.y_offset -= (n_wicks as i64);
             }
             if ui.button("Reset offset y").clicked() {
-                self.y_offset=0;
+                self.y_offset = 0;
             }
         });
         /*
          * */
         Ok(())
     }
-    fn mk_plt(&self) -> (Plot,Plot) {
+    fn mk_plt(&self) -> (Plot, Plot) {
         let (x_lower, x_higher) = self.x_bounds;
         let (y_lower, y_higher) = self.y_bounds;
         let v_higher = self.v_bound;
-        make_plot(&self.name, self.intv, y_lower, y_higher, x_lower, x_higher, v_higher)
+        make_plot(
+            &self.name, self.intv, y_lower, y_higher, x_lower, x_higher, v_higher,
+        )
     }
-    fn add_hist(&mut self, klines:&Klines){
-        let res=klines.dat.get(&self.intv);
-        match res{
-            Some(kline)=>{
-                let (divider,width) = get_chart_params(&self.intv);
-                self.add_live(&kline.kline, &divider, &width, false )
+    fn add_hist(&mut self, klines: &Klines) {
+        let res = klines.dat.get(&self.intv);
+        match res {
+            Some(kline) => {
+                let (divider, width) = get_chart_params(&self.intv);
+                self.add_live(&kline.kline, &divider, &width, false)
             }
-            None =>{
+            None => {
                 tracing::info!["Kline empty for intv:{}", &self.intv.to_str()]
-
             }
         }
     }
@@ -246,36 +263,36 @@ impl KlinePlot {
         kline_input: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
         divider: &f64,
         width: &f64,
-        tick:bool,
+        tick: bool,
     ) {
-        if tick==false{
+        if tick == false {
             self.l_boxplot = vec![];
             self.l_barchart = vec![];
-        }else{
+        } else {
             self.l_tick_boxplot = vec![];
             self.l_tick_barchart = vec![];
         };
         let mut highest: f64 = 0.0;
         let mut v_highest: f64 = 0.0;
-        let mut lowest: f64 = kline_input[0].3;;
-        let t0= if kline_input.len() > WICKS_VISIBLE + 1{
-            kline_input[kline_input.len() - 1-WICKS_VISIBLE].0 //NOTE out of bounds error
-        }else{
+        let mut lowest: f64 = kline_input[0].3;
+        let t0 = if kline_input.len() > WICKS_VISIBLE + 1 {
+            kline_input[kline_input.len() - 1 - WICKS_VISIBLE].0 //NOTE out of bounds error
+        } else {
             kline_input[0].0
         };
         let t1 = kline_input[kline_input.len() - 1].0;
-        if tick==false{
-            self.get_data_timestamp=Some(t1.timestamp());
+        if tick == false {
+            self.get_data_timestamp = Some(t1.timestamp());
         };
-        if self.x_bounds_set==false{
-            let w=(self.intv.to_sec() as f64)*(CHART_FORWARD as f64 );
-            let u=(self.intv.to_sec() as f64)*((self.ticks as f64)+(self.offset as f64));
+        if self.x_bounds_set == false {
+            let w = (self.intv.to_sec() as f64) * (CHART_FORWARD as f64);
+            let u = (self.intv.to_sec() as f64) * ((self.ticks as f64) + (self.offset as f64));
             tracing::trace!["ticks count:{}", self.ticks];
             self.x_bounds = (
-                ((t0.timestamp() as f64)+u) / self.chart_params.0,
-                ((t1.timestamp() as f64)+w+u) / self.chart_params.0,
+                ((t0.timestamp() as f64) + u) / self.chart_params.0,
+                ((t1.timestamp() as f64) + w + u) / self.chart_params.0,
             );
-            self.x_bounds_set==true;
+            self.x_bounds_set == true;
         };
         for kline in kline_input.iter() {
             let (t, _, h, l, _, v) = kline;
@@ -286,45 +303,47 @@ impl KlinePlot {
                 tracing::trace!["V highest: {:?} \n", v];
                 v_highest = *v;
             };
-            if l < &lowest{
-                lowest= *l;
+            if l < &lowest {
+                lowest = *l;
             };
             tracing::trace!["V: {:?} \n", v];
             let (boxe, bar) = box_element(kline, divider, width);
 
-            if tick==false{
+            if tick == false {
                 self.l_boxplot.push(boxe);
                 self.l_barchart.push(bar);
-            }else{
-                if let Some(init_timestamp) = self.get_data_timestamp{
-                    if t.timestamp() == init_timestamp{
-
-                    }else{
+            } else {
+                if let Some(init_timestamp) = self.get_data_timestamp {
+                    if t.timestamp() == init_timestamp {
+                    } else {
                         self.l_tick_boxplot.push(boxe);
                         self.l_tick_barchart.push(bar);
                     };
-                }else{
+                } else {
                     self.l_tick_boxplot.push(boxe);
                     self.l_tick_barchart.push(bar);
                 };
                 if h > &self.tick_highest {
                     self.tick_highest = *h;
                 };
-                if l < &self.tick_lowest{
-                    self.tick_lowest= *l;
+                if l < &self.tick_lowest {
+                    self.tick_lowest = *l;
                 };
             };
-        };
+        }
 
-        if tick==true{
-            self.ticks=kline_input.len();
+        if tick == true {
+            self.ticks = kline_input.len();
         };
-        self.v_bound=v_highest;
-        let (v_y,u_y)=((1.0+self.y_increment*self.y_offset as f64),(1.0+self.y_increment*self.y_offset as f64));
-        if (self.tick_highest >= highest || self.tick_lowest <= lowest) && tick==true {
-            self.y_bounds = (self.tick_lowest*v_y, self.tick_highest*u_y);
-        }else{
-            self.y_bounds = (lowest*v_y,highest*u_y);
+        self.v_bound = v_highest;
+        let (v_y, u_y) = (
+            (1.0 + self.y_increment * self.y_offset as f64),
+            (1.0 + self.y_increment * self.y_offset as f64),
+        );
+        if (self.tick_highest >= highest || self.tick_lowest <= lowest) && tick == true {
+            self.y_bounds = (self.tick_lowest * v_y, self.tick_highest * u_y);
+        } else {
+            self.y_bounds = (lowest * v_y, highest * u_y);
         };
     }
     fn add_live_single(
@@ -345,11 +364,11 @@ impl KlinePlot {
         self.l_boxplot.push(boxe);
         self.l_barchart.push(bar);
     }
-    fn reset_chart(&mut self)->Result<()>{
+    fn reset_chart(&mut self) -> Result<()> {
         Ok(())
     }
     fn show(&mut self, ui: &mut egui::Ui, plot_extras: &PlotExtras) -> Result<()> {
-        let (plot_candles,plot_volume) = self.mk_plt();
+        let (plot_candles, plot_volume) = self.mk_plt();
         //Handle live tick as separate box...
         let bp = BoxPlot::new(&self.name, self.l_boxplot.clone())
             .element_formatter(Box::new(time_format));
@@ -366,7 +385,7 @@ impl KlinePlot {
             let tick_box_plot = vec![tick_box_e];
             let tick_bar_vol = vec![tick_vol];
             let bp_tick = BoxPlot::new("Tick", tick_box_plot);
-            tracing::trace!["Tick bar vol:{:?}",tick_bar_vol];
+            tracing::trace!["Tick bar vol:{:?}", tick_bar_vol];
             let bc_tick = BarChart::new("Tick Vol", tick_bar_vol);
             if self.loading == false && self.static_loaded == true {
                 plot_candles.show(ui, |plot_ui| {
@@ -410,8 +429,7 @@ impl KlinePlot {
         }
         Ok(())
     }
-    fn live_from_sql() { 
-    }
+    fn live_from_sql() {}
     fn live_live_from_ad(
         &mut self,
         ad: &AssetData,
@@ -440,7 +458,7 @@ impl KlinePlot {
             if k.is_empty() == false {
                 tracing::trace!["Live KLINES added 1"];
                 self.add_live(&k, &div, &width, true);
-                tracing::trace!["Live KLINES added {:?}",self.l_boxplot];
+                tracing::trace!["Live KLINES added {:?}", self.l_boxplot];
             };
         } else {
             let kl = &k[(k.len() - max_load_points)..];
@@ -459,7 +477,7 @@ impl KlinePlot {
         intv: Intv,
         max_load_points: usize,
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
-        hist:bool,
+        hist: bool,
     ) -> Result<()> {
         tracing::trace!["GUI Live from AD called!"];
         let k = match timestamps {
@@ -476,7 +494,7 @@ impl KlinePlot {
         if k.len() <= max_load_points {
             self.loading = true;
 
-            if hist ==true{
+            if hist == true {
                 tracing::trace!["HIST k.len <<< {:?}", k.is_empty()];
             };
 
@@ -488,7 +506,7 @@ impl KlinePlot {
             //tracing::debug!["max load points separation{:?}",kl];
             self.loading = true;
 
-            if hist ==true{
+            if hist == true {
                 tracing::trace!["HIST k.len >>>  {:?}", k.is_empty()];
             };
 
@@ -637,7 +655,15 @@ macro_rules! make_p2{
         }
     };
 }
-fn make_plot(name: &str, intv: Intv, y_lower: f64, y_higher: f64, x_lower: f64, x_higher: f64, v_higher: f64) -> (Plot, Plot) {
+fn make_plot(
+    name: &str,
+    intv: Intv,
+    y_lower: f64,
+    y_higher: f64,
+    x_lower: f64,
+    x_higher: f64,
+    v_higher: f64,
+) -> (Plot, Plot) {
     match intv {
         Intv::Min1 => make_p2!(
             name,
@@ -808,13 +834,9 @@ fn make_plot(name: &str, intv: Intv, y_lower: f64, y_higher: f64, x_lower: f64, 
 //    let width=0.8;
 //    let divider=60.0;
 
-//TODO fuck with these to fix the graph or give up and fork
-//WTF is going on here... points are plotted on the chart by seconds...
-//1min interval = 60. 
-//So naturaly... 3min should be 180 or 3x60... but it's not...
-const m1_div: i64 = 60; // so the chart should plot every second...
-const m3_div: i64 = m1_div*3;
-const m5_div: i64 = m1_div*5;
+const m1_div: i64 = 60;
+const m3_div: i64 = m1_div * 3;
+const m5_div: i64 = m1_div * 5;
 const m15_div: i64 = m1_div * 15;
 const m30_div: i64 = m1_div * 30;
 const h1_div: i64 = m1_div * 60;
@@ -824,28 +846,28 @@ const h6_div: i64 = h1_div * 6;
 const h8_div: i64 = h1_div * 8;
 const h12_div: i64 = h1_div * 12;
 const d1_div: i64 = h1_div * 24;
-const d3_div: i64 = d1_div * 3;//FIXME
-const w1_div: i64 = d1_div * 7;//FIXME
-const mo1_div: i64 = d1_div *30; //FIXME
+const d3_div: i64 = d1_div * 3;
+const w1_div: i64 = d1_div * 7;
+const mo1_div: i64 = d1_div * 30; //30 is kind of a hack... but it works... so wtf...
 
-const gap:f64=45.0;
-const extra_gap:f64=1.2;
+const gap: f64 = 45.0;
+const extra_gap: f64 = 1.2;
 
-const m1_gap: f64 = gap/(m1_div as f64);
-const m3_gap: f64 = (gap*3.0)/(m3_div as f64);
-const m5_gap: f64 =(gap*5.0)/(m5_div as f64);
-const m15_gap: f64 =(gap*15.0)/(m15_div as f64);
-const m30_gap: f64 =(gap*30.0)/(m30_div as f64);
-const h1_gap: f64 =(gap*60.0)/(h1_div as f64);
-const h2_gap: f64 =(gap*60.0*2.0)/(h2_div as f64);
-const h4_gap: f64 =(gap*60.0*4.0)/(h4_div as f64);
-const h6_gap: f64 =(gap*60.0*6.0)/(h6_div as f64);
-const h8_gap: f64 =(gap*60.0*8.0)/(h8_div as f64);
-const h12_gap: f64 =(gap*60.0*12.0)/(h12_div as f64);
-const d1_gap: f64 =(gap*60.0*24.0)/(d1_div as f64);
-const d3_gap: f64 =(extra_gap*gap*60.0*72.0)/(d3_div as f64);
-const w1_gap: f64 =(extra_gap*gap*60.0*24.0*7.0)/(w1_div as f64);
-const mo1_gap: f64 =(extra_gap*gap*60.0*24.0*30.0)/(mo1_div as f64);
+const m1_gap: f64 = gap / (m1_div as f64);
+const m3_gap: f64 = (gap * 3.0) / (m3_div as f64);
+const m5_gap: f64 = (gap * 5.0) / (m5_div as f64);
+const m15_gap: f64 = (gap * 15.0) / (m15_div as f64);
+const m30_gap: f64 = (gap * 30.0) / (m30_div as f64);
+const h1_gap: f64 = (gap * 60.0) / (h1_div as f64);
+const h2_gap: f64 = (gap * 60.0 * 2.0) / (h2_div as f64);
+const h4_gap: f64 = (gap * 60.0 * 4.0) / (h4_div as f64);
+const h6_gap: f64 = (gap * 60.0 * 6.0) / (h6_div as f64);
+const h8_gap: f64 = (gap * 60.0 * 8.0) / (h8_div as f64);
+const h12_gap: f64 = (gap * 60.0 * 12.0) / (h12_div as f64);
+const d1_gap: f64 = (gap * 60.0 * 24.0) / (d1_div as f64);
+const d3_gap: f64 = (extra_gap * gap * 60.0 * 72.0) / (d3_div as f64);
+const w1_gap: f64 = (extra_gap * gap * 60.0 * 24.0 * 7.0) / (w1_div as f64);
+const mo1_gap: f64 = (extra_gap * gap * 60.0 * 24.0 * 30.0) / (mo1_div as f64);
 
 fn get_chart_params(intv: &Intv) -> (f64, f64) {
     match intv {
@@ -860,7 +882,7 @@ fn get_chart_params(intv: &Intv) -> (f64, f64) {
         Intv::Hour6 => (h6_div as f64, h6_gap),
         Intv::Hour8 => (h8_div as f64, h8_gap),
         Intv::Hour12 => (h12_div as f64, h12_gap),
-        Intv::Day1 => (d1_div as f64,d1_gap),
+        Intv::Day1 => (d1_div as f64, d1_gap),
         Intv::Day3 => (d3_div as f64, d3_gap),
         Intv::Week1 => (w1_div as f64, w1_gap),
         Intv::Month1 => (mo1_div as f64, mo1_gap), //with reference to 1970 1,1 00:00 perhaps?
@@ -1006,13 +1028,18 @@ fn x_format_1mo(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
 fn time_format(input: &BoxElem, plot: &BoxPlot) -> String {
     let red = Color32::from_rgb(255, 0, 0);
     let green = Color32::from_rgb(0, 255, 0);
-    let (o,c) = match input.fill{
+    let (o, c) = match input.fill {
         red => (input.spread.quartile1, input.spread.quartile3),
         green => (input.spread.quartile3, input.spread.quartile1),
     };
     format!(
         "Time: {} \n Open: {} \n High: {} \n Low: {} \n Close: {} \n Average: {}",
-        input.name, o, input.spread.upper_whisker, input.spread.lower_whisker, c, input.spread.median
+        input.name,
+        o,
+        input.spread.upper_whisker,
+        input.spread.lower_whisker,
+        c,
+        input.spread.median
     )
 }
 
@@ -1035,8 +1062,8 @@ impl fmt::Display for PaneType {
             PaneType::LiveTrade => write!(f, "Live Trade"),
             PaneType::HistTrade => write!(f, "Hist Trade"),
             PaneType::ManageData => write!(f, "Manage Data"),
-            PaneType::Account=> write!(f, "Account"),
-            PaneType::Settings=> write!(f, "Settings"),
+            PaneType::Account => write!(f, "Account"),
+            PaneType::Settings => write!(f, "Settings"),
             PaneType::None => write!(f, "None"),
         }
     }
@@ -1156,7 +1183,13 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 //let hist_trading=&mut h_plot.hist_trade;
 
-                HistPlot::show(&mut h_plot, &p_extras, chan, self.hist_asset_data.clone(), ui);
+                HistPlot::show(
+                    &mut h_plot,
+                    &p_extras,
+                    chan,
+                    self.hist_asset_data.clone(),
+                    ui,
+                );
 
                 let mut man_orders = self
                     .man_orders
@@ -1225,15 +1258,9 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                             self.hist_plot.remove(&pane.nr);
                             self.man_orders.remove(&pane.nr);
                         }
-                        PaneType::ManageData => {
-
-                        }
-                        PaneType::Account=> {
-
-                        }
-                        PaneType::Settings=> {
-
-                        }
+                        PaneType::ManageData => {}
+                        PaneType::Account => {}
+                        PaneType::Settings => {}
                     }
                     let tab_title = self.tab_title_for_pane(pane);
                     log::debug!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
@@ -1475,12 +1502,11 @@ impl eframe::App for DesktopApp {
                     if ui.button("Load settings").clicked() {
                         //TODO - save settings  to file and load them
                     }
-                    if ui.button("Save settings").clicked() {
-                    }
+                    if ui.button("Save settings").clicked() {}
                     if ui.button("Quit").clicked() {
-                        let chan=match self.send_to_cli.clone(){
-                            Some(chan)=>{
-                                let msg=ClientInstruct::Terminate;
+                        let chan = match self.send_to_cli.clone() {
+                            Some(chan) => {
+                                let msg = ClientInstruct::Terminate;
                                 chan.send(msg);
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
@@ -1858,7 +1884,7 @@ impl ManualOrders {
 
                 ui.end_row();
                 let mut dummy: Option<f64> = None;
-                ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40,40,40);
+                ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
 
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut man_orders.quant, Quant::Q25, "25%");
@@ -2300,24 +2326,23 @@ fn test_chart2(ui: &mut egui::Ui) {
     ];
     let barchart = BarChart::new("bar volume chart", bar_data);
 
-    let id="test1";
+    let id = "test1";
     let plot = Plot::new("candlestick chart")
         .legend(Legend::default())
         .x_axis_formatter(x_format_1d)
-        .link_cursor(id, [true,false])
-        .link_axis(id, [true,false])
+        .link_cursor(id, [true, false])
+        .link_axis(id, [true, false])
         .x_grid_spacer(uniform_grid_spacer(grid_spacer_1d))
         .width(360.0)
         .height(150.0)
         .default_x_bounds(59576.0, 59618.0)
-
         .default_y_bounds(0.0, 5.0);
 
     let plot2 = Plot::new("candlestick chart- boxchart")
         .legend(Legend::default())
         .x_axis_formatter(x_format_1d)
-        .link_axis(id, [true,false])
-        .link_cursor(id, [true,false])
+        .link_axis(id, [true, false])
+        .link_cursor(id, [true, false])
         .x_grid_spacer(uniform_grid_spacer(grid_spacer_1d))
         .width(360.0)
         .height(50.0)
@@ -2355,7 +2380,7 @@ struct LivePlot {
     intv: Intv,
     last_intv: Intv,
     lines: Vec<HLine>,
-    reload:bool,
+    reload: bool,
 }
 
 impl Default for LivePlot {
@@ -2369,7 +2394,7 @@ impl Default for LivePlot {
             intv: Intv::Min1,
             last_intv: Intv::Min1,
             lines: vec![],
-            reload:false,
+            reload: false,
         }
     }
 }
@@ -2408,13 +2433,13 @@ impl LivePlot {
         tracing::trace!["\x1b[36m Collected Data\x1b[0m: {:?}", &collect_data];
 
         ui.end_row();
-        if live_plot.intv != live_plot.last_intv{
-            live_plot.reload=true;
+        if live_plot.intv != live_plot.last_intv {
+            live_plot.reload = true;
             tracing::debug!["\x1b[36m live chart reloaded\x1b[0m: "];
-            
-            live_plot.last_intv=live_plot.intv;
-            live_plot.kline_plot.intv=live_plot.intv;
-            live_plot.reload=false;
+
+            live_plot.last_intv = live_plot.intv;
+            live_plot.kline_plot.intv = live_plot.intv;
+            live_plot.reload = false;
         };
         egui::Grid::new("Hplot order assets:")
             .striped(true)
@@ -2433,11 +2458,9 @@ impl LivePlot {
                 let s = &live_plot.search_string.clone();
                 let i = live_plot.intv;
 
-                if ui.button("Search").clicked() {
+                if ui.button("Search").clicked() {};
 
-                };
-                
-                if live_plot.reload ==false{
+                if live_plot.reload == false {
                     //let ad = live_plot
                     //    .live_asset_data
                     //    .lock()
@@ -2488,20 +2511,25 @@ struct HistPlot {
     trade_wicks_s: String,
 
     pub trade_time: i64,
-    pub att_klines:Option<Klines>,
-    pub part_loaded:bool,
+    pub att_klines: Option<Klines>,
+    pub part_loaded: bool,
 }
 
 use crate::data::Klines;
 
-use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::Datelike;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 impl Default for HistPlot {
     fn default() -> Self {
-        let curr_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).expect("Unable to get unix timestamp!").as_millis() as i64;
-        let curr_date=chrono::NaiveDateTime::from_timestamp_millis(curr_timestamp).expect("Unable to parse current time").date();
-        let current_year=chrono::Utc::now().year() as i32;
+        let curr_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Unable to get unix timestamp!")
+            .as_millis() as i64;
+        let curr_date = chrono::NaiveDateTime::from_timestamp_millis(curr_timestamp)
+            .expect("Unable to parse current time")
+            .date();
+        let current_year = chrono::Utc::now().year() as i32;
         Self {
             kline_plot: KlinePlot::default(),
             hist_asset_data: Arc::new(Mutex::new(AssetData::new(666))),
@@ -2515,7 +2543,7 @@ impl Default for HistPlot {
             intv: Intv::Min1,
             last_intv: Intv::Min1,
 
-            picked_date: chrono::NaiveDate::from_ymd(current_year-1, 1, 1),
+            picked_date: chrono::NaiveDate::from_ymd(current_year - 1, 1, 1),
             picked_date_end: curr_date,
 
             hist_extras: None,
@@ -2528,8 +2556,8 @@ impl Default for HistPlot {
             trade_wicks_s: "20".to_string(),
 
             trade_time: 0,
-            att_klines:None,
-            part_loaded:false
+            att_klines: None,
+            part_loaded: false,
         }
     }
 }
@@ -2539,58 +2567,49 @@ use crate::data::DLAsset;
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 #[derive(Dbg, Default)]
-struct Account{
-    pub enc_pub_key:Vec<u8>,
-    pub enc_priv_key:Vec<u8>,
+struct Account {
+    pub enc_pub_key: Vec<u8>,
+    pub enc_priv_key: Vec<u8>,
 
-    api_key_enter_string:String,
-    priv_api_key_enter_string:String,
-    
-    key_status:KeysStatus,
+    api_key_enter_string: String,
+    priv_api_key_enter_string: String,
 
-    balances:Vec<(String,f64)>
+    key_status: KeysStatus,
+
+    balances: Vec<(String, f64)>,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 #[derive(Dbg, Default)]
-pub enum KeysStatus{
+pub enum KeysStatus {
     #[default]
     NotAdded,
     Invalid,
-    Valid
+    Valid,
 }
-impl KeysStatus{
-    fn to_str(&self)->String{
-        match self{
-            KeysStatus::NotAdded=> "Keys not added".to_string(),
-            KeysStatus::Invalid=> "Keys invalid".to_string(),
-            KeysStatus::Valid=> "Keys valid".to_string(),
+impl KeysStatus {
+    fn to_str(&self) -> String {
+        match self {
+            KeysStatus::NotAdded => "Keys not added".to_string(),
+            KeysStatus::Invalid => "Keys invalid".to_string(),
+            KeysStatus::Valid => "Keys valid".to_string(),
         }
     }
 }
 
-impl Account{
+impl Account {
     fn new() -> Self {
-        Account{
+        Account {
             ..Default::default()
         }
     }
-    fn show(
-        account: &mut Account,
-        cli_chan: watch::Sender<ClientInstruct>,
-        ui: &mut egui::Ui,
-    ) {
+    fn show(account: &mut Account, cli_chan: watch::Sender<ClientInstruct>, ui: &mut egui::Ui) {
         egui::Grid::new("Account")
             .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
-                ui.label(
-                    RichText::new(format![
-                        "BINANCE KEYS",
-                    ])
-                    .color(Color32::YELLOW),
-                );
+                ui.label(RichText::new(format!["BINANCE KEYS",]).color(Color32::YELLOW));
                 ui.end_row();
                 ui.add_sized(
                     egui::vec2(400.0, 20.0),
@@ -2606,47 +2625,29 @@ impl Account{
                 ui.end_row();
                 if ui.button("Add keys").clicked() {
                     //TODO - add a function that stores keys securely here
-                    account.api_key_enter_string="".to_string();
-                    account.priv_api_key_enter_string="".to_string();
-
+                    account.api_key_enter_string = "".to_string();
+                    account.priv_api_key_enter_string = "".to_string();
                 };
                 ui.end_row();
                 if ui.button("Remove keys").clicked() {
                     //TODO - add a function that stores keys securely here
-                    account.api_key_enter_string="".to_string();
-                    account.priv_api_key_enter_string="".to_string();
-
+                    account.api_key_enter_string = "".to_string();
+                    account.priv_api_key_enter_string = "".to_string();
                 };
                 //TODO get return status from validate_keys functon here and display it as such.
                 //Save encrypted keys and settings in a savefile, that can be opened with password
                 ui.end_row();
-                match account.key_status{
-                    KeysStatus::NotAdded=> {
+                match account.key_status {
+                    KeysStatus::NotAdded => {
                         ui.label(
-                            RichText::new(format![
-                                "Add binance API keys",
-                            ])
-                            .color(Color32::ORANGE),
+                            RichText::new(format!["Add binance API keys",]).color(Color32::ORANGE),
                         );
                     }
-                    KeysStatus::Invalid=> {
-                        ui.label(
-                            RichText::new(format![
-                                "Keys Invalid",
-                            ])
-                            .color(Color32::RED),
-                        );
-
+                    KeysStatus::Invalid => {
+                        ui.label(RichText::new(format!["Keys Invalid",]).color(Color32::RED));
                     }
-                    KeysStatus::Valid=> {
-                        ui.label(
-                            RichText::new(format![
-                                "Keys Valid",
-                            ])
-                            .color(Color32::RED),
-                        );
-
-
+                    KeysStatus::Valid => {
+                        ui.label(RichText::new(format!["Keys Valid",]).color(Color32::RED));
                     }
                 };
             });
@@ -2689,35 +2690,29 @@ impl Account{
             .show(ui, |ui| {
                 if ui.button("Refresh balances").clicked() {
                     //TODO if api keys installed call get_assets kind of function
-
                 };
             });
     }
 }
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Dbg )]
-struct Settings{
-    default_asset:String,
-    default_intv:Intv
+#[derive(Dbg)]
+struct Settings {
+    default_asset: String,
+    default_intv: Intv,
 }
-impl Settings{
+impl Settings {
     fn new() -> Self {
-        Settings{
-            default_asset:"BTCUSDT".to_string(),
-            default_intv:Intv::Min1
+        Settings {
+            default_asset: "BTCUSDT".to_string(),
+            default_intv: Intv::Min1,
         }
     }
-    fn show(
-        settings: &mut Settings,
-        cli_chan: watch::Sender<ClientInstruct>,
-        ui: &mut egui::Ui,
-    ) {
+    fn show(settings: &mut Settings, cli_chan: watch::Sender<ClientInstruct>, ui: &mut egui::Ui) {
         egui::Grid::new("Account")
             .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
-                if ui.button("Settings").clicked() {
-                };
+                if ui.button("Settings").clicked() {};
             });
     }
 }
@@ -2866,11 +2861,11 @@ impl DataManager {
                 .hist_asset_data
                 .lock()
                 .expect("Unable to unlock mutex: DATA MANAGER");
-            if ad.downloaded_assets.is_empty() == true {
-            } else {
+            if ad.download_assets.is_empty==true{
+            }else{
                 data_manager.asset_list = ad.downloaded_assets.clone();
                 data_manager.asset_list_loaded = true;
-            };
+            }
         };
         if ui.button("Reload asset list").clicked() {
             data_manager.asset_list_loaded = false;
@@ -2909,34 +2904,40 @@ impl DataManager {
                 })
                 .body(|mut body| {
                     for (asset) in data_manager.asset_list.iter() {
-                        let row_height = 18.0;
-                        body.row(row_height, |mut row| {
-                            row.col(|ui| {
-                                ui.label(format!["{}", asset.asset]);
+                        if asset.asset != "TEST"{
+                            let row_height = 18.0;
+                            body.row(row_height, |mut row| {
+                                row.col(|ui| {
+                                    ui.label(format!["{}", asset.asset]);
+                                });
+                                row.col(|ui| {
+                                    ui.label(format!["{}", asset.exchange]);
+                                });
+                                row.col(|ui| {
+                                    if let Some(start_time) =
+                                        chrono::NaiveDateTime::from_timestamp_millis(asset.dat_start_t)
+                                    {
+                                        ui.label(format!["{}", start_time]);
+                                    } else {
+                                        ui.label(format!["NaN"]);
+                                    };
+                                });
+                                row.col(|ui| {
+                                    if let Some(end_time) =
+                                        chrono::NaiveDateTime::from_timestamp_millis(asset.dat_end_t)
+                                    {
+                                        ui.label(format!["{}", end_time]);
+                                    } else {
+                                        ui.label(format!["NaN"]);
+                                    };
+                                });
+                                row.col(|ui| if ui.button("Delete").clicked() {
+                                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::DelAsset{symbol:asset.asset.clone()});
+                                    cli_chan.send(msg);
+                                    data_manager.asset_list_loaded = false;
+                                });
                             });
-                            row.col(|ui| {
-                                ui.label(format!["{}", asset.exchange]);
-                            });
-                            row.col(|ui| {
-                                if let Some(start_time) =
-                                    chrono::NaiveDateTime::from_timestamp_millis(asset.dat_start_t)
-                                {
-                                    ui.label(format!["{}", start_time]);
-                                } else {
-                                    ui.label(format!["NaN"]);
-                                };
-                            });
-                            row.col(|ui| {
-                                if let Some(end_time) =
-                                    chrono::NaiveDateTime::from_timestamp_millis(asset.dat_end_t)
-                                {
-                                    ui.label(format!["{}", end_time]);
-                                } else {
-                                    ui.label(format!["NaN"]);
-                                };
-                            });
-                            row.col(|ui| if ui.button("Delete").clicked() {});
-                        });
+                        };
                     }
                 });
         });
@@ -3078,18 +3079,19 @@ impl HistPlot {
         hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
     ) {
-        if hist_plot.part_loaded==true{
-            if let Some(ref klines)= hist_plot.att_klines{
+        if hist_plot.part_loaded == true {
+            if let Some(ref klines) = hist_plot.att_klines {
                 hist_plot.kline_plot.add_hist(&klines);
             };
         };
-        hist_plot.kline_plot.show_live(ui, plot_extras, hist_ad, None);
+        hist_plot
+            .kline_plot
+            .show_live(ui, plot_extras, hist_ad, None);
 
-        if hist_plot.intv != hist_plot.last_intv{
-            hist_plot.last_intv=hist_plot.intv;
-            hist_plot.kline_plot.intv=hist_plot.intv;
+        if hist_plot.intv != hist_plot.last_intv {
+            hist_plot.last_intv = hist_plot.intv;
+            hist_plot.kline_plot.intv = hist_plot.intv;
         };
-
 
         ui.end_row();
         egui::Grid::new("Hplot order assets:")
@@ -3113,6 +3115,7 @@ impl HistPlot {
                     });
                 }
                  * */
+                ui.label(RichText::new(format!["Jump to:"]).color(Color32::WHITE));
                 ui.add(
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date)
                         .id_salt("trade_time"),
@@ -3126,53 +3129,55 @@ impl HistPlot {
                         .id_salt("hist_end"),
                 );
                 ui.end_row();
-                if ui.button("Trade time").clicked() {
-
-                }
+                if ui.button("Trade time").clicked() {}
                 if ui.button("Load Asset - part data").clicked() {
-                    let st=match hist_plot.picked_date.and_hms_opt(0, 0, 0){
-                        Some(st)=>st,
+                    let st = match hist_plot.picked_date.and_hms_opt(0, 0, 0) {
+                        Some(st) => st,
                         None => {
                             tracing::error!["GUI: could not parse picked date!"];
                             chrono::NaiveDateTime::default()
                         }
-                    }.timestamp_millis();
-                    let et=match hist_plot.picked_date_end.and_hms_opt(0, 0, 0){
-                        Some(st)=>st,
+                    }
+                    .timestamp_millis();
+                    let et = match hist_plot.picked_date_end.and_hms_opt(0, 0, 0) {
+                        Some(st) => st,
                         None => {
                             tracing::error!["GUI: could not parse picked date!"];
                             chrono::NaiveDateTime::default()
                         }
-                    }.timestamp_millis();
+                    }
+                    .timestamp_millis();
                     let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart {
-                        symbol: hist_plot.search_load_string.clone(), start:st, end:et
+                        symbol: hist_plot.search_load_string.clone(),
+                        start: st,
+                        end: et,
                     });
-                    hist_plot.part_loaded=true;
+                    hist_plot.part_loaded = true;
                     cli_chan.send(msg);
                 }
                 if ui.button("Load Asset - all data").clicked() {
-                    let s=hist_plot.search_load_string.clone();
+                    let s = hist_plot.search_load_string.clone();
                     let ad = hist_plot
                         .hist_asset_data
                         .lock()
                         .expect("Posoned mutex! - Hist asset data");
 
                     //NOTE validate assed DL before checking
-                    hist_plot.kline_plot.symbol=s.clone();
+                    hist_plot.kline_plot.symbol = s.clone();
 
-                    let res=ad.kline_data.get(&s.clone());
-                    match res{
+                    let res = ad.kline_data.get(&s.clone());
+                    match res {
                         Some(_) => {
                             tracing::error!["Data for asset {} already loaded!", &s];
-                        },
+                        }
                         None => {
-                            let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistData {
-                                symbol: hist_plot.search_load_string.clone(),
-                            });
+                            let msg =
+                                ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistData {
+                                    symbol: hist_plot.search_load_string.clone(),
+                                });
                             cli_chan.send(msg);
                         }
                     };
-
                 }
                 ui.end_row();
                 /*
@@ -3205,20 +3210,19 @@ impl HistPlot {
                         .hint_text("Unload asset"),
                 );
                 if ui.button("Unload").clicked() {
-                        let s = &hist_plot.unload_search_string.clone();
-                        let mut ad = hist_plot
-                            .hist_asset_data
-                            .lock()
-                            .expect("Posoned mutex! - Hist asset data");
-                        let res=ad.kline_data.get(&s.clone());
-                        match res{
-                            Some(_) => {
-                                tracing::info!["Remove data for asset {}", &s];
-                                ad.kline_data.remove(s);
-                            },
-                            None => tracing::error!["Data for asset {} not loaded!", &s],
-                        };
-
+                    let s = &hist_plot.unload_search_string.clone();
+                    let mut ad = hist_plot
+                        .hist_asset_data
+                        .lock()
+                        .expect("Posoned mutex! - Hist asset data");
+                    let res = ad.kline_data.get(&s.clone());
+                    match res {
+                        Some(_) => {
+                            tracing::info!["Remove data for asset {}", &s];
+                            ad.kline_data.remove(s);
+                        }
+                        None => tracing::error!["Data for asset {} not loaded!", &s],
+                    };
                 };
             });
         egui::Grid::new("Hplot forwards:").show(ui, |ui| {

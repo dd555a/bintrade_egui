@@ -2,7 +2,6 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Tim
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env, path::Path, result::Result as OCResult, str::FromStr};
 
-
 use tokio::sync::oneshot;
 
 use std::sync::{Arc, Mutex};
@@ -105,14 +104,14 @@ async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Re
         None => {
             log::info!("Load all data:{}", intv);
             &format!(
-                "SELECT [Timestamp MS], Open, High, Low, Close, Volume  FROM {};",
+                "SELECT [Open Time], Open, High, Low, Close, Volume  FROM {};",
                 intv
             )
         }
         Some((ts, te)) => {
             log::info!("Load data between {} and {}", ts, te);
             &format!(
-                "SELECT [Timestamp MS], Open, High, Low, Close, Volume  FROM {} WHERE {} <= [Timestamp ms] <= {};",
+                "SELECT [Open Time], Open, High, Low, Close, Volume  FROM {} WHERE {} <= [Timestamp ms] <= {};",
                 intv, ts, te,
             )
         }
@@ -191,7 +190,7 @@ async fn append_kline(
     assert!(input.len() <= 65535 / 11);
     query_builder.push_values(
         input.iter(),
-        |mut b, (tt, t, o, h, l, c, v, ctt, ct, qav, no, qbbav, abtav)| {
+        |mut b, (t, tt, o, h, l, c, v, ctt, ct, qav, no, qbbav, abtav)| {
             b.push_bind(t)
                 .push_bind(tt)
                 .push_bind(o)
@@ -390,20 +389,20 @@ impl Intv {
     }
     pub fn to_view_window(&self) -> usize {
         match &self {
-            Intv::Min1 =>   1440,
-            Intv::Min3 =>   1440,
-            Intv::Min5 =>   1440,
-            Intv::Min15 =>  1440,
-            Intv::Min30 =>  775,
-            Intv::Hour1 =>  775,
-            Intv::Hour2 =>  775,
-            Intv::Hour4 =>  775,
-            Intv::Hour6 =>  775,
-            Intv::Hour8 =>  775,
+            Intv::Min1 => 1440,
+            Intv::Min3 => 1440,
+            Intv::Min5 => 1440,
+            Intv::Min15 => 1440,
+            Intv::Min30 => 775,
+            Intv::Hour1 => 775,
+            Intv::Hour2 => 775,
+            Intv::Hour4 => 775,
+            Intv::Hour6 => 775,
+            Intv::Hour8 => 775,
             Intv::Hour12 => 775,
-            Intv::Day1 =>   250,
-            Intv::Day3 =>   300,
-            Intv::Week1 =>  300,
+            Intv::Day1 => 250,
+            Intv::Day3 => 300,
+            Intv::Week1 => 300,
             Intv::Month1 => 300,
         }
     }
@@ -675,7 +674,7 @@ pub struct AssetData {
     pub size: usize,
     pub kline_data: HashMap<String, Klines>,
     pub downloaded_assets: Vec<DLAsset>,
-    pub temp_kline:Option<Klines>
+    pub temp_kline: Option<Klines>,
 }
 
 impl AssetData {
@@ -698,7 +697,7 @@ impl AssetData {
             size: 0,
             kline_data: HashMap::new(),
             downloaded_assets: vec![],
-            temp_kline:None
+            temp_kline: None,
         }
     }
     //#[instrument(level="debug")]
@@ -926,7 +925,7 @@ pub fn get_data_binance(
         Some(start_time) => start_time,
         None => 0,
     };
-    tracing::debug!["INTV DL Timestamp: {}", timestamp];
+    tracing::trace!["INTV DL Timestamp: {}", timestamp];
 
     //+1 to avoid duplicates)
     let curr_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
@@ -965,8 +964,8 @@ pub fn get_data_binance(
             Err(err) => Err(anyhow!("Binance error:{:?}", err)),
         };
         let k = kunt?;
-        tracing::debug!["Kline chunk: {:?}", k];
-        tracing::debug![
+        tracing::trace!["Kline chunk: {:?}", k];
+        tracing::trace![
             "Kline timestamp: {}",
             chrono::NaiveDateTime::from_timestamp_millis(timestamp + intv.to_ms() * n * 500)
                 .ok_or(anyhow!["FFFUCK"])
@@ -1067,8 +1066,8 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
 
     let symbol_inf = symbol_info_full.chunks(100);
     let fut_symbol_inf = fut_symbol_info_full.chunks(100);
-    tracing::debug!["Symbol info: {:?}", symbol_inf];
-    tracing::debug!["Symbol fut info: {:?}", fut_symbol_inf];
+    tracing::trace!["Symbol info: {:?}", symbol_inf];
+    tracing::trace!["Symbol fut info: {:?}", fut_symbol_inf];
 
     for symbol_info in symbol_inf {
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
@@ -1083,7 +1082,7 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
         });
         let mut query = query_builder.build();
         let result = query.execute(metadata_db).await?;
-        log::info!("{:?}", result);
+        log::trace!("{:?}", result);
     }
     for fut_symbol_info in fut_symbol_inf {
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
@@ -1100,7 +1099,7 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
         });
         let mut query = query_builder.build();
         let result = query.execute(metadata_db).await?;
-        log::info!("{:?}", result);
+        log::trace!("{:?}", result);
     }
     Ok(())
 }
@@ -1273,7 +1272,7 @@ async fn intv_dl_klines(
         for i in Intv::iter() {
             let kl = get_data_binance(&client, &s, i, start_time, end_time)?;
             if kl.kline.is_empty() {
-                tracing::info!["Kline empty: {:?}, for interval {}", &kl, i.to_str()];
+                tracing::trace!["Kline empty: {:?}, for interval {}", &kl, i.to_str()];
             }
             klines.insert_fat(&i, kl);
         }
@@ -1462,16 +1461,20 @@ async fn get_asset_timestamps(
     ];
     let timestamps_meta: (Option<i64>, Option<i64>) =
         sqlx::query_as(q).fetch_one(metadata_db).await?;
+    match timestamps_meta.0 {
+        Some(_) => {
+            tracing::error!["Timestamps meta called!"];
+            return Ok((timestamps_meta.0, timestamps_meta.1));
+        }
+            ,
+        None => (),
+    };
     let qf = &format![
         "SELECT [onboardDate], [deliveryDate] FROM assets_fut WHERE Asset = '{}';",
         symbol
     ];
     let timestamps_fut: (Option<i64>, Option<i64>) =
         sqlx::query_as(qf).fetch_one(metadata_db).await?;
-    match timestamps_meta.0 {
-        Some(_) => return Ok((timestamps_meta.0, timestamps_meta.1)),
-        None => (),
-    };
     Ok((timestamps_fut.0, timestamps_fut.1))
 }
 
@@ -1494,7 +1497,12 @@ impl SQLConn {
     ) -> Result<()> {
         todo!()
     }
-    async fn load_part_data(&mut self, symbol: &str, start_time:&i64, end_time:&i64) -> Result<()> {
+    async fn load_part_data(
+        &mut self,
+        symbol: &str,
+        start_time: &i64,
+        end_time: &i64,
+    ) -> Result<()> {
         let s: String = symbol.to_string();
         let pool = connect_sqlite(format!["{}/Asset{}.db", &self.db_path, &symbol])
             .await
@@ -1503,14 +1511,18 @@ impl SQLConn {
         for intv in Intv::iter() {
             let s: &str = intv.to_str();
             println!("Loading data for:{} interval:{}", symbol, s);
-            let k: Kline = kfrom_sql(&pool, &format!["kline_{}", &s], Some((*start_time, *end_time)))
-                .await
-                .context("SQL : unable to connect to db")?;
+            let k: Kline = kfrom_sql(
+                &pool,
+                &format!["kline_{}", &s],
+                Some((*start_time, *end_time)),
+            )
+            .await
+            .context("SQL : unable to connect to db")?;
             klines.dat.insert(intv, k);
         }
         let ad_a = Arc::clone(&mut self.hist_asset_data);
         let mut ad = ad_a.lock().expect("Posioned AD mutex! (DATA)");
-        ad.temp_kline=Some(klines);
+        ad.temp_kline = Some(klines);
         Ok(())
     }
     #[instrument(level = "trace")]
@@ -1527,7 +1539,11 @@ impl SQLConn {
                 .await
                 .context("SQL : unable to connect to db")?;
 
-            tracing::debug!["LOAD ALL DATA - START:{} END:{}",k.kline[0].0, k.kline[k.kline.len()-1].0];
+            tracing::debug![
+                "LOAD ALL DATA - START:{} END:{}",
+                k.kline[0].0,
+                k.kline[k.kline.len() - 1].0
+            ];
             klines.dat.insert(intv, k);
         }
         let ad_a = Arc::clone(&mut self.hist_asset_data);
@@ -1542,7 +1558,13 @@ impl SQLConn {
         tracing::debug!["Asset Data SQL CONNECT = {}", ad.debug()];
         Ok(())
     }
-    pub async fn del_single_asset(&self, asset_symbol: &str) -> Result<()> {
+    pub async fn del_single_asset(&self, asset_symbol: &str, meta_pool:&Pool<Sqlite>) -> Result<()> {
+        let q = format!(
+            "
+        DELETE FROM assets_dl WHERE asset = '{}';",
+            asset_symbol
+        );
+        exec_query(&meta_pool, &q).await?;
         let db_path = format!["./databases/Asset{}.db", asset_symbol];
         let file_path = std::path::Path::new(&db_path);
         std::fs::remove_file(file_path)?;
@@ -1581,65 +1603,22 @@ impl SQLConn {
         current_timestamp: i64,
     ) -> Result<()> {
         let db_path = format!["./databases/Asset{}.db", asset_symbol];
-        if Sqlite::database_exists(&db_path).await? == false {
+        let exch = Exchange::from(exchange);
+
+        let (klines, start_time)=if Sqlite::database_exists(&db_path).await? == false {
             create_db(&db_path).await?;
             let apool = connect_sqlite(&db_path).await?;
             cr_kl_tables(&apool).await?;
             tracing::debug!["Created database {} and created tables", &db_path];
 
             apool.close().await;
-        };
-        let (start_time_ms, end_time_ms) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+            let (start_time,_)=get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+            (download_asset_data(&asset_symbol, &exch, start_time, Some(current_timestamp)).await?, start_time)
 
-        /////////////////////////////////////////////////////////////////////////////////////////////////////
-        ///
-        //NOTE debug
-        let start_t = if let Some(start_ti) = start_time_ms {
-            start_ti
-        } else {
-            0
+        }else{
+            let (start_time_ms, end_time_ms)=get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+            (download_asset_data(&asset_symbol, &exch, end_time_ms, Some(current_timestamp)).await?, start_time_ms) 
         };
-        let end_t = if let Some(end_ti) = end_time_ms {
-            end_ti
-        } else {
-            0
-        };
-
-        tracing::trace![
-            "get start times for:{} \n Start: {} \n End: {}",
-            asset_symbol,
-            NaiveDateTime::from_timestamp_millis(start_t).ok_or(anyhow!["FFCUK"])?,
-            NaiveDateTime::from_timestamp_millis(end_t).ok_or(anyhow!["FFCUK"])?
-        ];
-        //let start_time_ms=Some(1769950725000 as i64); //1st Feb 2026 NOTE testing only remov
-        /////////////////////////////////////////////////////////////////////////////////////////////////////
-        ///
-        let st: String = if let Some(start_time_ms) = start_time_ms {
-            let t = chrono::NaiveDateTime::from_timestamp_millis(start_time_ms)
-                .ok_or(anyhow!["HAS TO BE SOME HERE!"])
-                .expect("HAS TO BE SOME HERE");
-            format!["{}", t]
-        } else {
-            "None".to_string()
-        };
-        let et: String = if let Some(end_time_ms) = end_time_ms {
-            let t = chrono::NaiveDateTime::from_timestamp_millis(end_time_ms)
-                .ok_or(anyhow!["HAS TO BE SOME HERE!"])
-                .expect("HAS TO BE SOME HERE");
-            format!["{}", t]
-        } else {
-            "None".to_string()
-        };
-        tracing::trace![
-            "Start end timestamps for: {} Start: {:?} End: {:?}",
-            asset_symbol,
-            st,
-            et
-        ];
-        let exch = Exchange::from(exchange);
-
-        let klines =
-            download_asset_data(&asset_symbol, &exch, end_time_ms, Some(current_timestamp)).await?;
 
         let apool = connect_sqlite(&db_path).await?;
         for i in Intv::iter() {
@@ -1662,25 +1641,26 @@ impl SQLConn {
                     }
                 }?;
             } else {
-                tracing::info!["SQL append kline empty, doing nothing"]
+                tracing::trace!["SQL append kline empty, doing nothing"]
             }
-        }
-        let start_timestamp = match start_time_ms {
-            Some(start_timestamp) => start_timestamp,
-            None => {
-                tracing::error!["WRONG START TIME: NONE"];
+        };
+
+        let start_timestamp=match start_time{
+            Some(st)=>st,
+            None=> {
+                tracing::error!["START TIME SHOULD NO BE NONE!"];
                 0
             }
         };
 
-        //NOTE see if the hack bellow works....
         let res = update_asset_metadata_time(
             &apool,
             &meta_pool,
             asset_symbol,
             "Binance",
             start_timestamp,
-            current_timestamp -6000*30,
+            current_timestamp - 6000 * 30, //ROllback start time by 30 minutes and set
+                                           //current_timestamp as END_TIME for the data.
         )
         .await;
         match res {
@@ -1696,7 +1676,6 @@ impl SQLConn {
     }
     pub async fn update_data(&self) -> Result<()> {
         tracing::debug!["Update_data called"];
-        //check if database exists, create if not
         if Sqlite::database_exists(&metadata_db_path).await? == false {
             create_metadata_db().await?;
             tracing::debug!["Metadata DB created"];
@@ -1704,11 +1683,10 @@ impl SQLConn {
         let meta_pool = SqlitePool::connect(&metadata_db_path)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
+
         download_asset_list_binance(&meta_pool).await?;
 
-        //NOTE download both asset lists
-        //locally handle the above error
-        tracing::debug!["Asset list updated"];
+        tracing::trace!["Asset list updated"];
         let asset_list = dl_load_asset_list(&meta_pool).await?;
         tracing::debug!["DL asset list loaded"];
         let current_timestamp_ms: i64 = match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -1727,7 +1705,6 @@ impl SQLConn {
         //doesn't have it... idk
         //
         //Asset list loaded here, and operations executed for each asset
-        //
         meta_pool.close().await;
 
         let meta_pool = SqlitePool::connect(&metadata_db_path)
@@ -1771,6 +1748,7 @@ impl SQLConn {
         let validate = self
             .validate_asset_binance(&meta_pool, symbol, exchange)
             .await?;
+        tracing::debug!["Asset validated! {:?}", validate];
         match validate {
             true => (),
             false => {
@@ -1781,7 +1759,7 @@ impl SQLConn {
         };
         let q = format!(
             "
-        INSERT OR REPLACE INTO metadata (Symbol, Exchange, [End Time], [Start Time] )
+        INSERT OR REPLACE INTO assets_dl (Asset, Exchange)
         VALUES('{}', '{}');",
             symbol, exchange
         );
@@ -1789,12 +1767,7 @@ impl SQLConn {
         meta_pool.close().await;
         Ok(())
     }
-    async fn validate_asset_dl(
-        &self,
-        meta_pool: &Pool<Sqlite>,
-        symbol: &str,
-    ) -> Result<bool> {
-
+    async fn validate_asset_dl(&self, meta_pool: &Pool<Sqlite>, symbol: &str) -> Result<bool> {
         let res: (Option<String>,) = sqlx::query_as(
             format!(
                 "SELECT 
@@ -1819,7 +1792,7 @@ impl SQLConn {
         let res: (Option<String>,) = sqlx::query_as(
             format!(
                 "SELECT 
-    [Asset] FROM assets WHERE Asset = {};",
+    [Asset] FROM assets WHERE Asset = '{}';",
                 symbol
             )
             .as_str(),
@@ -1842,8 +1815,8 @@ impl SQLConn {
                 let meta_pool = SqlitePool::connect(&metadata_db_path)
                     .await
                     .context(anyhow!("SQL::Unable to metadata connect to db"));
-                let meta_pool = match meta_pool{
-                    Ok(pool)=>pool,
+                let meta_pool = match meta_pool {
+                    Ok(pool) => pool,
                     Err(e) => {
                         let err_string = format!["{}", e];
                         log::error!("{}", err_string);
@@ -1851,17 +1824,17 @@ impl SQLConn {
                     }
                 };
 
-                let res=self.validate_asset_dl(&meta_pool, s).await;
-                let valid=match res{
-                    Ok(v)=>v,
-                    Err(e)=>{
+                let res = self.validate_asset_dl(&meta_pool, s).await;
+                let valid = match res {
+                    Ok(v) => v,
+                    Err(e) => {
                         let err_string = format!["{}", e];
                         log::error!("Asset validation failed {}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
-                if valid==false{
-                    let err_string="ERROR:Asset not in asset list!".to_string();
+                if valid == false {
+                    let err_string = "ERROR:Asset not in asset list!".to_string();
                     log::error!("{}", err_string);
                     return SQLResponse::Failure((err_string, GeneralError::Generic));
                 };
@@ -1879,31 +1852,35 @@ impl SQLConn {
                 };
                 resp
             }
-            SQLInstructs::LoadHistDataPart { symbol: ref s, start: ref st, end: ref et} => {
+            SQLInstructs::LoadHistDataPart {
+                symbol: ref s,
+                start: ref st,
+                end: ref et,
+            } => {
                 log::info!("Loading historical data for:{}", s);
 
                 let meta_pool = SqlitePool::connect(&metadata_db_path)
                     .await
                     .context(anyhow!("SQL::Unable to metadata connect to db"));
-                let meta_pool = match meta_pool{
-                    Ok(pool)=>pool,
+                let meta_pool = match meta_pool {
+                    Ok(pool) => pool,
                     Err(e) => {
                         let err_string = format!["{}", e];
                         log::error!("{}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
-                let res=self.validate_asset_dl(&meta_pool, s).await;
-                let valid=match res{
-                    Ok(v)=>v,
-                    Err(e)=>{
+                let res = self.validate_asset_dl(&meta_pool, s).await;
+                let valid = match res {
+                    Ok(v) => v,
+                    Err(e) => {
                         let err_string = format!["{}", e];
                         log::error!("{}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
-                if valid==false{
-                    let err_string="ERROR:Asset not in asset list!".to_string();
+                if valid == false {
+                    let err_string = "ERROR:Asset not in asset list!".to_string();
                     log::error!("{}", err_string);
                     return SQLResponse::Failure((err_string, GeneralError::Generic));
                 };
@@ -1938,11 +1915,22 @@ impl SQLConn {
             SQLInstructs::LoadTradeRecord { id: ref id } => {
                 todo!()
             }
-            SQLInstructs::None => {
-                SQLResponse::None
-            }
+            SQLInstructs::None => SQLResponse::None,
             SQLInstructs::DelAsset { symbol: ref symbol } => {
-                let res=self.del_single_asset(symbol).await;
+                let meta_pool = SqlitePool::connect(&metadata_db_path)
+                    .await
+                    .context(anyhow!("SQL::Unable to metadata connect to db"));
+                let meta_pool = match meta_pool {
+                    Ok(pool) => pool,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!("{}", err_string);
+                        return SQLResponse::Failure((err_string, GeneralError::Generic));
+                    }
+                };
+                let res = self.del_single_asset(symbol, &meta_pool).await;
+                tracing::info!["Deleted asset historical data for: {}", symbol];
+                meta_pool.close().await;
                 //TODO - clean this up and turn bellow into a macro
                 let resp = match res {
                     Ok(_) => SQLResponse::Success,
@@ -1958,7 +1946,7 @@ impl SQLConn {
                 resp
             }
             SQLInstructs::DelAll => {
-                let res=self.del_all_assets().await;
+                let res = self.del_all_assets().await;
                 let resp = match res {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
