@@ -19,7 +19,7 @@ use eframe::egui::{self, DragValue, Event, Vec2};
 
 use crate::{ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse};
 
-use crate::binance::KlineTick;
+use crate::conn::KlineTick;
 
 use egui::{Color32, ComboBox, epaint};
 use egui_plot_bintrade::{
@@ -34,7 +34,7 @@ use crate::data::{AssetData, Intv};
 use crate::trade::{HistTrade, LimitStatus, Order, Quant, StopStatus};
 use std::collections::BTreeMap;
 
-use crate::binance::SymbolOutput;
+use crate::conn::SymbolOutput;
 
 #[derive(PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -118,6 +118,7 @@ const WICKS_VISIBLE: usize = 90;
 const NAVI_WICKS_DEFAULT: u16 = 30;
 const CHART_FORWARD: u16 = 40;
 const VIEW_WINDOW: usize = 3_000;
+const DEFAULT_TRADE_WICKS: u16 = 30;
 
 impl KlinePlot {
     fn show_empty(&self, ui: &mut egui::Ui) {
@@ -437,7 +438,6 @@ impl KlinePlot {
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
         data: &SymbolOutput,
     ) -> Result<()> {
-
         let mut k = if let Some(ck) = data.closed_klines.get(&intv) {
             KlineTick::to_kline_vec(ck)
         } else {
@@ -448,8 +448,8 @@ impl KlinePlot {
         } else {
             vec![]
         };
-        if ok.is_empty()==false{
-            let last_tick=ok[ok.len()-1];
+        if ok.is_empty() == false {
+            let last_tick = ok[ok.len() - 1];
             k.push(last_tick);
         };
         let (div, width) = get_chart_params(&intv);
@@ -2442,17 +2442,17 @@ impl LivePlot {
         egui::Grid::new("Hplot order assets:")
             .striped(true)
             .show(ui, |ui| {
-                egui::ComboBox::from_label("Interval")
+                egui::ComboBox::from_label("")
                     .selected_text(format!("{}", live_plot.intv.to_str()))
                     .show_ui(ui, |ui| {
                         for i in Intv::iter() {
                             ui.selectable_value(&mut live_plot.intv, i, i.to_str());
                         }
                     });
-                let search = ui.add(
-                    egui::TextEdit::singleline(&mut live_plot.search_string).hint_text("Search"),
+                let search = ui.add_sized(
+                    egui::vec2(100.0, 20.0),
+                    egui::TextEdit::singleline(&mut live_plot.search_string).hint_text("Search for asset"),
                 );
-                ui.label("Search for asset symbol");
                 let s = &live_plot.search_string.clone();
                 let i = live_plot.intv;
 
@@ -2499,6 +2499,14 @@ struct HistPlot {
     last_intv: Intv,
     picked_date: chrono::NaiveDate,
     picked_date_end: chrono::NaiveDate,
+
+
+    trade_h: u16,
+    trade_min: u16,
+
+    trade_h_s: String,
+    trade_min_s: String,
+
     hist_extras: Option<HistExtras>,
     hist_trade: HistTrade,
 
@@ -2509,6 +2517,8 @@ struct HistPlot {
     trade_wicks_s: String,
 
     pub trade_time: i64,
+    pub last_trade_time:i64,
+
     pub att_klines: Option<Klines>,
     pub part_loaded: bool,
 }
@@ -2548,17 +2558,28 @@ impl Default for HistPlot {
             hist_trade: HistTrade::default(),
 
             navi_wicks: 200,
-            trade_wicks: 20,
+            trade_wicks: DEFAULT_TRADE_WICKS,
 
             navi_wicks_s: "200".to_string(),
-            trade_wicks_s: "20".to_string(),
+            trade_wicks_s: "30".to_string(),
 
-            trade_time: 0,
+
+            trade_h: 0,
+            trade_min: 0,
+
+            trade_h_s: "00".to_string(),
+            trade_min_s: "00".to_string(),
+
+            trade_time: curr_date.and_hms(0,0,0).timestamp_millis(),
+            last_trade_time: curr_date.and_hms(0,0,0).timestamp_millis(),
+
             att_klines: None,
             part_loaded: false,
         }
     }
 }
+
+const BACKLOAD_WICKS:i64=3000;
 
 use crate::data::DLAsset;
 
@@ -2859,8 +2880,8 @@ impl DataManager {
                 .hist_asset_data
                 .lock()
                 .expect("Unable to unlock mutex: DATA MANAGER");
-            if ad.downloaded_assets.is_empty()==true{
-            }else{
+            if ad.downloaded_assets.is_empty() == true {
+            } else {
                 data_manager.asset_list = ad.downloaded_assets.clone();
                 data_manager.asset_list_loaded = true;
             }
@@ -2902,7 +2923,7 @@ impl DataManager {
                 })
                 .body(|mut body| {
                     for (asset) in data_manager.asset_list.iter() {
-                        if asset.asset != "TEST"{
+                        if asset.asset != "TEST" {
                             let row_height = 18.0;
                             body.row(row_height, |mut row| {
                                 row.col(|ui| {
@@ -2913,7 +2934,9 @@ impl DataManager {
                                 });
                                 row.col(|ui| {
                                     if let Some(start_time) =
-                                        chrono::NaiveDateTime::from_timestamp_millis(asset.dat_start_t)
+                                        chrono::NaiveDateTime::from_timestamp_millis(
+                                            asset.dat_start_t,
+                                        )
                                     {
                                         ui.label(format!["{}", start_time]);
                                     } else {
@@ -2922,17 +2945,25 @@ impl DataManager {
                                 });
                                 row.col(|ui| {
                                     if let Some(end_time) =
-                                        chrono::NaiveDateTime::from_timestamp_millis(asset.dat_end_t)
+                                        chrono::NaiveDateTime::from_timestamp_millis(
+                                            asset.dat_end_t,
+                                        )
                                     {
                                         ui.label(format!["{}", end_time]);
                                     } else {
                                         ui.label(format!["NaN"]);
                                     };
                                 });
-                                row.col(|ui| if ui.button("Delete").clicked() {
-                                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::DelAsset{symbol:asset.asset.clone()});
-                                    cli_chan.send(msg);
-                                    data_manager.asset_list_loaded = false;
+                                row.col(|ui| {
+                                    if ui.button("Delete").clicked() {
+                                        let msg = ClientInstruct::SendSQLInstructs(
+                                            SQLInstructs::DelAsset {
+                                                symbol: asset.asset.clone(),
+                                            },
+                                        );
+                                        cli_chan.send(msg);
+                                        data_manager.asset_list_loaded = false;
+                                    }
                                 });
                             });
                         };
@@ -3095,16 +3126,16 @@ impl HistPlot {
         egui::Grid::new("Hplot order assets:")
             .striped(true)
             .show(ui, |ui| {
-                egui::ComboBox::from_label("Interval")
+                egui::ComboBox::from_label("")
                     .selected_text(format!("{}", hist_plot.intv.to_str()))
                     .show_ui(ui, |ui| {
                         for i in Intv::iter() {
                             ui.selectable_value(&mut hist_plot.intv, i, i.to_str());
                         }
                     });
-                ui.add(
-                    egui::TextEdit::singleline(&mut hist_plot.search_load_string)
-                        .hint_text("Search for asset"),
+                ui.add_sized(
+                    egui::vec2(100.0, 20.0),
+                    egui::TextEdit::singleline(&mut hist_plot.search_load_string).hint_text("Search for asset"),
                 );
                 /*
                 if ui.button("Search").clicked() {
@@ -3113,11 +3144,79 @@ impl HistPlot {
                     });
                 }
                  * */
-                ui.label(RichText::new(format!["Jump to:"]).color(Color32::WHITE));
+                //ui.label(RichText::new(format!["Jump to:"]).color(Color32::WHITE));
                 ui.add(
-                    egui_extras::DatePickerButton::new(&mut hist_plot.picked_date)
+                    egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
                         .id_salt("trade_time"),
                 );
+                ui.add(egui::TextEdit::singleline(&mut hist_plot.trade_h_s).hint_text("Trade hours"));
+                /*
+                ui.add_sized(
+                    egui::vec2(0.5, 20.0),
+                    egui::Label::new(":"),
+                );
+                */
+                ui.add(egui::TextEdit::singleline(&mut hist_plot.trade_min_s).hint_text("Trade mins"));
+                if ui.button("Go to").clicked() {
+                    let res: Result<u16, ParseIntError> = hist_plot.trade_h_s.parse();
+                    let trade_h= match res {
+                        Ok(n) => {
+                            if n <= 23{
+                                n
+                            }else{
+                                tracing::error!["Unable to parse hour: larger than 23"];
+                                hist_plot.trade_h_s="00".to_string();
+                                0
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!["Parsing error for hour: {}", e];
+                            0
+                        }
+                    };
+                    let res: Result<u16, ParseIntError> = hist_plot.trade_min_s.parse();
+                    let trade_min= match res {
+                        Ok(n) => {
+                            if n <= 59{
+                                n
+                            }else{
+                                tracing::error!["Unable to parse minutes: larger than 59"];
+                                hist_plot.trade_min_s="00".to_string();
+                                0
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!["Parsing error for hour: {}", e];
+                            0
+                        }
+                    };
+                    let trade_time=hist_plot.picked_date_end.and_hms(trade_h.into(),trade_min.into(),0);
+                    //FIXME click here
+                };
+                //ui.end_row();
+                if ui.button("Trade N wicks >>").clicked() {
+                    let res: Result<u16, ParseIntError> = hist_plot.trade_wicks_s.parse();
+                    let n_wicks = match res {
+                        Ok(n) => n,
+                        Err(e) => {
+                            tracing::error!["Parsing error for trade wicks: {}", e];
+                            hist_plot.trade_wicks_s=format!["{}",DEFAULT_TRADE_WICKS];
+                            DEFAULT_TRADE_WICKS
+                        }
+                    };
+                    hist_plot.navi_wicks = n_wicks;
+                    //TODO change trade time whenever symbol is changed to latest data point
+                    //
+                    hist_plot.hist_trade.trade_time = hist_plot.trade_time;
+                    let res = hist_plot.hist_trade.trade_forward(n_wicks);
+                    hist_plot.hist_trade.trade_time =
+                        hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
+                }
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s).hint_text("Trade N wicks"),
+                );
+                ui.end_row();
+                /*
                 ui.add(
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date)
                         .id_salt("hist_start"),
@@ -3126,8 +3225,9 @@ impl HistPlot {
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
                         .id_salt("hist_end"),
                 );
-                ui.end_row();
-                if ui.button("Trade time").clicked() {}
+                 * */
+                //if ui.button("Trade time").clicked() {}
+                /*
                 if ui.button("Load Asset - part data").clicked() {
                     let st = match hist_plot.picked_date.and_hms_opt(0, 0, 0) {
                         Some(st) => st,
@@ -3178,6 +3278,7 @@ impl HistPlot {
                     };
                 }
                 ui.end_row();
+                 * */
                 /*
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.loaded_search_string)
@@ -3202,7 +3303,6 @@ impl HistPlot {
                         }
                     };
                 }
-                 * */
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.unload_search_string)
                         .hint_text("Unload asset"),
@@ -3222,29 +3322,8 @@ impl HistPlot {
                         None => tracing::error!["Data for asset {} not loaded!", &s],
                     };
                 };
+                **/
             });
-        egui::Grid::new("Hplot forwards:").show(ui, |ui| {
-            if ui.button("Trade >>").clicked() {
-                let res: Result<u16, ParseIntError> = hist_plot.trade_wicks_s.parse();
-                let n_wicks = match res {
-                    Ok(n) => n,
-                    Err(e) => {
-                        tracing::error!["Parsing error for trade wicks: {}", e];
-                        0
-                    }
-                };
-                hist_plot.navi_wicks = n_wicks;
-                //TODO change trade time whenever symbol is changed to latest data point
-                //
-                hist_plot.hist_trade.trade_time = hist_plot.trade_time;
-                let res = hist_plot.hist_trade.trade_forward(n_wicks);
-                hist_plot.hist_trade.trade_time =
-                    hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
-            }
-            let search = ui.add(
-                egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s).hint_text("Trade N wicks"),
-            );
-        });
     }
 }
 use std::num::ParseIntError;

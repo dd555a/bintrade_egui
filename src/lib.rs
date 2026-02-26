@@ -129,7 +129,7 @@ pub enum BinResponse {
     OrderStatus(i32),
 }
 
-use crate::binance::SymbolOutput;
+use crate::conn::SymbolOutput;
 use std::collections::HashMap;
 
 #[derive(PartialEq, EnumIter, Debug, Clone, Default)]
@@ -231,8 +231,8 @@ impl std::fmt::Display for ClientInstruct {
         write!(f, "{}", self.to_str())
     }
 }
-pub mod binance;
 pub mod client;
+pub mod conn;
 pub mod data;
 pub mod gui;
 pub mod trade;

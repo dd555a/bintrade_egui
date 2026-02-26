@@ -34,8 +34,8 @@ use eframe::EventLoopBuilderHook;
 use eframe::egui;
 use winit::platform::wayland::EventLoopBuilderExtWayland;
 
-use crate::binance::BinanceClient;
-use crate::binance::SymbolOutput;
+use crate::conn::BinanceClient;
+use crate::conn::SymbolOutput;
 use crate::data::AssetData;
 use crate::data::Intv;
 use crate::data::SQLConn;

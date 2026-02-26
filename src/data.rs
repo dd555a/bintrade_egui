@@ -122,6 +122,38 @@ async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Re
     Ok(kline)
 }
 
+async fn kfrom_sql_wcheck(
+    symbol: &str,
+    meta_pool: &Pool<Sqlite>,
+    pool: &Pool<Sqlite>,
+    intv: &Intv,
+    trade_time: i64,
+    no_wicks: usize,
+) -> Result<Option<Kline>> {
+    let q = &format![
+        "SELECT [Start time], [End time] FROM assets_dl WHERE Asset = '{}';",
+        symbol
+    ];
+    let (t_start, t_end): (Option<i64>, Option<i64>) =
+        sqlx::query_as(q).fetch_one(meta_pool).await?;
+
+    if let (Some(t_s), Some(t_e)) = (t_start, t_end) {
+        let within_range = if (t_s <= trade_time && trade_time <= t_e) == true {
+            let kline = kfrom_sql(
+                pool,
+                intv.to_str(),
+                Some((trade_time - intv.to_ms() * (no_wicks as i64), trade_time)),
+            )
+            .await?;
+            return Ok(Some(kline));
+        } else {
+            return Ok(None);
+        };
+    } else {
+        return Err(anyhow!["Timestamps not found!"]);
+    }
+}
+
 #[instrument(level = "debug")]
 async fn get_sql_timestamps(
     pool: &Pool<Sqlite>,
@@ -1010,7 +1042,7 @@ pub fn get_data_binance(
             ),
         );
         progress_bar.inc_and_draw(&bar, n as usize);
-    };
+    }
     return Ok(FatKline::new(kline));
 }
 
@@ -1060,7 +1092,7 @@ async fn create_metadata_db() -> Result<()> {
     Ok(())
 }
 
-use crate::binance::{FutSymbolInfo, SymbolInfo, fut_get_exchange_info, get_exchange_info};
+use crate::conn::{FutSymbolInfo, SymbolInfo, fut_get_exchange_info, get_exchange_info};
 
 async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
     tracing::info!["Fetching exchange info"];
@@ -1470,7 +1502,6 @@ async fn get_asset_timestamps(
             tracing::error!["Timestamps meta called!"];
             return Ok((timestamps_meta.0, timestamps_meta.1));
         }
-            ,
         None => (),
     };
     let qf = &format![
@@ -1562,7 +1593,11 @@ impl SQLConn {
         tracing::debug!["Asset Data SQL CONNECT = {}", ad.debug()];
         Ok(())
     }
-    pub async fn del_single_asset(&self, asset_symbol: &str, meta_pool:&Pool<Sqlite>) -> Result<()> {
+    pub async fn del_single_asset(
+        &self,
+        asset_symbol: &str,
+        meta_pool: &Pool<Sqlite>,
+    ) -> Result<()> {
         let q = format!(
             "
         DELETE FROM assets_dl WHERE asset = '{}';",
@@ -1609,19 +1644,27 @@ impl SQLConn {
         let db_path = format!["./databases/Asset{}.db", asset_symbol];
         let exch = Exchange::from(exchange);
 
-        let (klines, start_time)=if Sqlite::database_exists(&db_path).await? == false {
+        let (klines, start_time) = if Sqlite::database_exists(&db_path).await? == false {
             create_db(&db_path).await?;
             let apool = connect_sqlite(&db_path).await?;
             cr_kl_tables(&apool).await?;
             tracing::debug!["Created database {} and created tables", &db_path];
 
             apool.close().await;
-            let (start_time,_)=get_asset_timestamps(&asset_symbol, &meta_pool).await?;
-            (download_asset_data(&asset_symbol, &exch, start_time, Some(current_timestamp)).await?, start_time)
-
-        }else{
-            let (start_time_ms, end_time_ms)=get_asset_timestamps(&asset_symbol, &meta_pool).await?;
-            (download_asset_data(&asset_symbol, &exch, end_time_ms, Some(current_timestamp)).await?, start_time_ms) 
+            let (start_time, _) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+            (
+                download_asset_data(&asset_symbol, &exch, start_time, Some(current_timestamp))
+                    .await?,
+                start_time,
+            )
+        } else {
+            let (start_time_ms, end_time_ms) =
+                get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+            (
+                download_asset_data(&asset_symbol, &exch, end_time_ms, Some(current_timestamp))
+                    .await?,
+                start_time_ms,
+            )
         };
 
         let apool = connect_sqlite(&db_path).await?;
@@ -1647,11 +1690,11 @@ impl SQLConn {
             } else {
                 tracing::trace!["SQL append kline empty, doing nothing"]
             }
-        };
+        }
 
-        let start_timestamp=match start_time{
-            Some(st)=>st,
-            None=> {
+        let start_timestamp = match start_time {
+            Some(st) => st,
+            None => {
                 tracing::error!["START TIME SHOULD NO BE NONE!"];
                 0
             }
