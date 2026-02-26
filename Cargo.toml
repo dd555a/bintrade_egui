@@ -56,7 +56,4 @@ derive-debug = "0.1.2"
 num = "0.4.3"
 reqwest = { version = "0.13.1", features = ["json", "multipart"] }
 linya = "0.3.1"
-<<<<<<< HEAD
 magic-crypt = "4.0.1"
-=======
->>>>>>> master

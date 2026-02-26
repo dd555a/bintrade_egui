@@ -993,7 +993,6 @@ pub fn get_data_binance(
         > = klines.iter().map(|k| kline_conv(&k)).collect();
         let mut kline_chunk = kl?;
         kline.append(&mut kline_chunk);
-<<<<<<< HEAD
         let current_timestamp_naive = chrono::NaiveDateTime::from_timestamp_millis(curr_timestamp)
             .ok_or(anyhow!["current timestamp couldn't be formatted"])?;
         let timestamp_naive = chrono::NaiveDateTime::from_timestamp_millis(timestamp)
@@ -1011,18 +1010,7 @@ pub fn get_data_binance(
             ),
         );
         progress_bar.inc_and_draw(&bar, n as usize);
-    }
-=======
-        let bar: Bar = progress_bar
-<<<<<<< HEAD
-            .bar(no_iterations as usize, format!("Downloading data for {} {}: {}/{}",&symbol, &intv.to_str(), n, no_iterations));
-        progress_bar.inc_and_draw(&bar, n as usize);
-=======
-            .bar(n as usize, format!("Downloading data for {}: {}/{}",&symbol, n, no_iterations));
-        progress_bar.inc_and_draw(&bar, 1);
->>>>>>> refs/remotes/origin/master
     };
->>>>>>> master
     return Ok(FatKline::new(kline));
 }
 
