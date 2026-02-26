@@ -102,16 +102,16 @@ async fn connect_sqlite<P: AsRef<Path>>(filename: P) -> Result<Pool<Sqlite>> {
 async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Result<Kline> {
     let q: &str = match t {
         None => {
-            log::info!("Load all data:{}", intv);
+            log::info!("kfrom_sql_part Load all data:{}", intv);
             &format!(
                 "SELECT [Open Time], Open, High, Low, Close, Volume  FROM {};",
                 intv
             )
         }
         Some((ts, te)) => {
-            log::info!("Load data between {} and {}", ts, te);
+            log::info!("kfrom_sql_part Load data between {} and {}", ts, te);
             &format!(
-                "SELECT [Open Time], Open, High, Low, Close, Volume  FROM {} WHERE {} <= [Timestamp ms] <= {};",
+                "SELECT [Open Time], Open, High, Low, Close, Volume  FROM '{}' WHERE [Timestamp ms] BETWEEN '{}' AND '{}';",
                 intv, ts, te,
             )
         }
@@ -137,16 +137,26 @@ async fn kfrom_sql_wcheck(
     let (t_start, t_end): (Option<i64>, Option<i64>) =
         sqlx::query_as(q).fetch_one(meta_pool).await?;
 
+    tracing::debug!["kform_sql_wcheck START_TIME {:?} END_TIME {:?} TRADE_TIME {:?}", t_start, t_end, trade_time];
+
     if let (Some(t_s), Some(t_e)) = (t_start, t_end) {
         let within_range = if (t_s <= trade_time && trade_time <= t_e) == true {
+            tracing::debug!["kform_sql_wcheck fetching kline"];
+            let bb=(trade_time - intv.to_ms() * (no_wicks as i64));
+            let back_time=if bb >0 {
+                bb
+            }else{
+                0
+            };
             let kline = kfrom_sql(
                 pool,
-                intv.to_str(),
-                Some((trade_time - intv.to_ms() * (no_wicks as i64), trade_time)),
+                &format!["kline_{}", &intv.to_str()],
+                Some((back_time, trade_time)),
             )
             .await?;
             return Ok(Some(kline));
         } else {
+            tracing::debug!["kform_sql_wcheck time_outside_fetch_range"];
             return Ok(None);
         };
     } else {
@@ -1532,6 +1542,51 @@ impl SQLConn {
     ) -> Result<()> {
         todo!()
     }
+    async fn load_part_data2(
+        &mut self,
+        symbol: &str,
+        trade_time: &i64,
+        backload_wicks: &i64,
+    ) -> Result<()> {
+        let s: String = symbol.to_string();
+        let pool = connect_sqlite(format!["{}/Asset{}.db", &self.db_path, &symbol])
+            .await
+            .context("SQL : unable to connect to db")?;
+
+        let meta_pool = SqlitePool::connect(&metadata_db_path)
+            .await
+            .context(anyhow!("SQL::Unable to metadata connect to db"))?;
+
+        let mut klines = Klines::new_empty();
+        for intv in Intv::iter() {
+            let s: &str = intv.to_str();
+            println!("load_part_data2 Loading data for:{} interval:{}", symbol, s);
+            let k = kfrom_sql_wcheck(
+                &symbol,
+                &meta_pool,
+                &pool,
+                &intv,
+                *trade_time,
+                *backload_wicks as usize,
+            )
+            .await
+            .context("SQL : unable to connect to db")?;
+            if let Some(kl)= k{
+                klines.dat.insert(intv, kl);
+            }else{
+                tracing::info!["KLINE WSCHECK empty for SYMBOL:{} INTERVAL: {}",symbol,intv.to_str()];
+            };
+        };
+        pool.close().await;
+        meta_pool.close().await;
+        let ad_a = Arc::clone(&mut self.hist_asset_data);
+        let mut ad = ad_a.lock().expect("Posioned AD mutex! (DATA)");
+        if let Some(_)=ad.kline_data.get(symbol){
+            ad.kline_data.remove(symbol);
+        };
+        ad.kline_data.insert(symbol.to_string(), klines);
+        Ok(())
+    }
     async fn load_part_data(
         &mut self,
         symbol: &str,
@@ -1887,6 +1942,51 @@ impl SQLConn {
                 };
 
                 let resp = match self.load_all_data(&s).await {
+                    Ok(_) => SQLResponse::Success,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!(
+                            "{}",
+                            anyhow!["{:?} SQL::load_all_data : {:?}", i, e.context(err_ctx)]
+                        );
+                        SQLResponse::Failure((err_string, GeneralError::Generic))
+                    }
+                };
+                resp
+            }
+            SQLInstructs::LoadHistDataPart2 {
+                symbol: ref s,
+                backload_wicks: ref st,
+                trade_time: ref et,
+            } => {
+                log::info!("Loading historical data for:{}", s);
+
+                let meta_pool = SqlitePool::connect(&metadata_db_path)
+                    .await
+                    .context(anyhow!("SQL::Unable to metadata connect to db"));
+                let meta_pool = match meta_pool {
+                    Ok(pool) => pool,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!("{}", err_string);
+                        return SQLResponse::Failure((err_string, GeneralError::Generic));
+                    }
+                };
+                let res = self.validate_asset_dl(&meta_pool, s).await;
+                let valid = match res {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        log::error!("{}", err_string);
+                        return SQLResponse::Failure((err_string, GeneralError::Generic));
+                    }
+                };
+                if valid == false {
+                    let err_string = "ERROR:Asset not in asset list!".to_string();
+                    log::error!("{}", err_string);
+                    return SQLResponse::Failure((err_string, GeneralError::Generic));
+                };
+                let resp = match self.load_part_data2(&s, &et, &st).await {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];

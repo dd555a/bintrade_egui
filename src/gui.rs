@@ -141,6 +141,9 @@ impl KlinePlot {
     ) -> Result<()> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
 
+        if let Some(col)=collected_data{
+            tracing::debug!["AD debugging HIST length {}", ad.kline_data.len()];
+        };
         let symbol = self.symbol.clone();
         if let Some(col_data) = collected_data {
             if let Some(data) = col_data.get(&symbol) {
@@ -3108,11 +3111,8 @@ impl HistPlot {
         hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
     ) {
-        if hist_plot.part_loaded == true {
-            if let Some(ref klines) = hist_plot.att_klines {
-                hist_plot.kline_plot.add_hist(&klines);
-            };
-        };
+
+
         hist_plot
             .kline_plot
             .show_live(ui, plot_extras, hist_ad, None);
@@ -3137,14 +3137,6 @@ impl HistPlot {
                     egui::vec2(100.0, 20.0),
                     egui::TextEdit::singleline(&mut hist_plot.search_load_string).hint_text("Search for asset"),
                 );
-                /*
-                if ui.button("Search").clicked() {
-                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistFull{
-                        symbol: hist_plot.search_load_string.clone(), start:st, end:et
-                    });
-                }
-                 * */
-                //ui.label(RichText::new(format!["Jump to:"]).color(Color32::WHITE));
                 ui.add(
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
                         .id_salt("trade_time"),
@@ -3190,8 +3182,15 @@ impl HistPlot {
                             0
                         }
                     };
-                    let trade_time=hist_plot.picked_date_end.and_hms(trade_h.into(),trade_min.into(),0);
-                    //FIXME click here
+                    let trade_date=hist_plot.picked_date_end.clone();
+                    let trade_time=trade_date.and_hms(trade_h.into(),trade_min.into(),0).timestamp_millis();
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
+                        symbol: hist_plot.search_load_string.clone(),
+                        trade_time:trade_time,
+                        backload_wicks:BACKLOAD_WICKS,
+                    });
+                    hist_plot.kline_plot.symbol =hist_plot.search_load_string.clone();
+                    cli_chan.send(msg);
                 };
                 //ui.end_row();
                 if ui.button("Trade N wicks >>").clicked() {
@@ -3211,6 +3210,10 @@ impl HistPlot {
                     let res = hist_plot.hist_trade.trade_forward(n_wicks);
                     hist_plot.hist_trade.trade_time =
                         hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
+
+
+                    //FIXME click here
+                    //
                 }
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s).hint_text("Trade N wicks"),
@@ -3245,13 +3248,6 @@ impl HistPlot {
                         }
                     }
                     .timestamp_millis();
-                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart {
-                        symbol: hist_plot.search_load_string.clone(),
-                        start: st,
-                        end: et,
-                    });
-                    hist_plot.part_loaded = true;
-                    cli_chan.send(msg);
                 }
                 if ui.button("Load Asset - all data").clicked() {
                     let s = hist_plot.search_load_string.clone();
