@@ -140,8 +140,6 @@ impl KlinePlot {
     ) -> Result<()> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
 
-        let chart_ad_id = ad.id.clone();
-
         let symbol = self.symbol.clone();
         if let Some(col_data) = collected_data {
             if let Some(data) = col_data.get(&symbol) {
@@ -439,10 +437,8 @@ impl KlinePlot {
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
         data: &SymbolOutput,
     ) -> Result<()> {
-        //tracing::debug!["\x1b[93m  live_live ran \x1b[0m"];
-        //initial_klines
 
-        let k = if let Some(ck) = data.closed_klines.get(&intv) {
+        let mut k = if let Some(ck) = data.closed_klines.get(&intv) {
             KlineTick::to_kline_vec(ck)
         } else {
             vec![]
@@ -452,18 +448,20 @@ impl KlinePlot {
         } else {
             vec![]
         };
+        if ok.is_empty()==false{
+            let last_tick=ok[ok.len()-1];
+            k.push(last_tick);
+        };
         let (div, width) = get_chart_params(&intv);
         self.chart_params = (div, width);
         if k.len() <= max_load_points {
             if k.is_empty() == false {
-                tracing::trace!["Live KLINES added 1"];
                 self.add_live(&k, &div, &width, true);
-                tracing::trace!["Live KLINES added {:?}", self.l_boxplot];
             };
         } else {
             let kl = &k[(k.len() - max_load_points)..];
             if kl.is_empty() == false {
-                self.add_live(&kl, &div, &width, true);
+                self.add_live(&k, &div, &width, true);
             };
         }
         self.static_loaded = true;

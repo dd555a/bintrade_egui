@@ -1013,9 +1013,6 @@ pub fn get_data_binance(
     }
     return Ok(FatKline::new(kline));
 }
-//TODO test and make functions to load an asset into asset data by downloading it
-//
-//
 
 use linya::{Bar, Progress};
 async fn create_metadata_db() -> Result<()> {
@@ -1051,6 +1048,13 @@ async fn create_metadata_db() -> Result<()> {
     let q = format!(
         "CREATE UNIQUE INDEX Asset_DL
         ON assets_dl ( [Asset] )"
+    );
+    exec_query(&pool, &q).await?;
+    let q = format!(
+        "
+    INSERT OR REPLACE INTO assets_dl (Asset, Exchange)
+    VALUES('{}', '{}');",
+        "TEST", "Binance"
     );
     exec_query(&pool, &q).await?;
     Ok(())
