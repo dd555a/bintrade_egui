@@ -297,7 +297,7 @@ impl ClientTask {
                         .with_min_inner_size([300.0, 220.0]),
                     event_loop_builder,
                     persist_window: false,
-                    persistence_path: Some(std::path::PathBuf::from("./bintrade_gui_save")),
+                    //persistence_path: Some(std::path::PathBuf::from("./bintrade_gui_save")),
                     ..Default::default()
                 };
 
@@ -318,7 +318,7 @@ impl ClientTask {
                 );
                 match r {
                     Ok(_a) => return (),
-                    Err(e) => log::error!("{}", e),
+                    Err(e) => log::error!("GUI error {}", e),
                 }
             }
         });
@@ -517,7 +517,7 @@ impl ClientTask {
         sleep_notify: Arc<Notify>,
         live_collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         live_price: Arc<Mutex<f64>>,
-        live_ad: Arc<Mutex<AssetData>>, //TODO find a way to clean this...
+        live_ad: Arc<Mutex<AssetData>>,
     ) {
         let (mut send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
@@ -530,8 +530,12 @@ impl ClientTask {
         );
         log::info!("Binclient started");
         loop {
-            let sub_params = vec!["btcusdt@aggTrade".to_string(), "btcusdt@kline_1m".to_string()];
+            let sub_params = vec![
+                "btcusdt@aggTrade".to_string(),
+                "btcusdt@kline_1m".to_string(),
+            ];
             let mut params: HashMap<String, Vec<String>> = HashMap::new();
+            //TODO - replace this with default asset and inteval
             params.insert("BTCUSDT".to_string(), sub_params);
             let res = cli
                 .get_initial_data("BTCUSDT", &Intv::Min1, 2_000, live_ad.clone())
@@ -541,16 +545,15 @@ impl ClientTask {
                 Err(e) => log::error!["Initial data connection failed, ERROR: {}", e],
             };
             /*
-            */
-            let res = cli.connect_ws(params).await;
-            match res{
-                Ok(_) => log::trace!["WS connected successfuly for BTCUSDT"],
-                Err(e) => log::error!["WS connection failed, ERROR: {}", e],
-            };
+             */
             //NOTE replce with defaults from config...
             //NOTE call this function every time an interval is switched for LIVE
+            //TODO match response, break and change asset as needed
             loop {
                 select! {
+                    _ = cli.connect_ws(params.clone()) =>{
+                        log::debug!["WS running"];
+                    }
                     _ = recv_from_client.changed() =>{
                         let instruct=recv_from_client.borrow_and_update().clone();
                         let response=cli.parse_binance_instructs(instruct).await;
@@ -712,7 +715,13 @@ pub fn cli_run() -> Result<()> {
         let frontend = Frontend::Desktop;
         log::info!("Bintrade starting");
         let mut main_struct = ClientTask::new(frontend, conf);
-        main_struct.run_main(tasks).await;
+        let cancel_all_token = main_struct.cancel_all.clone();
+        select! {
+            _ = main_struct.run_main(tasks) => {
+            }
+            _  = cancel_all_token.cancelled() => {
+            }
+        };
         log::info!("Bintrade exiting");
     });
     Ok(())
