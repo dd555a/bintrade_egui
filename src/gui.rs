@@ -141,9 +141,6 @@ impl KlinePlot {
     ) -> Result<()> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
 
-        if let Some(col)=collected_data{
-            tracing::debug!["AD debugging HIST length {}", ad.kline_data.len()];
-        };
         let symbol = self.symbol.clone();
         if let Some(col_data) = collected_data {
             if let Some(data) = col_data.get(&symbol) {
@@ -1264,15 +1261,15 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                         PaneType::Settings => {}
                     }
                     let tab_title = self.tab_title_for_pane(pane);
-                    log::debug!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
+                    log::trace!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
                 }
                 Tile::Container(container) => {
-                    log::debug!("Closing container: {:?}", container.kind());
+                    log::trace!("Closing container: {:?}", container.kind());
                     let children_ids = container.children();
                     for child_id in children_ids {
                         if let Some(Tile::Pane(pane)) = tiles.get(*child_id) {
                             let tab_title = self.tab_title_for_pane(pane);
-                            log::debug!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
+                            log::trace!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
                         }
                     }
                 }
@@ -2523,7 +2520,9 @@ struct HistPlot {
     pub last_trade_time:i64,
 
     pub att_klines: Option<Klines>,
-    pub part_loaded: bool,
+    pub all_loaded: bool,
+    
+    pub trade_slice_loaded:bool,
 }
 
 use crate::data::Klines;
@@ -2577,12 +2576,14 @@ impl Default for HistPlot {
             last_trade_time: curr_date.and_hms(0,0,0).timestamp_millis(),
 
             att_klines: None,
-            part_loaded: false,
+            all_loaded: false,
+
+            trade_slice_loaded:false,
         }
     }
 }
 
-const BACKLOAD_WICKS:i64=3000;
+const BACKLOAD_WICKS:i64=720;
 
 use crate::data::DLAsset;
 
@@ -3150,6 +3151,7 @@ impl HistPlot {
                 */
                 ui.add(egui::TextEdit::singleline(&mut hist_plot.trade_min_s).hint_text("Trade mins"));
                 if ui.button("Go to").clicked() {
+                    
                     let res: Result<u16, ParseIntError> = hist_plot.trade_h_s.parse();
                     let trade_h= match res {
                         Ok(n) => {
@@ -3184,12 +3186,14 @@ impl HistPlot {
                     };
                     let trade_date=hist_plot.picked_date_end.clone();
                     let trade_time=trade_date.and_hms(trade_h.into(),trade_min.into(),0).timestamp_millis();
+                    tracing::trace!["GO to>> END: {}", trade_time];
                     let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
                         symbol: hist_plot.search_load_string.clone(),
                         trade_time:trade_time,
                         backload_wicks:BACKLOAD_WICKS,
                     });
                     hist_plot.kline_plot.symbol =hist_plot.search_load_string.clone();
+                    hist_plot.trade_time=trade_time;
                     cli_chan.send(msg);
                 };
                 //ui.end_row();
@@ -3203,17 +3207,36 @@ impl HistPlot {
                             DEFAULT_TRADE_WICKS
                         }
                     };
-                    hist_plot.navi_wicks = n_wicks;
-                    //TODO change trade time whenever symbol is changed to latest data point
-                    //
-                    hist_plot.hist_trade.trade_time = hist_plot.trade_time;
-                    let res = hist_plot.hist_trade.trade_forward(n_wicks);
-                    hist_plot.hist_trade.trade_time =
-                        hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
 
+
+                    hist_plot.navi_wicks = n_wicks;
+
+                    let new_trade_time=hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
+                    tracing::trace!["Trade >> START: {} END: {}", &hist_plot.trade_time, &new_trade_time];
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
+                        symbol: hist_plot.search_load_string.clone(),
+                        trade_time:new_trade_time,
+                        backload_wicks:BACKLOAD_WICKS,
+                    });
+                    cli_chan.send(msg);
+                    hist_plot.trade_time = new_trade_time;
+
+                    /*
+                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart {
+                        symbol: hist_plot.search_load_string.clone(),
+                        start:hist_plot.trade_time,
+                        end:new_trade_time,
+                    });
+                    cli_chan.send(msg);
+
+
+                    if hist_plot.trade_slice_loaded{
+                        //let res = hist_plot.hist_trade.trade_forward(n_wicks);
+
+                    };
+                     */
 
                     //FIXME click here
-                    //
                 }
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s).hint_text("Trade N wicks"),

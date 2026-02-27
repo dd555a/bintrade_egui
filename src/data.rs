@@ -86,8 +86,11 @@ fn yfcandle_conv(input: &Candle) -> Result<(chrono::NaiveDateTime, f64, f64, f64
 async fn exec_query(pool: &Pool<Sqlite>, q: &str) -> Result<()> {
     let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(q);
     let query = query_builder.build();
-    let result = query.execute(pool).await?;
-    log::info!("{:?}", result);
+    let result = query.execute(pool).await;
+    match result{
+        Ok(_)=>(),
+        Err(e)=>tracing::error!("SQL error: {:?}", e),
+    };
     Ok(())
 }
 
@@ -98,20 +101,28 @@ async fn connect_sqlite<P: AsRef<Path>>(filename: P) -> Result<Pool<Sqlite>> {
     let pool = sqlx::sqlite::SqlitePool::connect_with(options).await?;
     Ok(pool)
 }
-#[instrument(level = "debug")]
+#[instrument(level = "trace")]
 async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Result<Kline> {
     let q: &str = match t {
         None => {
-            log::info!("kfrom_sql_part Load all data:{}", intv);
+            log::trace!("kfrom_sql_part Load all data:{}", intv);
             &format!(
-                "SELECT [Open Time], Open, High, Low, Close, Volume  FROM {};",
+                "
+                BEGIN TRANSACTION;
+                SELECT [Open Time], Open, High, Low, Close, Volume  FROM {};
+                COMMIT;
+                ",
                 intv
             )
         }
         Some((ts, te)) => {
-            log::info!("kfrom_sql_part Load data between {} and {}", ts, te);
+            log::trace!("kfrom_sql_part Load data between {} and {}", ts, te);
             &format!(
-                "SELECT [Open Time], Open, High, Low, Close, Volume  FROM '{}' WHERE [Timestamp ms] BETWEEN '{}' AND '{}';",
+                "
+                BEGIN TRANSACTION;
+                SELECT [Open Time], Open, High, Low, Close, Volume  FROM '{}' WHERE [Timestamp ms] BETWEEN '{}' AND '{}';
+                COMMIT;
+                ",
                 intv, ts, te,
             )
         }
@@ -137,11 +148,11 @@ async fn kfrom_sql_wcheck(
     let (t_start, t_end): (Option<i64>, Option<i64>) =
         sqlx::query_as(q).fetch_one(meta_pool).await?;
 
-    tracing::debug!["kform_sql_wcheck START_TIME {:?} END_TIME {:?} TRADE_TIME {:?}", t_start, t_end, trade_time];
+    tracing::trace!["kform_sql_wcheck START_TIME {:?} END_TIME {:?} TRADE_TIME {:?}", t_start, t_end, trade_time];
 
     if let (Some(t_s), Some(t_e)) = (t_start, t_end) {
         let within_range = if (t_s <= trade_time && trade_time <= t_e) == true {
-            tracing::debug!["kform_sql_wcheck fetching kline"];
+            tracing::trace!["kform_sql_wcheck fetching kline"];
             let bb=(trade_time - intv.to_ms() * (no_wicks as i64));
             let back_time=if bb >0 {
                 bb
@@ -156,7 +167,7 @@ async fn kfrom_sql_wcheck(
             .await?;
             return Ok(Some(kline));
         } else {
-            tracing::debug!["kform_sql_wcheck time_outside_fetch_range"];
+            tracing::trace!["kform_sql_wcheck time_outside_fetch_range"];
             return Ok(None);
         };
     } else {
@@ -164,7 +175,7 @@ async fn kfrom_sql_wcheck(
     }
 }
 
-#[instrument(level = "debug")]
+#[instrument(level = "trace")]
 async fn get_sql_timestamps(
     pool: &Pool<Sqlite>,
     table: &str,
@@ -582,7 +593,7 @@ impl Kline {
     pub fn new_sql(k: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>) -> Self {
         Self { kline: k }
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     pub fn split(
         &self,
         no_splits: usize,
@@ -644,7 +655,7 @@ impl Klines {
     pub fn insert_fat(&mut self, i: &Intv, kl: FatKline) {
         self.full_dat.insert(i.clone(), kl);
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     fn get_times2(&self, full: bool) -> Option<(i64, i64)> {
         if full == true {
             let kline = self.full_dat.get(&Intv::Min1);
@@ -674,7 +685,7 @@ impl Klines {
             };
         }
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     fn get_times(&mut self, full: bool) {
         if full == true {
             let kline = self.full_dat.get(&Intv::Min1);
@@ -717,6 +728,7 @@ pub struct AssetData {
     pub kline_data: HashMap<String, Klines>,
     pub downloaded_assets: Vec<DLAsset>,
     pub temp_kline: Option<Klines>,
+    pub load_status: HashMap<String, bool>,
 }
 
 impl AssetData {
@@ -740,9 +752,10 @@ impl AssetData {
             kline_data: HashMap::new(),
             downloaded_assets: vec![],
             temp_kline: None,
+            load_status: HashMap::new(),
         }
     }
-    //#[instrument(level="debug")]
+    //#[instrument(level="trace")]
     pub fn load_full_intv(
         &self,
         symbol: &str,
@@ -765,7 +778,7 @@ impl AssetData {
             log::info!["{}", &symbol];
         });
     }
-    //#[instrument(level="debug")]
+    //#[instrument(level="trace")]
     pub fn find_slice_n(
         &self,
         symbol: &str,
@@ -821,7 +834,7 @@ impl AssetData {
                 start_index
             };
             let end_index = start_index + (next_wicks as usize);
-            tracing::debug!["Start index:{}, End index:{}", start_index, end_index];
+            //tracing::debug!["Start index:{}, End index:{}", start_index, end_index];
             (start_index, end_index)
         } else {
             tracing::error!["Kline empty!"];
@@ -865,7 +878,7 @@ impl AssetData {
         let end_index = ((kst - end_t) / dur) as usize;
         return Some(&k.kline[start_index..end_index]);
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     pub fn find_slice_index(
         &self,
         symbol: &str,
@@ -888,7 +901,7 @@ impl AssetData {
         }
         return Some(&k.kline[start_index..end_index]);
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     pub async fn load_all(&mut self, symbol: &str, sql_pool: &Pool<Sqlite>) -> Result<()> {
         let search = self
             .kline_data
@@ -897,7 +910,7 @@ impl AssetData {
         let mut klines = Klines::new_empty();
         for intv in Intv::iter() {
             let s: &str = intv.to_str();
-            println!("Loading data for:{} interval:{}", symbol, s);
+            tracing::trace!("Loading data for:{} interval:{}", symbol, s);
             let k: Kline = kfrom_sql(&sql_pool, &format!["kline_{}", &s], None).await?;
             klines.dat.insert(intv, k);
         }
@@ -1098,6 +1111,14 @@ async fn create_metadata_db() -> Result<()> {
     VALUES('{}', '{}');",
         "TEST", "Binance"
     );
+    let q = format![
+        "
+        PRAGMA journal_mode=WAL;  
+        PRAGMA cache_size=-50000;
+        PRAGMA synchronous=NORMAL;
+        PRAGMA temp_store=MEMORY;
+            "
+    ];
     exec_query(&pool, &q).await?;
     Ok(())
 }
@@ -1522,6 +1543,7 @@ async fn get_asset_timestamps(
         sqlx::query_as(qf).fetch_one(metadata_db).await?;
     Ok((timestamps_fut.0, timestamps_fut.1))
 }
+use std::time::Instant;
 
 impl SQLConn {
     pub fn new(hist_asset_data: Arc<Mutex<AssetData>>) -> Self {
@@ -1533,7 +1555,7 @@ impl SQLConn {
     pub fn new_testing() -> Self {
         Self::default()
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     pub async fn dl_binance_asset(
         &self,
         symbol: &str,
@@ -1548,6 +1570,10 @@ impl SQLConn {
         trade_time: &i64,
         backload_wicks: &i64,
     ) -> Result<()> {
+        let now = Instant::now();
+
+
+
         let s: String = symbol.to_string();
         let pool = connect_sqlite(format!["{}/Asset{}.db", &self.db_path, &symbol])
             .await
@@ -1557,10 +1583,13 @@ impl SQLConn {
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
 
+        let elapsed = now.elapsed();
+        tracing::info!("load_part_data2 Elapsed pool connect: {:?}", elapsed);
+
         let mut klines = Klines::new_empty();
         for intv in Intv::iter() {
             let s: &str = intv.to_str();
-            println!("load_part_data2 Loading data for:{} interval:{}", symbol, s);
+            tracing::trace!("load_part_data2 Loading data for:{} interval:{}", symbol, s);
             let k = kfrom_sql_wcheck(
                 &symbol,
                 &meta_pool,
@@ -1574,7 +1603,7 @@ impl SQLConn {
             if let Some(kl)= k{
                 klines.dat.insert(intv, kl);
             }else{
-                tracing::info!["KLINE WSCHECK empty for SYMBOL:{} INTERVAL: {}",symbol,intv.to_str()];
+                tracing::trace!["KLINE WSCHECK empty for SYMBOL:{} INTERVAL: {}",symbol,intv.to_str()];
             };
         };
         pool.close().await;
@@ -1585,6 +1614,10 @@ impl SQLConn {
             ad.kline_data.remove(symbol);
         };
         ad.kline_data.insert(symbol.to_string(), klines);
+
+
+        let elapsed = now.elapsed();
+        tracing::info!("load_part_data2 Elapsed total: {:?}", elapsed);
         Ok(())
     }
     async fn load_part_data(
@@ -1600,7 +1633,7 @@ impl SQLConn {
         let mut klines = Klines::new_empty();
         for intv in Intv::iter() {
             let s: &str = intv.to_str();
-            println!("Loading data for:{} interval:{}", symbol, s);
+            tracing::trace!("Loading data for:{} interval:{}", symbol, s);
             let k: Kline = kfrom_sql(
                 &pool,
                 &format!["kline_{}", &s],
@@ -1624,12 +1657,12 @@ impl SQLConn {
         let mut klines = Klines::new_empty();
         for intv in Intv::iter() {
             let s: &str = intv.to_str();
-            println!("Loading data for:{} interval:{}", symbol, s);
+            tracing::trace!("Loading data for:{} interval:{}", symbol, s);
             let k: Kline = kfrom_sql(&pool, &format!["kline_{}", &s], None)
                 .await
                 .context("SQL : unable to connect to db")?;
 
-            tracing::debug![
+            tracing::trace![
                 "LOAD ALL DATA - START:{} END:{}",
                 k.kline[0].0,
                 k.kline[k.kline.len() - 1].0
@@ -1645,7 +1678,7 @@ impl SQLConn {
             }
             None => ad.kline_data.insert(symbol.to_string(), klines),
         };
-        tracing::debug!["Asset Data SQL CONNECT = {}", ad.debug()];
+        tracing::trace!["Asset Data SQL CONNECT = {}", ad.debug()];
         Ok(())
     }
     pub async fn del_single_asset(
@@ -1703,7 +1736,7 @@ impl SQLConn {
             create_db(&db_path).await?;
             let apool = connect_sqlite(&db_path).await?;
             cr_kl_tables(&apool).await?;
-            tracing::debug!["Created database {} and created tables", &db_path];
+            tracing::trace!["Created database {} and created tables", &db_path];
 
             apool.close().await;
             let (start_time, _) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
@@ -1777,10 +1810,10 @@ impl SQLConn {
         Ok(())
     }
     pub async fn update_data(&self) -> Result<()> {
-        tracing::debug!["Update_data called"];
+        tracing::trace!["Update_data called"];
         if Sqlite::database_exists(&metadata_db_path).await? == false {
             create_metadata_db().await?;
-            tracing::debug!["Metadata DB created"];
+            tracing::info!["Metadata DB created"];
         };
         let meta_pool = SqlitePool::connect(&metadata_db_path)
             .await
@@ -1788,9 +1821,9 @@ impl SQLConn {
 
         download_asset_list_binance(&meta_pool).await?;
 
-        tracing::trace!["Asset list updated"];
+        tracing::info!["Asset list updated"];
         let asset_list = dl_load_asset_list(&meta_pool).await?;
-        tracing::debug!["DL asset list loaded"];
+        tracing::trace!["DL asset list loaded"];
         let current_timestamp_ms: i64 = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(n) => {
                 let r = n.as_millis().try_into();
@@ -1801,7 +1834,7 @@ impl SQLConn {
             }
             Err(e) => Err(anyhow!["{:?}", e]),
         }?;
-        tracing::debug!["Current Timestamp {}", current_timestamp_ms];
+        tracing::trace!["Current Timestamp {}", current_timestamp_ms];
 
         //NOTE the current system uses asset futures to get the onboarding date... why the v3 API
         //doesn't have it... idk
@@ -1819,7 +1852,7 @@ impl SQLConn {
         }
         Ok(())
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn unload_data(&mut self, symbol: &str) -> Result<()> {
         let ad_a = Arc::clone(&mut self.hist_asset_data);
         let mut ad = ad_a.lock().expect("Posioned AD mutex! (DATA)");
@@ -1850,7 +1883,7 @@ impl SQLConn {
         let validate = self
             .validate_asset_binance(&meta_pool, symbol, exchange)
             .await?;
-        tracing::debug!["Asset validated! {:?}", validate];
+        tracing::trace!["Asset validated! {:?}", validate];
         match validate {
             true => (),
             false => {
@@ -2004,7 +2037,7 @@ impl SQLConn {
                 start: ref st,
                 end: ref et,
             } => {
-                log::info!("Loading historical data for:{}", s);
+                log::debug!("Loading part data: {}", s);
 
                 let meta_pool = SqlitePool::connect(&metadata_db_path)
                     .await
@@ -2037,7 +2070,7 @@ impl SQLConn {
                         let err_string = format!["{}", e];
                         log::error!(
                             "{}",
-                            anyhow!["{:?} SQL::load_all_data : {:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::load_part_data : {:?}", i, e.context(err_ctx)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
