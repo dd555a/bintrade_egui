@@ -2600,6 +2600,12 @@ struct Account {
     key_status: KeysStatus,
 
     balances: Vec<(String, f64)>,
+
+    binance_pub_key:Option<String>,
+    binance_priv_key:Option<String>,
+
+    enc_binance_pub_key:Option<String>,
+    enc_binance_priv_key:Option<String>,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -2717,26 +2723,146 @@ impl Account {
             });
     }
 }
+
+
+use bincode::{config, Decode, Encode};
+use std::io::{Write, Read};
+use std::fs::File;
+
+use magic_crypt::{new_magic_crypt, MagicCryptTrait};
+
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Dbg)]
+#[derive(Dbg, Default, Encode, Decode, Clone)]
 struct Settings {
     default_asset: String,
     default_intv: Intv,
+    enc_api_keys: bool,
+    save_api_keys:bool,
+
+    binance_pub_key:Option<String>,
+    binance_priv_key:Option<String>,
+
+    enc_binance_pub_key:Option<String>,
+    enc_binance_priv_key:Option<String>,
+    
+    password_string:String,
+
 }
+
+const SETTINGS_SAVE_PATH:&str="./Settings.bin";
+
 impl Settings {
     fn new() -> Self {
         Settings {
             default_asset: "BTCUSDT".to_string(),
-            default_intv: Intv::Min1,
+            enc_api_keys: true,
+            save_api_keys:true,
+            ..Default::default()
         }
     }
+    fn verify_password_req(password:&str)->bool{
+        if password.len() <15{
+            return false
+        };
+        //FIXME add more requirements
+        true
+    }
     fn show(settings: &mut Settings, cli_chan: watch::Sender<ClientInstruct>, ui: &mut egui::Ui) {
-        egui::Grid::new("Account")
+        egui::Grid::new("Account_settings")
             .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
-                if ui.button("Settings").clicked() {};
+                ui.checkbox(&mut settings.save_api_keys,"Store api keys in settings file");
+                if settings.save_api_keys==true{
+                    ui.checkbox(&mut settings.enc_api_keys,"Encrypt api keys w password");
+                    if settings.enc_api_keys==true{
+                        ui.add_sized(
+                            egui::vec2(250.0, 20.0),
+                            egui::TextEdit::singleline(&mut settings.password_string)
+                                .hint_text("Add asset to download list for binance"),
+                        );
+
+                    };
+                    if ui.button("Save settings").clicked() {
+                        let password=settings.password_string.clone();
+                        let password_ok=Settings::verify_password_req(&password);
+                        match password_ok{
+                            true=>{
+                                settings.password_string="".to_string();
+                                let res=settings.save_settings_file(Some(password));
+                                match res{
+                                    Ok(_)=>(),
+                                    Err(e)=>tracing::error!["Save setting encrypted ERROR: {}",e],
+                                };
+                            },
+                            false=>tracing::error!["Password less tha 15 characters"],
+                        };
+                    };
+                };
+                if ui.button("Save settings").clicked() {
+                    let res=settings.save_settings_file(None);
+                    match res{
+                        Ok(_)=>(),
+                        Err(e)=>tracing::error!["Save setting unencrypted ERROR: {}",e],
+                    };
+                };
             });
+    }
+    fn encrypt_keys(&mut self, pass:String)->Result<()>{
+        let mc = new_magic_crypt!(&pass, 256);
+        let pub_key:String=self.binance_pub_key.take().ok_or(anyhow!["Pub key string not found!"])?;
+        let priv_key:String=self.binance_priv_key.take().ok_or(anyhow!["Private key string not found!"])?;
+        let enc_pub_key= mc.encrypt_str_to_base64(pub_key);
+        let enc_priv_key= mc.encrypt_str_to_base64(priv_key);
+        self.enc_binance_pub_key=Some(enc_pub_key);
+        self.enc_binance_priv_key=Some(enc_priv_key);
+        Ok(())
+    }
+    fn decrypt_keys(&mut self, pass:String)->Result<()>{
+        let mc = new_magic_crypt!(&pass, 256);
+        let pub_key:String=self.enc_binance_pub_key.take().ok_or(anyhow!["Pub key string not found!"])?;
+        let priv_key:String=self.enc_binance_priv_key.take().ok_or(anyhow!["Private key string not found!"])?;
+        let pub_key= mc.decrypt_base64_to_string(pub_key)?;
+        let priv_key= mc.decrypt_base64_to_string(priv_key)?;
+        self.binance_pub_key=Some(pub_key);
+        self.binance_priv_key=Some(priv_key);
+        Ok(())
+    }
+    fn save_settings_file(&mut self, password:Option<String>)->Result<()>{
+        match password{
+            Some(pass)=>{
+                self.encrypt_keys(pass);
+            }
+            None=>{
+                if self.save_api_keys==false{
+                    self.binance_pub_key=None;
+                    self.binance_priv_key=None;
+                    self.enc_binance_pub_key=None;
+                    self.enc_binance_priv_key=None;
+                };
+            }
+        }
+        let config = config::standard();
+        let res=bincode::encode_to_vec(self.clone(), config)?;
+        let mut file = std::fs::File::create(SETTINGS_SAVE_PATH)?;
+        file.write_all(&res)?;
+        Ok(())
+    }
+    fn load_settings_file(password:Option<String>)->Result<Self>{
+        let config = config::standard();
+        let mut file = std::fs::File::open(SETTINGS_SAVE_PATH)?;
+
+        let mut data:Vec<u8> = vec![];
+        file.read_to_end(&mut data)?;
+        let (mut settings,_):(Settings,usize)=bincode::decode_from_slice(&data, config)?;
+        match password{
+            Some(pass)=>{
+                settings.decrypt_keys(pass);
+            }
+            None=>{
+            }
+        };
+        Ok(settings)
     }
 }
 

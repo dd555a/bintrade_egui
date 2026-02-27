@@ -321,9 +321,11 @@ async fn check_append_kline(
     } //check that kline append start time is 1 higher than sql time to ensure there are no gaps
     Ok(())
 }
+use bincode::{config, Decode, Encode};
 
-#[derive(EnumIter, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(EnumIter, Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Decode, Encode)]
 pub enum Intv {
+    #[default]
     Min1,
     Min3,
     Min5,
