@@ -1,52 +1,41 @@
-use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, NaiveDateTime};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env, path::Path, result::Result as OCResult, str::FromStr};
-
-use tokio::sync::oneshot;
+use std::{collections::HashMap, path::Path};
 
 use std::sync::{Arc, Mutex};
-use time::{OffsetDateTime, macros::datetime};
 
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::{GeneralError, SQLInstructs, SQLResponse};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tokio::sync::watch::{Receiver, Sender};
-use tokio::time::{Duration, sleep};
-
 use sqlx::{
-    Error, Execute, Pool, QueryBuilder, Sqlite, SqlitePool, migrate::MigrateDatabase,
+    Pool, QueryBuilder, Sqlite, SqlitePool, migrate::MigrateDatabase,
     sqlite::SqliteConnectOptions,
 };
 
-use rust_decimal::prelude::ToPrimitive;
-
-//use binance_history::{get_klines,SpotKline};
 use binance::api::Binance;
 use binance::market::Market;
 use binance::model::{KlineSummaries, KlineSummary};
 
-use plotters::prelude::*;
-
-const err_ctx: &str = "SQL Data loader";
-const metadata_db_path: &str = "./databases/metadata.db";
+const ERR_CTX: &str = "SQL Data loader";
+const ITER_SIZE: usize = 100;
+const METADATA_DB_PATH: &str = "./databases/metadata.db";
 
 use tracing::instrument;
+use bincode::{Decode, Encode};
+use linya::{Bar, Progress};
+use std::time::Instant;
 
-use yahoo_finance_api as yahoo;
+use crate::{GeneralError, SQLInstructs, SQLResponse};
+use crate::conn::{fut_get_exchange_info, get_exchange_info};
+
+/*
 use yfinance_rs::core::models::Interval;
 use yfinance_rs::{Candle, HistoryBuilder, YfClient, YfError};
-
-fn yfintv_conv(intv: Intv) -> Interval {
-    match intv {
-        _ => todo!(),
-    }
-}
 
 async fn get_yfinance_data(symbol: String, intv: Intv) -> Result<Kline> {
     let client = YfClient::default();
@@ -82,6 +71,7 @@ fn yfcandle_conv(input: &Candle) -> Result<(chrono::NaiveDateTime, f64, f64, f64
     }
     Ok((time, open, high, low, close, volume))
 }
+*/
 
 async fn exec_query(pool: &Pool<Sqlite>, q: &str) -> Result<()> {
     let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(q);
@@ -105,7 +95,7 @@ async fn connect_sqlite<P: AsRef<Path>>(filename: P) -> Result<Pool<Sqlite>> {
 async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Result<Kline> {
     let q: &str = match t {
         None => {
-            log::trace!("kfrom_sql_part Load all data:{}", intv);
+            tracing::trace!("kfrom_sql_part Load all data:{}", intv);
             &format!(
                 "
                 BEGIN TRANSACTION;
@@ -116,7 +106,7 @@ async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Re
             )
         }
         Some((ts, te)) => {
-            log::trace!("kfrom_sql_part Load data between {} and {}", ts, te);
+            tracing::trace!("kfrom_sql_part Load data between {} and {}", ts, te);
             &format!(
                 "
                 BEGIN TRANSACTION;
@@ -151,9 +141,9 @@ async fn kfrom_sql_wcheck(
     tracing::trace!["kform_sql_wcheck START_TIME {:?} END_TIME {:?} TRADE_TIME {:?}", t_start, t_end, trade_time];
 
     if let (Some(t_s), Some(t_e)) = (t_start, t_end) {
-        let within_range = if (t_s <= trade_time && trade_time <= t_e) == true {
+        if (t_s <= trade_time && trade_time <= t_e) == true {
             tracing::trace!["kform_sql_wcheck fetching kline"];
-            let bb=(trade_time - intv.to_ms() * (no_wicks as i64));
+            let bb=trade_time - intv.to_ms() * (no_wicks as i64);
             let back_time=if bb >0 {
                 bb
             }else{
@@ -173,48 +163,6 @@ async fn kfrom_sql_wcheck(
     } else {
         return Err(anyhow!["Timestamps not found!"]);
     }
-}
-
-#[instrument(level = "trace")]
-async fn get_sql_timestamps(
-    pool: &Pool<Sqlite>,
-    table: &str,
-) -> Result<(chrono::NaiveDateTime, chrono::NaiveDateTime, usize)> {
-    //NOTE THIS IS UTTERLY FUCKING RETARDED ... but it works for now...
-    let q1 = format!(
-        "
-    SELECT LAST([Timestamp MS], [Open Time], Open, High, Low, Close, Volume) AS output 
-    FROM {};",
-        table
-    );
-    let q2 = format!(
-        "
-    SELECT FIRST([Timestamp MS], [Open Time], Open, High, Low, Close, Volume) AS output 
-    FROM {};",
-        table
-    );
-    let qc = format!(
-        "
-    SELECT COUNT(*)
-    FROM {};",
-        table
-    );
-    let start: (chrono::NaiveDateTime, f64, f64, f64, f64, f64) = sqlx::query_as(&q2)
-        .fetch_one(pool)
-        .await
-        .expect("Could not fetch first row");
-    let end: (chrono::NaiveDateTime, f64, f64, f64, f64, f64) = sqlx::query_as(&q1)
-        .fetch_one(pool)
-        .await
-        .expect("Could not fetch last row");
-    let count: (u64,) = sqlx::query_as(&qc)
-        .fetch_one(pool)
-        .await
-        .expect("Could not fetch row count");
-    let start_time = start.0;
-    let end_time = end.0;
-    let (c,) = count;
-    return Ok((start_time, end_time, c as usize));
 }
 
 async fn append_kline(
@@ -259,9 +207,8 @@ async fn append_kline(
                 .push_bind(abtav);
         },
     );
-    let mut query = query_builder.build();
-    let result = query.execute(pool).await?;
-    log::info!("{:?}", result);
+    let query = query_builder.build();
+    let _result = query.execute(pool).await?;
     Ok(())
 }
 
@@ -280,48 +227,6 @@ async fn sql_append_kline_iter(
     Ok(())
 }
 
-async fn check_append_kline(
-    pool: &Pool<Sqlite>,
-    intv: &Intv,
-    input: &[(
-        i64,
-        chrono::NaiveDateTime,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        i64,
-        chrono::NaiveDateTime,
-        f64,
-        u64,
-        f64,
-        f64,
-    )],
-) -> Result<()> {
-    let is_time = input[0].1;
-    let ie_time = input[input.len() - 1].1;
-    let table_name = format!("kline_{}", intv.to_str());
-    let (os_time, oe_time, no_rows) = get_sql_timestamps(pool, &table_name).await?;
-    let check_time = is_time + intv.to_timedelta();
-    if check_time == oe_time {
-        //append normally
-        append_kline(pool, &table_name, input).await;
-    } else {
-        if oe_time >= is_time {
-            //remove the overlap then append
-            let overlap_points =
-                ((oe_time - is_time).num_minutes() as usize) / (intv.to_min() as usize);
-            append_kline(pool, &table_name, &input[overlap_points..]).await?;
-            log::info!("Data overlapping, pruning")
-        } else {
-            //Do nothing as there would be gaps in the data
-            log::error!("Unable to append data, appending would cause gaps!")
-        }
-    } //check that kline append start time is 1 higher than sql time to ensure there are no gaps
-    Ok(())
-}
-use bincode::{config, Decode, Encode};
 
 #[derive(EnumIter, Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Decode, Encode)]
 pub enum Intv {
@@ -546,7 +451,7 @@ pub struct FatKline {
 impl std::fmt::Display for FatKline {
     fn fmt(
         &self,
-        formatter: &mut std::fmt::Formatter<'_>,
+        _formatter: &mut std::fmt::Formatter<'_>,
     ) -> std::result::Result<(), std::fmt::Error> {
         Ok(())
     }
@@ -554,7 +459,7 @@ impl std::fmt::Display for FatKline {
 impl std::fmt::Debug for FatKline {
     fn fmt(
         &self,
-        formatter: &mut std::fmt::Formatter<'_>,
+        _formatter: &mut std::fmt::Formatter<'_>,
     ) -> std::result::Result<(), std::fmt::Error> {
         Ok(())
     }
@@ -587,11 +492,6 @@ pub struct Kline {
     pub kline: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>,
 }
 impl Kline {
-    fn new() -> Self {
-        Self {
-            kline: std::vec::Vec::new(),
-        }
-    }
     pub fn new_sql(k: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>) -> Self {
         Self { kline: k }
     }
@@ -600,47 +500,18 @@ impl Kline {
         &self,
         no_splits: usize,
     ) -> Vec<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
-        //XXX TODO switch to chunks
-        let batch_size = self.kline.len() % no_splits;
-        let output: Vec<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> = (0..no_splits)
-            .map(|n| &self.kline[n * &batch_size..n * (&batch_size + 1)])
-            .collect();
-
-        return output;
-    }
-    fn get_start_end(&self) -> Result<(chrono::NaiveDateTime, chrono::NaiveDateTime)> {
-        assert_ne!(self.kline.len(), 0);
-        let start_time = self.kline[0].0;
-        let end_time = self
-            .kline
-            .last()
-            .ok_or(anyhow!["SQL unable to create Kline"])?
-            .0;
-        Ok((start_time, end_time))
+        self.kline.chunks(no_splits).collect()
     }
 }
 
 #[derive(Debug)]
 pub struct Klines {
-    //symb:String, //String of the asset etc BTCUSTD
-    start_time: chrono::NaiveDateTime, //Data start time
-    end_time: chrono::NaiveDateTime,   //Data end time
+    start_time: chrono::NaiveDateTime,
+    end_time: chrono::NaiveDateTime,
     full_dat: HashMap<Intv, FatKline>,
     pub dat: HashMap<Intv, Kline>,
 }
 impl Klines {
-    fn new(
-        start_time: chrono::NaiveDateTime,
-        end_time: chrono::NaiveDateTime,
-        dat: HashMap<Intv, Kline>,
-    ) -> Self {
-        Self {
-            start_time: start_time,
-            end_time: end_time,
-            full_dat: HashMap::new(),
-            dat: dat,
-        }
-    }
     pub fn new_empty() -> Self {
         let start_time = chrono::NaiveDateTime::from_timestamp(0, 0);
         let end_time = chrono::NaiveDateTime::from_timestamp(0, 0);
@@ -658,36 +529,6 @@ impl Klines {
         self.full_dat.insert(i.clone(), kl);
     }
     #[instrument(level = "trace")]
-    fn get_times2(&self, full: bool) -> Option<(i64, i64)> {
-        if full == true {
-            let kline = self.full_dat.get(&Intv::Min1);
-            match kline {
-                Some(kl) => {
-                    let start_time = kl.kline[0].1.timestamp_millis();
-                    let end_time = kl.kline[kl.kline.len() - 1].1.timestamp_millis();
-                    return Some((start_time, end_time));
-                }
-                None => {
-                    log::error!("Unable to get times for kline: {:?}", &self);
-                    return None;
-                }
-            }
-        } else {
-            let kline = self.dat.get(&Intv::Min1);
-            let times = match kline {
-                Some(kl) => {
-                    let start_time = kl.kline[0].0.timestamp_millis();
-                    let end_time = kl.kline[kl.kline.len() - 1].0.timestamp_millis();
-                    return Some((start_time, end_time));
-                }
-                None => {
-                    log::error!("Unable to get times for kline: {:?}", &self);
-                    return None;
-                }
-            };
-        }
-    }
-    #[instrument(level = "trace")]
     fn get_times(&mut self, full: bool) {
         if full == true {
             let kline = self.full_dat.get(&Intv::Min1);
@@ -697,7 +538,7 @@ impl Klines {
                     self.end_time = kl.kline[kl.kline.len() - 1].1;
                 }
                 None => {
-                    log::error!("Unable to get times for kline: {:?}", &self);
+                    tracing::error!("Unable to get times for kline: {:?}", &self);
                 }
             }
         } else {
@@ -708,7 +549,7 @@ impl Klines {
                     self.end_time = kl.kline[kl.kline.len() - 1].0;
                 }
                 None => {
-                    log::error!("Unable to get times for kline: {:?}", &self);
+                    tracing::error!("Unable to get times for kline: {:?}", &self);
                 }
             }
         }
@@ -775,10 +616,10 @@ impl AssetData {
         Ok(&kline.kline)
     }
     pub fn show_all_loaded(&self) {
-        log::info!["All loaded symbols:"];
-        self.kline_data.iter().map(|(symbol, _)| {
-            log::info!["{}", &symbol];
-        });
+        tracing::info!["All loaded symbols:"];
+        let _:Vec<_>=self.kline_data.iter().map(|(symbol, _)| {
+            tracing::info!["{}", &symbol];
+        }).collect();
     }
     //#[instrument(level="trace")]
     pub fn find_slice_n(
@@ -788,15 +629,14 @@ impl AssetData {
         start_time: &i64,
         next_wicks: u16,
     ) -> Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
-        let kk: &Klines;
         let klines = self.kline_data.get(symbol);
-        match klines {
-            Some(k) => kk = k,
+        let kk=match klines {
+            Some(k) => k,
             None => {
                 tracing::error!["Find slice error: out of bounds!"];
                 return None;
             }
-        }
+        };
         let kline = kk.dat.get(intv);
         let kl = match kline {
             Some(ki) => ki,
@@ -812,17 +652,15 @@ impl AssetData {
             end_time > *start_time,
             "Start time must be greater than end time!"
         );
-        let dur = (end_time - start_time);
-
         let (start_index, end_index): (usize, usize) = if kl.kline.is_empty() == false {
             //NOTE this is to avoid using let index = vec.iter().position(|&r| r == "n").unwrap();
-            let kline_start_t = kl.kline[0].0.timestamp_millis();
-            let kline_end_t = kl.kline[kl.kline.len() - 1].0.timestamp_millis();
+            let kline_start_t = kl.kline[0].0.and_utc().timestamp_millis();
+            let kline_end_t = kl.kline[kl.kline.len() - 1].0.and_utc().timestamp_millis();
             let kline_length = kl.kline.len();
 
             let si = (start_time / (kline_end_t - kline_start_t)) as usize;
             let start_index: usize = si * kline_length;
-            let confirm: i64 = kl.kline[start_index].0.timestamp_millis();
+            let confirm: i64 = kl.kline[start_index].0.and_utc().timestamp_millis();
             let start_index = if confirm as usize != start_index {
                 let ss = if start_index < confirm as usize {
                     let s = start_index + 1;
@@ -836,7 +674,6 @@ impl AssetData {
                 start_index
             };
             let end_index = start_index + (next_wicks as usize);
-            //tracing::debug!["Start index:{}, End index:{}", start_index, end_index];
             (start_index, end_index)
         } else {
             tracing::error!["Kline empty!"];
@@ -852,30 +689,28 @@ impl AssetData {
         start_time: &chrono::NaiveDateTime,
         end_time: &chrono::NaiveDateTime,
     ) -> Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
-        let kk: &Klines;
         let klines = self.kline_data.get(symbol);
-        match klines {
-            Some(k) => kk = k,
+        let kk=match klines {
+            Some(kk) => kk,
             None => return None,
-        }
+        };
         if start_time < &kk.start_time {
             return None;
         }
         if end_time > &kk.end_time {
             return None;
         }
-        let k: &Kline;
         let kline = kk.dat.get(intv);
-        match kline {
-            Some(ki) => k = ki,
+        let k=match kline {
+            Some(k) => k,
             None => return None,
-        }
+        };
         let step: i64 = intv.to_sec();
-        let kst = kk.start_time.timestamp();
-        let ket = kk.end_time.timestamp();
+        let kst = kk.start_time.and_utc().timestamp();
+        let ket = kk.end_time.and_utc().timestamp();
         let dur = (kst - ket) / step;
-        let start_t = start_time.timestamp();
-        let end_t = end_time.timestamp();
+        let start_t = start_time.and_utc().timestamp();
+        let end_t = end_time.and_utc().timestamp();
         let start_index = ((kst - start_t) / dur) as usize;
         let end_index = ((kst - end_t) / dur) as usize;
         return Some(&k.kline[start_index..end_index]);
@@ -889,23 +724,21 @@ impl AssetData {
         end_index: usize,
     ) -> Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
         //TODO fix boilerplate maybe
-        let kk: &Klines;
         let klines = self.kline_data.get(symbol);
-        match klines {
-            Some(k) => kk = k,
+        let kk=match klines {
+            Some(kk) => kk,
             None => return None,
-        }
-        let k: &Kline;
+        };
         let kline = kk.dat.get(intv);
-        match kline {
-            Some(ki) => k = ki,
+        let k=match kline {
+            Some(k) => k,
             None => return None,
-        }
+        };
         return Some(&k.kline[start_index..end_index]);
     }
     #[instrument(level = "trace")]
     pub async fn load_all(&mut self, symbol: &str, sql_pool: &Pool<Sqlite>) -> Result<()> {
-        let search = self
+        let _search = self
             .kline_data
             .get(symbol)
             .ok_or(anyhow!["Unable to find data for symbol {}", symbol])?;
@@ -926,7 +759,6 @@ pub fn get_data_binance(
     symbol: &str,
     intv: Intv,
     start_time: Option<i64>,
-    part_download: Option<i64>,
 ) -> Result<FatKline> {
     fn kline_conv(
         input: &KlineSummary,
@@ -1008,7 +840,7 @@ pub fn get_data_binance(
     )> = vec![];
     let mut progress_bar = Progress::new();
     let no_it = if no_iterations <= 1 { 1 } else { no_iterations };
-    for n in (0..no_it) {
+    for n in 0..no_it {
         let res = client.get_klines(
             symbol,
             intv.to_bin_str(),
@@ -1071,12 +903,11 @@ pub fn get_data_binance(
     return Ok(FatKline::new(kline));
 }
 
-use linya::{Bar, Progress};
 async fn create_metadata_db() -> Result<()> {
-    create_db(&metadata_db_path)
+    create_db(&METADATA_DB_PATH)
         .await
         .context(anyhow!("SQL::Unable cereate db"))?;
-    let pool = SqlitePool::connect(&metadata_db_path)
+    let pool = SqlitePool::connect(&METADATA_DB_PATH)
         .await
         .context(anyhow!("SQL::Unable to metadata connect to db"))?;
     let q = format!(
@@ -1113,6 +944,7 @@ async fn create_metadata_db() -> Result<()> {
     VALUES('{}', '{}');",
         "TEST", "Binance"
     );
+    exec_query(&pool, &q).await?;
     let q = format![
         "
         PRAGMA journal_mode=WAL;  
@@ -1125,7 +957,6 @@ async fn create_metadata_db() -> Result<()> {
     Ok(())
 }
 
-use crate::conn::{FutSymbolInfo, SymbolInfo, fut_get_exchange_info, get_exchange_info};
 
 async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
     tracing::info!["Fetching exchange info"];
@@ -1149,9 +980,9 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
                 .push_bind(si.baseAsset.clone())
                 .push_bind(si.quoteAsset.clone());
         });
-        let mut query = query_builder.build();
+        let query = query_builder.build();
         let result = query.execute(metadata_db).await?;
-        log::trace!("{:?}", result);
+        tracing::trace!("{:?}", result);
     }
     for fut_symbol_info in fut_symbol_inf {
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
@@ -1166,9 +997,9 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
                 .push_bind(si.onboardDate.clone())
                 .push_bind(si.deliveryDate.clone());
         });
-        let mut query = query_builder.build();
+        let query = query_builder.build();
         let result = query.execute(metadata_db).await?;
-        log::trace!("{:?}", result);
+        tracing::trace!("{:?}", result);
     }
     Ok(())
 }
@@ -1206,55 +1037,6 @@ async fn load_asset_list_ad(pool: &Pool<Sqlite>) -> Result<Vec<DLAsset>> {
     Ok(oo)
 }
 
-async fn load_asset_list(
-    pool: &Pool<Sqlite>,
-) -> Result<
-    Vec<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<i64>,
-        Option<i64>,
-        Option<f64>,
-    )>,
-> {
-    let out:Vec<(String, String, String, String, String, Option<String>, Option<String>, Option<i64>, Option<i64>, Option<f64>)> = sqlx::query_as(format!("SELECT 
-[Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset] , [Extras] , [Extras Multi] , [Start Time ms] , [End Time ms] , [Market cap] FROM assets;").as_str())
-        .fetch_all(pool)
-        .await?;
-    Ok(out)
-}
-
-async fn update_asset_metadata(
-    metadata_pool: &Pool<Sqlite>,
-    symbol: &str,
-    start_time: Option<i64>,
-    end_time: i64,
-) -> Result<()> {
-    if let Some(start_time) = start_time {
-        let q = format!(
-            "
-        INSERT OR REPLACE INTO metadata ( Asset, [Start Time ms], [End Time ms])
-        VALUES('{}', {}. {});",
-            symbol, start_time, end_time
-        );
-        exec_query(metadata_pool, &q).await?;
-    } else {
-        let q = format!(
-            "
-        INSERT OR REPLACE INTO assets_dl ( Asset, [End Time ms])
-        VALUES({}, {});",
-            symbol, end_time
-        );
-        exec_query(metadata_pool, &q).await?;
-    };
-    Ok(())
-}
-
 pub enum Exchange {
     Binance,
     Yahoo,
@@ -1272,23 +1054,10 @@ impl From<&str> for Exchange {
     }
 }
 
-async fn get_asset_info(symbol: &str, exchange: &Exchange) -> Result<AssetMetadata> {
-    match exchange {
-        Exchange::Binance => {
-            todo!()
-        }
-        Exchange::Yahoo => {
-            todo!()
-        }
-    }
-    todo!()
-}
-
 async fn download_asset_data(
     symbol: &str,
     exchange: &Exchange,
     start_time: Option<i64>,
-    end_time: Option<i64>,
 ) -> Result<Klines> {
     let klines = match exchange {
         Exchange::Binance => {
@@ -1297,7 +1066,7 @@ async fn download_asset_data(
                 symbol,
                 start_time
             ];
-            intv_dl_klines(symbol, start_time, end_time).await
+            intv_dl_klines(symbol, start_time).await
         }
         Exchange::Yahoo => {
             todo!()
@@ -1306,12 +1075,9 @@ async fn download_asset_data(
     Ok(klines)
 }
 
-const ITER_SIZE: usize = 100;
-//for 11 variables max is 999/11
 
 #[derive(Debug)]
 pub struct SQLConn {
-    asset_dbs: HashMap<String, Pool<Sqlite>>,
     db_path: String,
     hist_asset_data: Arc<Mutex<AssetData>>,
 }
@@ -1319,9 +1085,7 @@ pub struct SQLConn {
 impl Default for SQLConn {
     fn default() -> Self {
         Self {
-            asset_dbs: HashMap::new(),
             db_path: "./databases".to_string(),
-
             hist_asset_data: Arc::new(Mutex::new(AssetData::new(666))),
         }
     }
@@ -1330,27 +1094,20 @@ impl Default for SQLConn {
 async fn intv_dl_klines(
     symbol: &str,
     start_time: Option<i64>,
-    end_time: Option<i64>,
 ) -> Result<Klines> {
     let s = symbol.to_string();
     let klines: Result<Klines, anyhow::Error> = tokio::task::spawn_blocking(move || {
         let client: Market = Binance::new(None, None);
         let mut klines = Klines::new_empty();
-        let mut res: Result<_, anyhow::Error> = Err(anyhow![""]);
-        let mut err_occured = false;
         for i in Intv::iter() {
-            let kl = get_data_binance(&client, &s, i, start_time, end_time)?;
+            let kl = get_data_binance(&client, &s, i, start_time)?;
             if kl.kline.is_empty() {
                 tracing::trace!["Kline empty: {:?}, for interval {}", &kl, i.to_str()];
             }
             klines.insert_fat(&i, kl);
         }
-        if err_occured == false {
-            klines.get_times(true);
-            Ok(klines)
-        } else {
-            res
-        }
+        klines.get_times(true);
+        Ok(klines)
     })
     .await?;
     return klines;
@@ -1359,12 +1116,12 @@ async fn create_db(db_path: &str) -> Result<()> {
     if !Sqlite::database_exists(&db_path).await.unwrap_or(false) {
         let result = Sqlite::create_database(&db_path).await?;
         let pool = connect_sqlite(&db_path).await?;
-        log::info!("Creating database {:?}", result);
+        tracing::info!("Creating database {:?}", result);
         let q = format!("PRAGMA foreign_keys=ON");
         exec_query(&pool, &q).await?;
         Ok(())
     } else {
-        log::info!("Database already exists");
+        tracing::info!("Database already exists");
         Ok(())
     }
 }
@@ -1405,80 +1162,7 @@ async fn cr_kl_tables(pool: &Pool<Sqlite>) -> Result<()> {
     Ok(())
 }
 
-async fn create_kline_tables(pool: &Pool<Sqlite>, klines: Klines, am: AssetMetadata) -> Result<()> {
-    for i in Intv::iter() {
-        let q = format!(
-            "CREATE TABLE kline_{} ( [Timestamp MS] INTEGER, [Open Time] datetime,  Open REAL,  High REAL,  Low REAL,  Close REAL,  Volume REAL, [Close Timestamp MS] INTEGER, [Close Time] INTEGER,  [Quote Asset Volume] REAL,  [Number of Trades] INTEGER,  [Taker Buy Base Asset Volume] REAL,  [Taker Buy Quote Asset Volume] REAL,[Ignore], [Pattern hash] REAL )",
-            i.to_str()
-        );
-        exec_query(&pool, &q).await?;
-        let q = format!(
-            "CREATE UNIQUE INDEX time_index
-            ON kline_{} ( [Timestamp MS] )",
-            i.to_str()
-        );
-        exec_query(&pool, &q).await?;
-        let kline = klines
-            .full_dat
-            .get(&i)
-            .ok_or(anyhow!["Unable to get kline"])?;
-        let iter_size;
-        if kline.kline.len() < 4_000 {
-            iter_size = (kline.kline.len() - 1)
-        } else {
-            iter_size = 4_000
-        };
-        sql_append_kline_iter(&kline, &i, &iter_size, &pool).await?;
-    }
-    let q = format!(
-        "CREATE TABLE colstats ( Column TEXT, Type INTEGER, Mean REAL, [Standard Deviaton] REAL , No INTEGER )",
-    );
-    exec_query(&pool, &q).await?;
-    let q = format!(
-        "CREATE UNIQUE INDEX col_id
-        ON colstats ( Column )"
-    );
-    exec_query(&pool, &q).await?;
-    let q = format!(
-        "CREATE TABLE metadata (Symbol TEXT, Exchange INTEGER, [Start Time] INTEGER, [End Time] INTEGER, [Key asset class 1] INTEGER, [Sub asset class 1] INTEGER ) "
-    );
-    exec_query(&pool, &q).await?;
-    let q = format!(
-        "CREATE UNIQUE INDEX asset_id
-        ON metadata ( Symbol )"
-    );
-    exec_query(&pool, &q).await?;
-    Ok(())
-}
-//MOVE metadata to a separate generalist db and make a (recreate) function - take the metadata
-//table and recreate the database from scratch
 
-enum ColumnTypes {
-    KlineDiscrete, //NOTE the collumn is synced to KLINE with no NIll values
-    KlineCont,     //collumn is is f64
-}
-
-#[derive(sqlx::FromRow, Debug)]
-struct AssetMetadata {
-    symbol: String,
-    data_start_ms: i64,
-    data_end_ms: i64,
-}
-/*
-   let q = format!(
-       "
-    SELECT FIRST( Asset, [Start Time], [End Time]) AS output 
-    FROM asset ;",
-   );
-* */
-async fn get_metadata(pool: &Pool<Sqlite>, symbol: &str) -> Result<AssetMetadata> {
-    let q = format!(
-        "SELECT ( Asset, [Start Time ms], [End Time ms]) FROM asset WHERE Asset = {};",
-        symbol
-    );
-    let am: AssetMetadata = sqlx::query_as(&q).fetch_one(pool).await?;
-    Ok(am)
-}
 async fn update_asset_metadata_time(
     asset_pool: &Pool<Sqlite>,
     metadata_pool: &Pool<Sqlite>,
@@ -1509,17 +1193,6 @@ async fn update_asset_metadata_time(
     Ok(())
 }
 
-async fn check_if_columns_exist(pool: &Pool<Sqlite>, columns: &str, table: &str) -> Result<bool> {
-    let start: (chrono::NaiveDateTime, f64, f64, f64, f64, f64) = sqlx::query_as(&format![
-        "PRAGMA table_info({}) WHERE name = '{}'",
-        columns, table
-    ])
-    .fetch_one(pool)
-    .await?;
-    todo!();
-}
-//NOTE for text queries '' is needed...
-
 async fn get_asset_timestamps(
     symbol: &str,
     metadata_db: &Pool<Sqlite>,
@@ -1545,7 +1218,6 @@ async fn get_asset_timestamps(
         sqlx::query_as(qf).fetch_one(metadata_db).await?;
     Ok((timestamps_fut.0, timestamps_fut.1))
 }
-use std::time::Instant;
 
 impl SQLConn {
     pub fn new(hist_asset_data: Arc<Mutex<AssetData>>) -> Self {
@@ -1574,14 +1246,11 @@ impl SQLConn {
     ) -> Result<()> {
         let now = Instant::now();
 
-
-
-        let s: String = symbol.to_string();
         let pool = connect_sqlite(format!["{}/Asset{}.db", &self.db_path, &symbol])
             .await
             .context("SQL : unable to connect to db")?;
 
-        let meta_pool = SqlitePool::connect(&metadata_db_path)
+        let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
 
@@ -1628,7 +1297,6 @@ impl SQLConn {
         start_time: &i64,
         end_time: &i64,
     ) -> Result<()> {
-        let s: String = symbol.to_string();
         let pool = connect_sqlite(format!["{}/Asset{}.db", &self.db_path, &symbol])
             .await
             .context("SQL : unable to connect to db")?;
@@ -1652,7 +1320,6 @@ impl SQLConn {
     }
     #[instrument(level = "trace")]
     async fn load_all_data(&mut self, symbol: &str) -> Result<()> {
-        let s: String = symbol.to_string();
         let pool = connect_sqlite(format!["{}/Asset{}.db", &self.db_path, &symbol])
             .await
             .context("SQL : unable to connect to db")?;
@@ -1704,7 +1371,7 @@ impl SQLConn {
     }
     pub async fn dl_single_asset_bin_wrap(&self, asset_symbol: &str) -> Result<()> {
         let exchange = "Binance";
-        let meta_pool = SqlitePool::connect(&metadata_db_path)
+        let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
         let current_timestamp: i64 = match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -1720,9 +1387,6 @@ impl SQLConn {
         self.download_single_asset(asset_symbol, exchange, &meta_pool, current_timestamp)
             .await?;
         Ok(())
-    }
-    pub async fn sql_append_metadata(&self, start_time: i64, end_time: i64) -> Result<()> {
-        todo!()
     }
     pub async fn download_single_asset(
         &self,
@@ -1743,7 +1407,7 @@ impl SQLConn {
             apool.close().await;
             let (start_time, _) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
             (
-                download_asset_data(&asset_symbol, &exch, start_time, Some(current_timestamp))
+                download_asset_data(&asset_symbol, &exch, start_time)
                     .await?,
                 start_time,
             )
@@ -1751,7 +1415,7 @@ impl SQLConn {
             let (start_time_ms, end_time_ms) =
                 get_asset_timestamps(&asset_symbol, &meta_pool).await?;
             (
-                download_asset_data(&asset_symbol, &exch, end_time_ms, Some(current_timestamp))
+                download_asset_data(&asset_symbol, &exch, end_time_ms)
                     .await?,
                 start_time_ms,
             )
@@ -1813,11 +1477,11 @@ impl SQLConn {
     }
     pub async fn update_data(&self) -> Result<()> {
         tracing::trace!["Update_data called"];
-        if Sqlite::database_exists(&metadata_db_path).await? == false {
+        if Sqlite::database_exists(&METADATA_DB_PATH).await? == false {
             create_metadata_db().await?;
             tracing::info!["Metadata DB created"];
         };
-        let meta_pool = SqlitePool::connect(&metadata_db_path)
+        let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
 
@@ -1844,12 +1508,12 @@ impl SQLConn {
         //Asset list loaded here, and operations executed for each asset
         meta_pool.close().await;
 
-        let meta_pool = SqlitePool::connect(&metadata_db_path)
+        let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
 
         for (asset_symbol, exchange) in asset_list {
-            self.download_single_asset(&asset_symbol, &exchange, &meta_pool, current_timestamp_ms)
+            let _=self.download_single_asset(&asset_symbol, &exchange, &meta_pool, current_timestamp_ms)
                 .await;
         }
         Ok(())
@@ -1869,16 +1533,16 @@ impl SQLConn {
     }
     async fn load_asset_list(&mut self) -> Result<()> {
         let ad_a = Arc::clone(&mut self.hist_asset_data);
-        let meta_pool = SqlitePool::connect(&metadata_db_path)
+        let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
         let dl_list = load_asset_list_ad(&meta_pool).await?;
         let mut ad = ad_a.lock().expect("Posioned AD mutex! (DATA)");
-        let result = ad.downloaded_assets = dl_list;
+        let _result = ad.downloaded_assets = dl_list;
         Ok(())
     }
     async fn insert_dl_asset(&self, symbol: &str, exchange: &str) -> Result<()> {
-        let meta_pool = SqlitePool::connect(&metadata_db_path)
+        let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
 
@@ -1924,7 +1588,7 @@ impl SQLConn {
         &self,
         meta_pool: &Pool<Sqlite>,
         symbol: &str,
-        exchange: &str,
+        _exchange: &str,
     ) -> Result<bool> {
         let res: (Option<String>,) = sqlx::query_as(
             format!(
@@ -1944,19 +1608,18 @@ impl SQLConn {
         //YAHOO. bit is fine for now. Maybe make a different asset list for
         //each exhcange...or simply append yahoo
     }
-    async fn insert_ad_intosql(&self, ad: Arc<Mutex<AssetData>>) {}
     pub async fn parse_sql_instructs(&mut self, i: SQLInstructs) -> SQLResponse {
         match i {
             SQLInstructs::LoadHistData { symbol: ref s } => {
-                log::info!("Loading historical data for:{}", s);
-                let meta_pool = SqlitePool::connect(&metadata_db_path)
+                tracing::info!("Loading historical data for:{}", s);
+                let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
                     .await
                     .context(anyhow!("SQL::Unable to metadata connect to db"));
                 let meta_pool = match meta_pool {
                     Ok(pool) => pool,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!("{}", err_string);
+                        tracing::error!("{}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
@@ -1966,13 +1629,13 @@ impl SQLConn {
                     Ok(v) => v,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!("Asset validation failed {}", err_string);
+                        tracing::error!("Asset validation failed {}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
                 if valid == false {
                     let err_string = "ERROR:Asset not in asset list!".to_string();
-                    log::error!("{}", err_string);
+                    tracing::error!("{}", err_string);
                     return SQLResponse::Failure((err_string, GeneralError::Generic));
                 };
 
@@ -1980,9 +1643,9 @@ impl SQLConn {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::load_all_data : {:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::load_all_data : {:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
@@ -1994,16 +1657,16 @@ impl SQLConn {
                 backload_wicks: ref st,
                 trade_time: ref et,
             } => {
-                log::info!("Loading historical data for:{}", s);
+                tracing::info!("Loading historical data for:{}", s);
 
-                let meta_pool = SqlitePool::connect(&metadata_db_path)
+                let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
                     .await
                     .context(anyhow!("SQL::Unable to metadata connect to db"));
                 let meta_pool = match meta_pool {
                     Ok(pool) => pool,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!("{}", err_string);
+                        tracing::error!("{}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
@@ -2012,22 +1675,22 @@ impl SQLConn {
                     Ok(v) => v,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!("{}", err_string);
+                        tracing::error!("{}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
                 if valid == false {
                     let err_string = "ERROR:Asset not in asset list!".to_string();
-                    log::error!("{}", err_string);
+                    tracing::error!("{}", err_string);
                     return SQLResponse::Failure((err_string, GeneralError::Generic));
                 };
                 let resp = match self.load_part_data2(&s, &et, &st).await {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::load_all_data : {:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::load_all_data : {:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
@@ -2039,16 +1702,16 @@ impl SQLConn {
                 start: ref st,
                 end: ref et,
             } => {
-                log::debug!("Loading part data: {}", s);
+                tracing::debug!("Loading part data: {}", s);
 
-                let meta_pool = SqlitePool::connect(&metadata_db_path)
+                let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
                     .await
                     .context(anyhow!("SQL::Unable to metadata connect to db"));
                 let meta_pool = match meta_pool {
                     Ok(pool) => pool,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!("{}", err_string);
+                        tracing::error!("{}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
@@ -2057,22 +1720,22 @@ impl SQLConn {
                     Ok(v) => v,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!("{}", err_string);
+                        tracing::error!("{}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
                 if valid == false {
                     let err_string = "ERROR:Asset not in asset list!".to_string();
-                    log::error!("{}", err_string);
+                    tracing::error!("{}", err_string);
                     return SQLResponse::Failure((err_string, GeneralError::Generic));
                 };
                 let resp = match self.load_part_data(&s, &st, &et).await {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::load_part_data : {:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::load_part_data : {:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
@@ -2085,28 +1748,28 @@ impl SQLConn {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::load_all_data e:{:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::load_all_data e:{:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
                 };
                 resp
             }
-            SQLInstructs::LoadTradeRecord { id: ref id } => {
+            SQLInstructs::LoadTradeRecord { id:_ } => {
                 todo!()
             }
             SQLInstructs::None => SQLResponse::None,
-            SQLInstructs::DelAsset { symbol: ref symbol } => {
-                let meta_pool = SqlitePool::connect(&metadata_db_path)
+            SQLInstructs::DelAsset { ref symbol } => {
+                let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
                     .await
                     .context(anyhow!("SQL::Unable to metadata connect to db"));
                 let meta_pool = match meta_pool {
                     Ok(pool) => pool,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!("{}", err_string);
+                        tracing::error!("{}", err_string);
                         return SQLResponse::Failure((err_string, GeneralError::Generic));
                     }
                 };
@@ -2118,9 +1781,9 @@ impl SQLConn {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
@@ -2133,24 +1796,24 @@ impl SQLConn {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
                 };
                 resp
             }
-            SQLInstructs::UpdateDataBinance { symbol: ref symbol } => {
+            SQLInstructs::UpdateDataBinance { ref symbol } => {
                 let res = self.dl_single_asset_bin_wrap(&symbol).await;
                 let resp = match res {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
@@ -2163,9 +1826,9 @@ impl SQLConn {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::update_all_data:{:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
@@ -2178,9 +1841,9 @@ impl SQLConn {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::load_asset_list:{:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::load_asset_list:{:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
@@ -2196,9 +1859,9 @@ impl SQLConn {
                     Ok(_) => SQLResponse::Success,
                     Err(e) => {
                         let err_string = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} SQL::load_asset_list:{:?}", i, e.context(err_ctx)]
+                            anyhow!["{:?} SQL::load_asset_list:{:?}", i, e.context(ERR_CTX)]
                         );
                         SQLResponse::Failure((err_string, GeneralError::Generic))
                     }
@@ -2225,7 +1888,7 @@ mod tests {
             .await
             .unwrap();
         asset_data.load_all(symb, &p).await;
-        let intv: &str = "1min";
+        let _intv: &str = "1min";
         //let k:Kline=kfrom_sql(&p,&format!["kline_{}",&intv], None).await;
         //.nondt_test(&p,"nigger2",None).await;
         /*

@@ -33,7 +33,6 @@ egui_extras = { version = "0.32.0", features = ["datepicker", "image", "serde"] 
 egui_plot_bintrade = "0.33.1"
 egui_tiles = "0.13.0"
 futures = "0.3.31"
-log = { version = "0.4.27"}
 plotters = "0.3.7"
 rust_decimal = "1.37.2"
 serde = "1.0.219"

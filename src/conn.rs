@@ -1,3 +1,5 @@
+#![allow(unused)]
+#![allow(non_snake_case)]
 use binance_async::Binance;
 use binance_async::models::*;
 use binance_async::rest::spot::GetAccountRequest;
@@ -7,50 +9,38 @@ use binance_async::websocket::{
     AccountUpdate, AccountUpdateBalance, AggregateTrade, BinanceWebsocket, CandelStickMessage,
     Depth, MiniTicker, Ticker, TradeMessage, UserOrderUpdate, usdm::WebsocketMessage,
 };
+
 use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
-
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use crate::{BinInstructs, BinResponse, GeneralError};
-
-use crate::data::AssetData;
-use crate::data::Kline as KlineMine;
-use crate::data::Klines;
-use crate::data::get_data_binance;
-
-use tokio::sync::mpsc::*;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use anyhow::{Context, Result, anyhow};
-use std::result::Result as OCResult;
-
-use crate::data::Intv;
-
 use futures::StreamExt;
-
 use rust_decimal::Decimal;
-
 use derive_debug::Dbg;
 use num::FromPrimitive;
 use serde_json::json;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use tokio::sync::watch::{Receiver, Sender};
 use tracing::instrument;
 use websockets::WebSocket;
-
 use binance::api::Binance as Binance2;
-use binance::market::Market;
-use binance::model::{KlineSummaries, KlineSummary};
-
-use crate::trade::Order;
-
 use reqwest;
-use reqwest::multipart;
 
+use crate::{BinInstructs, BinResponse, GeneralError};
+use crate::data::AssetData;
+use crate::data::Kline as KlineMine;
+use crate::data::Klines;
+use crate::trade::Order;
+use crate::data::Intv;
+
+
+const ERR_CTX: &str = "Binance client | websocket:";
+
+#[allow(unused)]
 #[derive(Deserialize, Debug)]
 pub struct SymbolInfo {
     pub symbol: String,
@@ -64,6 +54,7 @@ pub struct SymbolInfo {
     pub quoteCommissionPrecision: i64,
     //filters: Value
 }
+#[allow(unused)]
 #[derive(Deserialize, Debug)]
 pub struct FutSymbolInfo {
     pub symbol: String,
@@ -190,7 +181,6 @@ async fn get_latest_wicks(
     };
 }
 
-const err_ctx: &str = "Binance client | websocket:";
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct OrderBookWS {
@@ -626,7 +616,7 @@ impl WSTick {
         tracing::debug!["\x1b[93m Subscribe message\x1b[0m :  {:?}", sub_message];
         let mut conn = WebSocket::connect(socket).await?;
         conn.send_text(sub_message.to_string()).await?;
-        log::info!["Web socket connected with message:{:?}", sub_message];
+        tracing::info!["Web socket connected with message:{:?}", sub_message];
         Ok(conn)
     }
     #[instrument(level = "trace")]
@@ -744,11 +734,11 @@ impl BinanceClient {
                 ..Default::default()
             })
             .await
-            .context(err_ctx)?;
-        log::info!("{:?}", resp);
+            .context(ERR_CTX)?;
+        tracing::info!("{:?}", resp);
         Ok(())
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn cancel_order(&self, sym: &str) -> Result<()> {
         let resp = self
             .binance_client
@@ -758,29 +748,29 @@ impl BinanceClient {
                 ..Default::default()
             })
             .await
-            .context(err_ctx)?;
-        log::info!("{:?}", resp);
+            .context(ERR_CTX)?;
+        tracing::info!("{:?}", resp);
         Ok(())
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn start_user_stream(&self) -> Result<()> {
         let listen_key = self
             .binance_client
             .request(StartUserDataStreamRequest {})
             .await
-            .context(err_ctx)
+            .context(ERR_CTX)
             .context("Binance client:unable to connect_ws user stream")?;
         let mut ws: BinanceWebsocket<WebsocketMessage> =
             BinanceWebsocket::new(&[listen_key.listen_key.as_str()])
                 .await
-                .context(err_ctx)?;
+                .context(ERR_CTX)?;
         loop {
             let msg = ws
                 .next()
                 .await
                 .ok_or(anyhow!["Ws exited on a None"])
-                .context(err_ctx)?;
-            log::debug!("{msg:?}");
+                .context(ERR_CTX)?;
+            tracing::debug!("{msg:?}");
         }
         Ok(())
     }
@@ -792,7 +782,7 @@ impl BinanceClient {
         self.ws_tick
             .run(self.ws_buffer_size)
             .await
-            .context(err_ctx)?;
+            .context(ERR_CTX)?;
         tracing::trace!["Connect WS ws: {:?}", &self];
         Ok(())
     }
@@ -833,7 +823,7 @@ impl BinanceClient {
         self.ws_tick
             .run(self.ws_buffer_size)
             .await
-            .context(err_ctx)?;
+            .context(ERR_CTX)?;
         tracing::debug!["{:?}", &self];
         Ok(())
     }
@@ -849,9 +839,9 @@ impl BinanceClient {
             .binance_client
             .request(GetAccountRequest {})
             .await
-            .context(err_ctx)?;
+            .context(ERR_CTX)?;
         tracing::debug!["{:?}", &self];
-        log::info!("{:?}", resp);
+        tracing::info!("{:?}", resp);
         self.account_info = Some(resp);
         Ok(())
     }
@@ -866,12 +856,12 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
                             anyhow![
                                 "{:?} Unable to connect to ws  e:{}",
                                 i.clone(),
-                                e.context(err_ctx)
+                                e.context(ERR_CTX)
                             ]
                         );
                         //TODO check internet connection here with max retryies
@@ -889,9 +879,9 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(err_ctx)]
+                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(ERR_CTX)]
                         );
                         //TODO check internet connection here with max retryies
                         //BinResponse::Failure((string_error,GeneralError::SystemError(Sys_err::No_Network)))
@@ -912,7 +902,7 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        log::error!("{}", anyhow!["{:?} Unable to  e:{}", i, e]);
+                        tracing::error!("{}", anyhow!["{:?} Unable to  e:{}", i, e]);
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
@@ -933,9 +923,9 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(err_ctx)]
+                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(ERR_CTX)]
                         );
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
@@ -953,9 +943,9 @@ impl BinanceClient {
                     Ok(_) => {}
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(err_ctx)]
+                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(ERR_CTX)]
                         );
                         return BinResponse::Failure((string_error, GeneralError::Generic));
                     }
@@ -969,9 +959,9 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
-                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(err_ctx)]
+                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(ERR_CTX)]
                         );
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
@@ -986,12 +976,12 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        log::error!(
+                        tracing::error!(
                             "{}",
                             anyhow![
                                 "{:?} Unable to sell_now e:{}",
                                 i.clone(),
-                                e.context(err_ctx)
+                                e.context(ERR_CTX)
                             ]
                         );
                         BinResponse::Failure((string_error, GeneralError::Generic))

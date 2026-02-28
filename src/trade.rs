@@ -1,9 +1,8 @@
-use crate::data::{AssetData, Intv, Kline};
+use crate::data::{AssetData, Intv};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Result, anyhow};
-use std::result::Result as OCResult;
+use anyhow::{Result};
 use tracing::instrument;
 
 const fn exec_order(
@@ -51,7 +50,7 @@ const fn eval_limit(
     c: f64,
     l: f64,
     buy_sell: bool,
-    eval_mode_var: i32,
+    eval_mode:i32,
 ) -> Option<f64> {
     if eval_mode == 1 {
         if o > c {
@@ -83,10 +82,9 @@ pub enum OrderCondition {
     StopTriggered,
 }
 
-const eval_mode: i32 = 1;
-const m_fee: f64 = 0.0015;
-const t_fee: f64 = 0.0015;
-//NOTE - const fucntions for default fallbacks...
+const M_FEE: f64 = 0.0015;
+const T_FEE: f64 = 0.0015;
+
 pub const fn eval_order_basic(
     h: f64,
     o: f64,
@@ -95,13 +93,14 @@ pub const fn eval_order_basic(
     asset1: f64,
     asset2: f64,
     order: Order,
+    eval_mode:i32,
 ) -> Option<(OrderCondition, f64, f64, f64)> {
     let last_order_price;
     match order {
         Order::Market { buy: b, quant: q } => {
             let quant = q.get_f64();
             let buy_sell = b;
-            let (asset1, asset2) = exec_order(asset1, asset2, o, quant, buy_sell, t_fee);
+            let (asset1, asset2) = exec_order(asset1, asset2, o, quant, buy_sell, T_FEE);
             let condition = OrderCondition::Filled;
             last_order_price = o;
             Some((condition, asset1, asset2, last_order_price))
@@ -109,7 +108,7 @@ pub const fn eval_order_basic(
         Order::Limit {
             buy: b,
             price: p,
-            limit_status: li,
+            limit_status: _li,
             quant: q,
         } => {
             let quant = q.get_f64();
@@ -119,7 +118,7 @@ pub const fn eval_order_basic(
             match order {
                 Some(price) => {
                     let (asset1, asset2) =
-                        exec_order(asset1, asset2, price, quant, buy_sell, m_fee);
+                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE);
                     let condition = OrderCondition::Filled;
                     last_order_price = o;
                     Some((condition, asset1, asset2, last_order_price))
@@ -131,8 +130,8 @@ pub const fn eval_order_basic(
             buy: b,
             price: p,
             stop_price: sp,
-            stop_status: s,
-            limit_status: li,
+            stop_status: _s,
+            limit_status: _li,
             quant: q,
         } => {
             let quant = q.get_f64();
@@ -145,13 +144,13 @@ pub const fn eval_order_basic(
             match order {
                 Some(price) => {
                     let (asset1, asset2) =
-                        exec_order(asset1, asset2, price, quant, buy_sell, m_fee);
+                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE);
                     let condition = OrderCondition::StopTriggered;
                     let limit_order = eval_limit(limit, h, o, c, l, buy_sell, eval_mode);
                     match limit_order {
                         Some(price) => {
                             let (asset1, asset2) =
-                                exec_order(asset1, asset2, price, quant, buy_sell, m_fee);
+                                exec_order(asset1, asset2, price, quant, buy_sell, M_FEE);
                             let condition = OrderCondition::Filled;
                             last_order_price = o;
                             Some((condition, asset1, asset2, last_order_price))
@@ -168,7 +167,7 @@ pub const fn eval_order_basic(
         Order::StopMarket {
             buy: b,
             price: p,
-            stop_status: s,
+            stop_status: _s,
             quant: q,
         } => {
             let quant = q.get_f64();
@@ -178,7 +177,7 @@ pub const fn eval_order_basic(
             match order {
                 Some(price) => {
                     let (asset1, asset2) =
-                        exec_order(asset1, asset2, price, quant, buy_sell, m_fee);
+                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE);
                     let condition = OrderCondition::Filled;
                     last_order_price = o;
                     Some((condition, asset1, asset2, last_order_price))
@@ -462,13 +461,13 @@ impl Order {
             Order::Limit {
                 buy: _,
                 quant: _,
-                price: p,
+                price: _p,
                 limit_status: _,
             } => "Limit".to_string(),
             Order::StopLimit {
                 buy: _,
                 quant: _,
-                price: p,
+                price: _p,
                 limit_status: _,
                 stop_price: _,
                 stop_status: _,
@@ -476,7 +475,7 @@ impl Order {
             Order::StopMarket {
                 buy: _,
                 quant: _,
-                price: p,
+                price: _p,
                 stop_status: _,
             } => "Stop Market".to_string(),
         }
@@ -500,26 +499,28 @@ pub enum AdvOrder {
         limit2_price: f32,
     },
 }
-
+/* TODO FUTURE IMPLEMENT
 #[derive(Debug, Clone, Copy)]
 enum OrderStatus {
     BasicOrder { t: Order },
     AdvOrder { t: AdvOrder },
 }
+*/
 
 #[instrument(level = "debug")]
 fn hist_eval_kline(
     kline: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
-    mut order: Order,
+    order: Order,
     asset1: f64,
     asset2: f64,
+    eval_mode:i32,
 ) -> Option<(chrono::NaiveDateTime, f64, f64, Order)> {
     //TODO get this working then fix the performance bullshit with the .clone()
     for k in kline.iter() {
         let (t, o, h, l, c, _) = *k;
-        let result = eval_order_basic(h, o, c, l, asset1, asset2, order);
+        let result = eval_order_basic(h, o, c, l, asset1, asset2, order, eval_mode);
         match result {
-            Some((mut order_cond, asset1, asset2, last_price)) => {
+            Some((order_cond, asset1, asset2, _last_price)) => {
                 let (order_cond, order) = eval_basic_condition(order_cond, order);
                 match order_cond {
                     OrderCondition::Untouched => continue,
@@ -607,10 +608,7 @@ impl HistTrade {
             ..Default::default()
         }
     }
-    pub fn get_trade_time(&mut self) {
-        let timestep = self.current_intv.to_timedelta();
-    }
-    pub fn trade_forward(&mut self, next_wicks: u16) -> Result<()> {
+    pub fn trade_forward(&mut self, next_wicks: u16, eval_mode:i32) -> Result<()> {
         let ad = Arc::clone(&self.asset_data);
         let asset_data = ad.lock().expect("(TRADE) ad mutex poisoned");
         let trade_slice = asset_data.find_slice_n(
@@ -625,7 +623,7 @@ impl HistTrade {
                 t
             }
             None => {
-                log::error!["Trade slice not found"];
+                tracing::error!["Trade slice not found"];
                 return Ok(());
             }
         };
@@ -633,13 +631,13 @@ impl HistTrade {
         match self.current_order {
             Some(oo) => o = oo,
             None => {
-                log::error!["No order set"];
+                tracing::error!["No order set"];
                 return Ok(());
             }
         }
         tracing::debug!["HistTradingRunner {:?}", self.trade_time];
         //TODO replace this with index
-        let result = hist_eval_kline(ts, o, self.asset1, self.asset2);
+        let result = hist_eval_kline(ts, o, self.asset1, self.asset2, eval_mode);
         tracing::debug!["Hist_eval_kline result: {:?}", result];
         match result {
             Some((transaction_time, asset1, asset2, order)) => {
@@ -704,22 +702,8 @@ impl HistTrade {
     }
 }
 
-#[derive(Debug)]
-struct TradeLive {
-    trade_start_time: chrono::NaiveDateTime,
-    remote_server: bool,
-
-    trade_record: Vec<TradeRecord>,
-    set_last_order: bool,
-    current_symbol: String,
-    s1: f64,
-    s2: f64,
-    current_interval: String,
-    trade_platform: i32,
-}
-
 #[derive(PartialEq, Debug, Clone, Copy, Serialize, Deserialize)]
-struct TradeRecord {
+pub struct TradeRecord {
     transaction_time: chrono::NaiveDateTime,
     trades_made: i32,
     asset1_held: bool,
@@ -732,7 +716,7 @@ struct TradeRecord {
 }
 
 impl TradeRecord {
-    fn new() -> Self {
+    pub fn new() -> Self {
         TradeRecord {
             transaction_time: chrono::NaiveDateTime::default(),
             trades_made: 0,

@@ -1,51 +1,15 @@
-#![allow(warnings)]
+#![allow(deprecated)]
 use crate::trade::Order;
 use serde_json::Value;
 use strum_macros::EnumIter;
-
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
-pub enum Sys_err {
-    No_Network,
-    DiskFull,
-}
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
-pub enum Get_err {
-    Download_failed,
-    Not_found,
-    Access_denied,
-}
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
-pub enum Put_err {
-    Upload_failed,
-    Path_not_found,
-}
-
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
-pub enum Indp_data_err {
-    Duplicates,
-    Timezone,
-    WrongFormat,
-}
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
-pub enum Dep_data_err {
-    WrongFormat,
-    Duplicates,
-    Timezone,
-    Incorrect_method,
-}
-
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
-pub enum DataError {
-    Indp_corrup(Indp_data_err), //=> delete db, download again, etc...
-    Depn_corrup(Dep_data_err),  //=> delete afflicted dependent tables and recalc...
-}
+use std::collections::HashMap;
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum GeneralError {
-    SystemError(Sys_err),
-    GetError(Get_err),
-    PutError(Put_err),
-    DATAError(DataError),
+    SystemError,
+    GetError,
+    PutError,
+    DATAError,
     Generic,
 }
 
@@ -139,8 +103,6 @@ pub enum BinResponse {
     OrderStatus(i32),
 }
 
-use crate::conn::SymbolOutput;
-use std::collections::HashMap;
 
 #[derive(PartialEq, EnumIter, Debug, Clone, Default)]
 pub enum BinInstructs {
@@ -242,7 +204,7 @@ impl std::fmt::Display for ClientInstruct {
     }
 }
 pub mod client;
-pub mod conn;
 pub mod data;
 pub mod gui;
 pub mod trade;
+pub mod conn;
