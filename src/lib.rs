@@ -1,8 +1,8 @@
 #![allow(deprecated)]
 use crate::trade::Order;
 use serde_json::Value;
-use strum_macros::EnumIter;
 use std::collections::HashMap;
+use strum_macros::EnumIter;
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum GeneralError {
@@ -102,7 +102,6 @@ pub enum BinResponse {
     Failure((String, GeneralError)),
     OrderStatus(i32),
 }
-
 
 #[derive(PartialEq, EnumIter, Debug, Clone, Default)]
 pub enum BinInstructs {
@@ -204,7 +203,7 @@ impl std::fmt::Display for ClientInstruct {
     }
 }
 pub mod client;
+pub mod conn;
 pub mod data;
 pub mod gui;
 pub mod trade;
-pub mod conn;

@@ -10,33 +10,32 @@ use binance_async::websocket::{
     Depth, MiniTicker, Ticker, TradeMessage, UserOrderUpdate, usdm::WebsocketMessage,
 };
 
-use strum::IntoEnumIterator;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+use strum::IntoEnumIterator;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use anyhow::{Context, Result, anyhow};
-use futures::StreamExt;
-use rust_decimal::Decimal;
+use binance::api::Binance as Binance2;
 use derive_debug::Dbg;
+use futures::StreamExt;
 use num::FromPrimitive;
+use reqwest;
+use rust_decimal::Decimal;
 use serde_json::json;
 use tokio::sync::watch::{Receiver, Sender};
 use tracing::instrument;
 use websockets::WebSocket;
-use binance::api::Binance as Binance2;
-use reqwest;
 
-use crate::{BinInstructs, BinResponse, GeneralError};
 use crate::data::AssetData;
+use crate::data::Intv;
 use crate::data::Kline as KlineMine;
 use crate::data::Klines;
 use crate::trade::Order;
-use crate::data::Intv;
-
+use crate::{BinInstructs, BinResponse, GeneralError};
 
 const ERR_CTX: &str = "Binance client | websocket:";
 
@@ -181,7 +180,6 @@ async fn get_latest_wicks(
     };
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct OrderBookWS {
     bid_price: f64,
@@ -256,7 +254,7 @@ impl Default for BinWSResponse {
 }
 
 impl BinWSResponse {
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     fn subscribe_key(&self, symbol: &str) -> String {
         let ret = match &self {
             BinWSResponse::OrderBook(_) => {
@@ -300,7 +298,8 @@ impl BinWSResponse {
                 let event_time = input["E"]
                     .as_i64()
                     .ok_or(anyhow!["Unable to parse E as i64"])?;
-                tracing::trace![
+                #[cfg(debug_assertions)]
+                tracing::debug![
                     "\x1b[34m (AGGTrade Current linux epoch - event_time)\x1b[0m: {}ms",
                     t_now - event_time
                 ];
@@ -352,6 +351,7 @@ impl BinWSResponse {
                 let event_time = input["E"]
                     .as_i64()
                     .ok_or(anyhow!["Unable to parse E as i64"])?;
+                #[cfg(debug_assertions)]
                 tracing::trace![
                     "\x1b[31m (KLINE Current linux epoch - event_time)\x1b[0m: {}ms",
                     t_now - event_time
@@ -669,8 +669,8 @@ impl WSTick {
 pub struct BinanceClient {
     #[dbg(skip)]
     pub binance_client: Binance,
-    pub_key: String,
-    sec_key: String,
+    pub_key: Option<String>,
+    sec_key: Option<String>,
     current_order_id: u64,
     ws_buffer_size: usize,
     ws_tick: WSTick,
@@ -682,8 +682,8 @@ impl Default for BinanceClient {
     fn default() -> Self {
         Self {
             binance_client: Binance::default(),
-            pub_key: "".to_string(),
-            sec_key: "".to_string(),
+            pub_key: None,
+            sec_key: None,
             current_order_id: 0,
             ws_buffer_size: 50,
             ws_tick: WSTick::default(),
@@ -695,15 +695,15 @@ impl Default for BinanceClient {
 
 impl BinanceClient {
     pub fn new(
-        pub_key: String,
-        sec_key: String,
+        pub_key: Option<String>,
+        sec_key: Option<String>,
         collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         live_price_watch: Arc<Mutex<f64>>,
     ) -> Self {
         Self {
-            binance_client: Binance::with_key_and_secret(&pub_key, &sec_key),
-            pub_key: pub_key,
-            sec_key: sec_key,
+            binance_client: Binance::default(),
+            pub_key,
+            sec_key,
             current_order_id: 0,
             ws_buffer_size: 15,
             ws_tick: WSTick::new(collect, live_price_watch),
@@ -711,7 +711,7 @@ impl BinanceClient {
             exchange_info: vec![],
         }
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn send_new_order(
         &self,
         sym: &str,
@@ -815,7 +815,7 @@ impl BinanceClient {
         //NOTE insert into the hashmap, not the fn
         Ok(())
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     async fn change_ws_params(&mut self, new_params: HashMap<String, Vec<String>>) -> Result<()> {
         //TODO check if possible to change params without disconnecting
         self.ws_tick.disconnect = true;
@@ -827,13 +827,13 @@ impl BinanceClient {
         tracing::debug!["{:?}", &self];
         Ok(())
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     pub async fn disconnect_ws(&mut self) {
         tracing::debug!["{:?}", &self];
         self.ws_tick.disconnect = true;
         tracing::debug!["{:?}", &self];
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     pub async fn get_user_data(&mut self) -> Result<()> {
         let resp = self
             .binance_client
@@ -845,7 +845,7 @@ impl BinanceClient {
         self.account_info = Some(resp);
         Ok(())
     }
-    #[instrument(level = "debug")]
+    #[instrument(level = "trace")]
     pub async fn parse_binance_instructs(&mut self, i: BinInstructs) -> BinResponse {
         //TODO query state here...
         match i {
@@ -994,7 +994,7 @@ impl BinanceClient {
     }
 }
 //TODO AnyhowContext one level above
-#[instrument(level = "debug")]
+#[instrument(level = "trace")]
 fn parse_order_to_ba(order: &Order) -> (OrderType, OrderSide, f64, f64, f64) {
     //async fn send_new_order(&self, sym:String, otype: OrderType, sid:OrderSide, pric:f64, quant:f64)
     tracing::debug!["Order to parse:{:?}", &order];

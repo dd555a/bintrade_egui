@@ -15,7 +15,7 @@ opt-level = 2
 codegen-units = 1 
 
 [features]
-default=["yfinance"]
+default=[]
 yfinance=["dep:yahoo_finance_api", "dep:yfinance-rs"]
 
 [dependencies]

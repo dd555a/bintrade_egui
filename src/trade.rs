@@ -2,7 +2,7 @@ use crate::data::{AssetData, Intv};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Result};
+use anyhow::Result;
 use tracing::instrument;
 
 const fn exec_order(
@@ -50,7 +50,7 @@ const fn eval_limit(
     c: f64,
     l: f64,
     buy_sell: bool,
-    eval_mode:i32,
+    eval_mode: i32,
 ) -> Option<f64> {
     if eval_mode == 1 {
         if o > c {
@@ -93,7 +93,7 @@ pub const fn eval_order_basic(
     asset1: f64,
     asset2: f64,
     order: Order,
-    eval_mode:i32,
+    eval_mode: i32,
 ) -> Option<(OrderCondition, f64, f64, f64)> {
     let last_order_price;
     match order {
@@ -513,7 +513,7 @@ fn hist_eval_kline(
     order: Order,
     asset1: f64,
     asset2: f64,
-    eval_mode:i32,
+    eval_mode: i32,
 ) -> Option<(chrono::NaiveDateTime, f64, f64, Order)> {
     //TODO get this working then fix the performance bullshit with the .clone()
     for k in kline.iter() {
@@ -608,7 +608,7 @@ impl HistTrade {
             ..Default::default()
         }
     }
-    pub fn trade_forward(&mut self, next_wicks: u16, eval_mode:i32) -> Result<()> {
+    pub fn trade_forward(&mut self, next_wicks: u16, eval_mode: i32) -> Result<()> {
         let ad = Arc::clone(&self.asset_data);
         let asset_data = ad.lock().expect("(TRADE) ad mutex poisoned");
         let trade_slice = asset_data.find_slice_n(

@@ -14,89 +14,68 @@ use crate::{
 };
 use serde_json::Value;
 
-use config::Config;
-
 use futures::future::join_all;
 
 use eframe::EventLoopBuilderHook;
 use eframe::egui;
 use winit::platform::wayland::EventLoopBuilderExtWayland;
 
-use crate::conn::BinanceClient;
-use crate::conn::SymbolOutput;
-use crate::data::AssetData;
-use crate::data::Intv;
-use crate::data::SQLConn;
-use crate::gui::DesktopApp;
+use crate::conn::{BinanceClient, SymbolOutput};
+use crate::data::{AssetData, Intv, SQLConn};
+use crate::gui::{DesktopApp, Settings};
 
 use anyhow::{Context, Result};
+
 const ERR_CTX: &str = "Main client";
 
-pub fn load_config() -> Result<Config> {
-    let settings = Config::builder()
-        .add_source(config::File::with_name("./Settings-testing.toml"))
-        .build()?;
-    Ok(settings)
-}
-
-#[allow(unused)]
-#[derive(Clone, Debug)]
-enum Setting {
-    Symbol { s: String },
-    Intv { i: Intv },
-    IP { i: String },
-    Port { i: u16 },
+pub fn load_settings() -> Result<Settings> {
+    let res = Settings::load_settings_enc()?;
+    let sett = match res {
+        Some(settings) => settings,
+        None => Settings::new(),
+    };
+    Ok(sett)
 }
 
 #[derive(Clone, Debug)]
 enum Tasks {
-    Task0Cli {
-        default_symbol: String,
-        default_interval: String,
-        default_next_wicks: u16,
-        k0_inc: f32,
-        k1_inc: f32,
-        k2_inc: f32,
-    },
+    Task0Cli {},
     Task1BinWS {
-        api_key: String,
-        api_secret: String,
+        api_key: Option<String>,
+        api_secret: Option<String>,
+        default_symbol: String,
+        default_interval: Intv,
     },
     #[allow(unused)]
-    Task3SQL {
-        settings: i32,
-    },
+    Task3SQL {},
 }
 impl Tasks {
-    fn new_cli(global_settings: &Config) -> Result<Tasks> {
-        let default_symbol = global_settings.get("default_symbol")?;
-        let default_interval = global_settings.get("default_interval")?;
-        let default_next_wicks = global_settings.get("next_wicks")?;
-        let k0_inc = global_settings.get("k0_inc")?;
-        let k1_inc = global_settings.get("k1_inc")?;
-        let k2_inc = global_settings.get("k2_inc")?;
-        let t = Tasks::Task0Cli {
-            default_symbol,
-            default_interval,
-            default_next_wicks,
-            k0_inc,
-            k1_inc,
-            k2_inc,
-        };
-        return Ok(t);
+    #[allow(unused)]
+    fn new_cli(global_settings: &Settings) -> Result<Tasks> {
+        return Ok(Tasks::Task0Cli {});
     }
-    fn new_binws(global_settings: &Config) -> Result<Tasks> {
-        let api_key = global_settings.get("api_key")?;
-        let api_secret = global_settings.get("api_secret")?;
+    fn new_binws(global_settings: &Settings) -> Result<Tasks> {
+        //FIXME API keys stored this way is not good...
+        let (api_key, api_secret) = match (
+            global_settings.binance_pub_key.clone(),
+            global_settings.binance_priv_key.clone(),
+        ) {
+            (Some(key), Some(priv_key)) => (Some(key), Some(priv_key)),
+            _ => (None, None),
+        };
+        let default_symbol = global_settings.default_asset.clone();
+        let default_interval = global_settings.default_intv;
         let t = Tasks::Task1BinWS {
             api_key,
             api_secret,
+            default_symbol,
+            default_interval,
         };
         return Ok(t);
-    }  
+    }
     #[allow(unused)]
-    fn new_sql(global_settings: &Config) -> Tasks {
-        let t = Tasks::Task3SQL { settings: 0 };
+    fn new_sql(global_settings: &Settings) -> Tasks {
+        let t = Tasks::Task3SQL {};
         return t;
     }
 }
@@ -111,13 +90,13 @@ pub enum Frontend {
     Desktop,
 }
 impl Frontend {
-    fn init(&self, config: &Config) -> Result<Vec<Tasks>> {
+    fn init(&self, settings: &Settings) -> Result<Vec<Tasks>> {
         let mut tasks: Vec<Tasks> = std::vec::Vec::new();
-        let s0 = Tasks::new_cli(&config)?;
+        let s0 = Tasks::new_cli(&settings)?;
         tasks.push(s0);
-        let s1 = Tasks::new_binws(&config)?;
+        let s1 = Tasks::new_binws(&settings)?;
         tasks.push(s1);
-        let s3 = Tasks::new_sql(&config);
+        let s3 = Tasks::new_sql(&settings);
         tasks.push(s3);
         return Ok(tasks);
     }
@@ -195,7 +174,6 @@ pub struct ClientTask {
     lp_chan_recv: Option<watch::Receiver<f64>>,
     lp_chan_send: Option<watch::Sender<f64>>,
 
-    settings: Config,
     cancel_all: CancellationToken,
 
     cli_awake: Arc<Notify>,
@@ -219,7 +197,7 @@ pub struct ClientTask {
 }
 
 impl ClientTask {
-    fn new(f: Frontend, conf: Config) -> Self {
+    fn new(f: Frontend) -> Self {
         Self {
             frontend: f,
             live_dat: Arc::new(Mutex::new(AssetData::new(0))),
@@ -228,7 +206,6 @@ impl ClientTask {
             cli_awake: Arc::new(Notify::new()),
             cli_sleep: Arc::new(Notify::new()),
 
-            settings: conf,
             cancel_all: CancellationToken::new(),
 
             recv_settings: None,
@@ -258,12 +235,7 @@ impl ClientTask {
         live_price: Arc<Mutex<f64>>,
         collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
 
-        default_symbol: &str,
-        default_interval: Intv,
-        default_next_wicks: u16,
-        k0_inc: f32,
-        k1_inc: f32,
-        k2_inc: f32,
+        settings: Settings,
     ) -> Handle<()> {
         let rchan: watch::Receiver<ClientResponse>;
         let rchan_e = task_chans.pop().expect("Task channels doesn't exist!");
@@ -286,6 +258,7 @@ impl ClientTask {
                     }));
                 let native_options = eframe::NativeOptions {
                     viewport: egui::ViewportBuilder::default()
+                        //TODO - add resolution settings
                         .with_inner_size([1980.0, 1080.0])
                         .with_min_inner_size([300.0, 220.0]),
                     event_loop_builder,
@@ -294,6 +267,7 @@ impl ClientTask {
                     ..Default::default()
                 };
 
+                let sett = settings.clone();
                 let r = eframe::run_native(
                     "Bintrade Gui",
                     native_options,
@@ -306,6 +280,7 @@ impl ClientTask {
                             hist_asset_data.clone(),
                             live_price.clone(),
                             collect_data.clone(),
+                            sett,
                         )))
                     }),
                 );
@@ -408,18 +383,11 @@ impl ClientTask {
         }
     }
 
-    async fn run_main(&mut self, tasks: Vec<Tasks>) {
+    async fn run_main(&mut self, tasks: Vec<Tasks>, settings: Settings) {
         let mut handles: Vec<Handle<()>> = vec![];
         for t in tasks {
             match t {
-                Tasks::Task0Cli {
-                    ref default_symbol,
-                    ref default_interval,
-                    default_next_wicks,
-                    k0_inc,
-                    k1_inc,
-                    k2_inc,
-                } => {
+                Tasks::Task0Cli {} => {
                     let task_chans = self.make_chans(&t);
                     match self.frontend {
                         Frontend::Desktop => {
@@ -433,12 +401,7 @@ impl ClientTask {
                                 hist_asset_data,
                                 lp,
                                 collect_data,
-                                &default_symbol,
-                                Intv::from_str(&default_interval),
-                                default_next_wicks,
-                                k0_inc,
-                                k1_inc,
-                                k2_inc,
+                                settings.clone(),
                             );
                             handles.push(gui_blocking_handle);
                         }
@@ -447,6 +410,8 @@ impl ClientTask {
                 Tasks::Task1BinWS {
                     ref api_key,
                     ref api_secret,
+                    ref default_symbol,
+                    ref default_interval,
                 } => {
                     let chans = self.make_chans(&t);
                     let cancel_token = self.cancel_all.clone();
@@ -457,11 +422,15 @@ impl ClientTask {
                     let live_ad = self.live_dat.clone();
                     let a_key = api_key.clone();
                     let a_secret = api_secret.clone();
+                    let def_symb = default_symbol.clone();
+                    let def_intv = default_interval.clone();
                     let bin_cli_handle = tokio::task::spawn(async move {
                         ClientTask::start_binclient(
                             chans,
-                            &a_key,
-                            &a_secret,
+                            a_key,
+                            a_secret,
+                            def_symb,
+                            def_intv,
                             cancel_token,
                             awake_notify,
                             sleep_notify,
@@ -473,7 +442,7 @@ impl ClientTask {
                     });
                     handles.push(bin_cli_handle);
                 }
-                Tasks::Task3SQL { settings: _ } => {
+                Tasks::Task3SQL {} => {
                     let chans = self.make_chans(&t);
                     let cancel_token = self.cancel_all.clone();
                     let hist_data = Arc::clone(&self.hist_dat);
@@ -503,8 +472,10 @@ impl ClientTask {
     #[instrument(level = "trace")]
     async fn start_binclient(
         mut task_chans: Vec<ChanType>,
-        api_key: &str,
-        api_secret: &str,
+        api_key: Option<String>,
+        api_secret: Option<String>,
+        default_symbol: String,
+        default_intv: Intv,
         cancel_token: CancellationToken,
         awake_notify: Arc<Notify>,
         sleep_notify: Arc<Notify>,
@@ -514,13 +485,7 @@ impl ClientTask {
     ) {
         let (send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
-        //TODO link config
-        let mut cli = BinanceClient::new(
-            api_key.to_string(),
-            api_secret.to_string(),
-            live_collect,
-            live_price,
-        );
+        let mut cli = BinanceClient::new(api_key, api_secret, live_collect, live_price);
         tracing::info!("Binclient started");
         loop {
             let sub_params = vec![
@@ -528,24 +493,20 @@ impl ClientTask {
                 "btcusdt@kline_1m".to_string(),
             ];
             let mut params: HashMap<String, Vec<String>> = HashMap::new();
-            //TODO - replace this with default asset and inteval
-            params.insert("BTCUSDT".to_string(), sub_params);
+            params.insert(default_symbol.clone(), sub_params);
             let res = cli
-                .get_initial_data("BTCUSDT", &Intv::Min1, 2_000, live_ad.clone())
+                .get_initial_data(&default_symbol, &default_intv, 2_000, live_ad.clone())
                 .await;
             match res {
                 Ok(_) => tracing::trace!["Initial data for BTCUSDT received"],
                 Err(e) => tracing::error!["Initial data connection failed, ERROR: {}", e],
             };
-            /*
-             */
-            //NOTE replce with defaults from config...
             //NOTE call this function every time an interval is switched for LIVE
             //TODO match response, break and change asset as needed
             loop {
                 select! {
                     _ = cli.connect_ws(params.clone()) =>{
-                        tracing::debug!["WS running"];
+                        tracing::debug!["WS exited"];
                     }
                     _ = recv_from_client.changed() =>{
                         let instruct=recv_from_client.borrow_and_update().clone();
@@ -605,14 +566,7 @@ impl ClientTask {
     fn make_chans(&mut self, t: &Tasks) -> Vec<ChanType> {
         let mut cv: Vec<ChanType> = std::vec::Vec::new();
         match t {
-            Tasks::Task0Cli {
-                default_symbol,
-                default_interval,
-                default_next_wicks,
-                k0_inc,
-                k1_inc,
-                k2_inc,
-            } => {
+            Tasks::Task0Cli {} => {
                 use ClientInstruct::None as CliNone;
                 use ClientResponse::None as ClientRNone;
                 recv_channel_to_self_push_send_out!(
@@ -640,6 +594,8 @@ impl ClientTask {
             Tasks::Task1BinWS {
                 api_key,
                 api_secret: _,
+                default_symbol: _,
+                default_interval: _,
             } => {
                 use BinInstructs::None as BinNone;
                 use BinResponse::None as BinRNone;
@@ -665,7 +621,7 @@ impl ClientTask {
                 );
                 return cv;
             }
-            Tasks::Task3SQL { settings: _ } => {
+            Tasks::Task3SQL {} => {
                 use SQLInstructs::None as SQLNone;
                 use SQLResponse::None as SQLRNone;
                 send_channel_to_self_push_recv_out!(
@@ -701,18 +657,18 @@ pub fn cli_run() -> Result<()> {
         .context("Client unable to build tokio runtime!")
         .context(ERR_CTX)?;
 
-    let conf: Config = load_config()
-        .context("Unable to load config")
+    let settings: Settings = load_settings()
+        .context("Unable to load settings")
         .context(ERR_CTX)?;
     let frontend = Frontend::Desktop;
-    let tasks: Vec<Tasks> = frontend.init(&conf)?;
+    let tasks: Vec<Tasks> = frontend.init(&settings)?;
     let _res = rt.block_on(async {
         let frontend = Frontend::Desktop;
         tracing::info!("Bintrade starting");
-        let mut main_struct = ClientTask::new(frontend, conf);
+        let mut main_struct = ClientTask::new(frontend);
         let cancel_all_token = main_struct.cancel_all.clone();
         select! {
-            _ = main_struct.run_main(tasks) => {
+            _ = main_struct.run_main(tasks, settings) => {
             }
             _  = cancel_all_token.cancelled() => {
             }

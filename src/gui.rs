@@ -1,45 +1,50 @@
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
+use std::io::{Read, Write};
+use std::num::ParseIntError;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::collections::HashMap;
-use std::num::ParseIntError;
-use std::io::{Write, Read};
-use std::collections::BTreeMap;
 
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use anyhow::{ Result, anyhow};
+use anyhow::{Result, anyhow};
 use tracing::instrument;
 
 use tokio::sync::watch;
 
 use eframe::egui;
-use egui::{Color32, ComboBox, epaint, RichText};
+use egui::{Color32, ComboBox, RichText, epaint};
+use egui_extras::{Column, TableBuilder};
 use egui_plot_bintrade::{
     AxisHints, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, HPlacement,
     Legend, Plot,
 };
 use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
-use egui_extras::{Column, TableBuilder};
 
-use bincode::{config, Decode, Encode};
-use magic_crypt::{new_magic_crypt, MagicCryptTrait};
+use bincode::{Decode, Encode, config};
 use chrono::Datelike;
 use derive_debug::Dbg;
+use magic_crypt::{MagicCryptTrait, new_magic_crypt};
 
-use crate::data::{AssetData, Intv, DLAsset, Klines};
+use crate::conn::{KlineTick, SymbolOutput};
+use crate::data::{AssetData, DLAsset, Intv, Klines};
+use crate::trade::{
+    HistTrade, HistTrade as HistTradeRunner, LimitStatus, Order, Quant, StopStatus,
+};
 use crate::{ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse};
-use crate::conn::{KlineTick,SymbolOutput};
-use crate::trade::{HistTrade, LimitStatus, Order, Quant, StopStatus, HistTrade as HistTradeRunner};
 
 const WICKS_VISIBLE: usize = 90;
 const NAVI_WICKS_DEFAULT: u16 = 30;
 const CHART_FORWARD: u16 = 40;
 const DEFAULT_TRADE_WICKS: u16 = 30;
+const BACKLOAD_WICKS: i64 = 720;
+
+const SETTINGS_SAVE_PATH: &str = "./Settings.bin";
 
 #[derive(Dbg, Clone)]
 struct KlinePlot {
@@ -116,7 +121,6 @@ impl Default for KlinePlot {
     }
 }
 
-
 impl KlinePlot {
     fn show_empty(&self, ui: &mut egui::Ui) {
         let (plot_candles, plot_volume) = self.mk_plt();
@@ -142,7 +146,7 @@ impl KlinePlot {
         if let Some(col_data) = collected_data {
             if let Some(data) = col_data.get(&symbol) {
                 tracing::trace!["Collected data non empty"];
-                let _res=self.live_live_from_ad(
+                let _res = self.live_live_from_ad(
                     &ad,
                     &symbol,
                     self.intv.clone(),
@@ -151,7 +155,7 @@ impl KlinePlot {
                     &data,
                 );
             };
-            let _res=self.live_from_ad(
+            let _res = self.live_from_ad(
                 &ad,
                 &symbol,
                 self.intv.clone(),
@@ -160,7 +164,7 @@ impl KlinePlot {
                 false,
             );
         } else {
-            let _res=self.live_from_ad(
+            let _res = self.live_from_ad(
                 &ad,
                 &symbol,
                 self.intv.clone(),
@@ -169,7 +173,7 @@ impl KlinePlot {
                 true,
             );
         };
-        let _res=self.show(ui, plot_extras);
+        let _res = self.show(ui, plot_extras);
 
         ui.label(RichText::new(format!["Current asset: {}", &symbol]).color(Color32::WHITE));
         egui::Grid::new("Kline navi:").show(ui, |ui| {
@@ -717,61 +721,60 @@ fn make_plot(
     }
 }
 
-const M1_DIV:  i64 = 60;
-const M3_DIV:  i64 = M1_DIV * 3;
-const M5_DIV:  i64 = M1_DIV * 5;
+const M1_DIV: i64 = 60;
+const M3_DIV: i64 = M1_DIV * 3;
+const M5_DIV: i64 = M1_DIV * 5;
 const M15_DIV: i64 = M1_DIV * 15;
 const M30_DIV: i64 = M1_DIV * 30;
-const H1_DIV:  i64 = M1_DIV * 60;
-const H2_DIV:  i64 = H1_DIV * 2;
-const H4_DIV:  i64 = H1_DIV * 4;
-const H6_DIV:  i64 = H1_DIV * 6;
-const H8_DIV:  i64 = H1_DIV * 8;
+const H1_DIV: i64 = M1_DIV * 60;
+const H2_DIV: i64 = H1_DIV * 2;
+const H4_DIV: i64 = H1_DIV * 4;
+const H6_DIV: i64 = H1_DIV * 6;
+const H8_DIV: i64 = H1_DIV * 8;
 const H12_DIV: i64 = H1_DIV * 12;
-const D1_DIV:  i64 = H1_DIV * 24;
-const D3_DIV:  i64 = D1_DIV * 3;
-const W1_DIV:  i64 = D1_DIV * 7;
+const D1_DIV: i64 = H1_DIV * 24;
+const D3_DIV: i64 = D1_DIV * 3;
+const W1_DIV: i64 = D1_DIV * 7;
 const MO1_DIV: i64 = D1_DIV * 30; //30 is kind of a hack... but it works... so wtf...
 
-const GAP:       f64 = 45.0;
+const GAP: f64 = 45.0;
 const EXTRA_GAP: f64 = 1.2;
 
-const M1_GAP:    f64 =  GAP / (M1_DIV as f64);
-const M3_GAP:    f64 = (GAP * 3.0) / (M3_DIV as f64);
-const M5_GAP:    f64 = (GAP * 5.0) / (M5_DIV as f64);
-const M15_GAP:   f64 = (GAP * 15.0) / (M15_DIV as f64);
-const M30_GAP:   f64 = (GAP * 30.0) / (M30_DIV as f64);
-const H1_GAP:    f64 = (GAP * 60.0) / (H1_DIV as f64);
-const H2_GAP:    f64 = (GAP * 60.0 * 2.0) / (H2_DIV as f64);
-const H4_GAP:    f64 = (GAP * 60.0 * 4.0) / (H4_DIV as f64);
-const H6_GAP:    f64 = (GAP * 60.0 * 6.0) / (H6_DIV as f64);
-const H8_GAP:    f64 = (GAP * 60.0 * 8.0) / (H8_DIV as f64);
-const H12_GAP:   f64 = (GAP * 60.0 * 12.0) / (H12_DIV as f64);
-const D1_GAP:    f64 = (GAP * 60.0 * 24.0) / (D1_DIV as f64);
-const D3_GAP:    f64 = (EXTRA_GAP * GAP * 60.0 * 72.0) / (D3_DIV as f64);
-const W1_GAP:    f64 = (EXTRA_GAP * GAP * 60.0 * 24.0 * 7.0) / (W1_DIV as f64);
-const MO1_GAP:   f64 = (EXTRA_GAP * GAP * 60.0 * 24.0 * 30.0) / (MO1_DIV as f64);
+const M1_GAP: f64 = GAP / (M1_DIV as f64);
+const M3_GAP: f64 = (GAP * 3.0) / (M3_DIV as f64);
+const M5_GAP: f64 = (GAP * 5.0) / (M5_DIV as f64);
+const M15_GAP: f64 = (GAP * 15.0) / (M15_DIV as f64);
+const M30_GAP: f64 = (GAP * 30.0) / (M30_DIV as f64);
+const H1_GAP: f64 = (GAP * 60.0) / (H1_DIV as f64);
+const H2_GAP: f64 = (GAP * 60.0 * 2.0) / (H2_DIV as f64);
+const H4_GAP: f64 = (GAP * 60.0 * 4.0) / (H4_DIV as f64);
+const H6_GAP: f64 = (GAP * 60.0 * 6.0) / (H6_DIV as f64);
+const H8_GAP: f64 = (GAP * 60.0 * 8.0) / (H8_DIV as f64);
+const H12_GAP: f64 = (GAP * 60.0 * 12.0) / (H12_DIV as f64);
+const D1_GAP: f64 = (GAP * 60.0 * 24.0) / (D1_DIV as f64);
+const D3_GAP: f64 = (EXTRA_GAP * GAP * 60.0 * 72.0) / (D3_DIV as f64);
+const W1_GAP: f64 = (EXTRA_GAP * GAP * 60.0 * 24.0 * 7.0) / (W1_DIV as f64);
+const MO1_GAP: f64 = (EXTRA_GAP * GAP * 60.0 * 24.0 * 30.0) / (MO1_DIV as f64);
 
 fn get_chart_params(intv: &Intv) -> (f64, f64) {
     match intv {
-        Intv::Min1 =>   (M1_DIV  as f64, M1_GAP ),
-        Intv::Min3 =>   (M3_DIV  as f64, M3_GAP ),
-        Intv::Min5 =>   (M5_DIV  as f64, M5_GAP ),
-        Intv::Min15 =>  (M15_DIV as f64, M15_GAP),
-        Intv::Min30 =>  (M30_DIV as f64, M30_GAP),
-        Intv::Hour1 =>  (H1_DIV  as f64, H1_GAP ),
-        Intv::Hour2 =>  (H2_DIV  as f64, H2_GAP ),
-        Intv::Hour4 =>  (H4_DIV  as f64, H4_GAP ),
-        Intv::Hour6 =>  (H6_DIV  as f64, H6_GAP ),
-        Intv::Hour8 =>  (H8_DIV  as f64, H8_GAP ),
+        Intv::Min1 => (M1_DIV as f64, M1_GAP),
+        Intv::Min3 => (M3_DIV as f64, M3_GAP),
+        Intv::Min5 => (M5_DIV as f64, M5_GAP),
+        Intv::Min15 => (M15_DIV as f64, M15_GAP),
+        Intv::Min30 => (M30_DIV as f64, M30_GAP),
+        Intv::Hour1 => (H1_DIV as f64, H1_GAP),
+        Intv::Hour2 => (H2_DIV as f64, H2_GAP),
+        Intv::Hour4 => (H4_DIV as f64, H4_GAP),
+        Intv::Hour6 => (H6_DIV as f64, H6_GAP),
+        Intv::Hour8 => (H8_DIV as f64, H8_GAP),
         Intv::Hour12 => (H12_DIV as f64, H12_GAP),
-        Intv::Day1 =>   (D1_DIV  as f64, D1_GAP ),
-        Intv::Day3 =>   (D3_DIV  as f64, D3_GAP ),
-        Intv::Week1 =>  (W1_DIV  as f64, W1_GAP ),
+        Intv::Day1 => (D1_DIV as f64, D1_GAP),
+        Intv::Day3 => (D3_DIV as f64, D3_GAP),
+        Intv::Week1 => (W1_DIV as f64, W1_GAP),
         Intv::Month1 => (MO1_DIV as f64, MO1_GAP), //with reference to 1970 1,1 00:00 perhaps?
     }
 }
-
 
 //FIXME convert to macros or fork egui_plot library and make a better implementation yourself...
 #[allow(unused)]
@@ -1042,8 +1045,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
         let color = egui::epaint::Hsva::new(0.0, 0.0, 0.0, 0.0);
         ui.painter().rect_filled(ui.max_rect(), 0.0, color);
         match pane.ty {
-            PaneType::None => {
-            }
+            PaneType::None => {}
             PaneType::LiveTrade => {
                 let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
                 let live_price = self.live_price.lock().expect("Live price mutex poisoned!");
@@ -1065,7 +1067,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     man_orders.plot_extras = Some(p_extras);
                 };
                 let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
-                let _res=ManualOrders::show(
+                let _res = ManualOrders::show(
                     &mut man_orders,
                     &live_price,
                     None,
@@ -1109,7 +1111,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     man_orders.plot_extras = Some(p_extras);
                 };
                 let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
-                let _res=ManualOrders::show(
+                let _res = ManualOrders::show(
                     &mut man_orders,
                     &hist_extras.last_price,
                     Some(&mut h_plot.hist_trade),
@@ -1181,7 +1183,10 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     for child_id in children_ids {
                         if let Some(Tile::Pane(pane)) = tiles.get(*child_id) {
                             let tab_title = self.tab_title_for_pane(pane);
-                            tracing::trace!("Closing tab: {}, tile ID: {tile_id:?}", tab_title.text());
+                            tracing::trace!(
+                                "Closing tab: {}, tile ID: {tile_id:?}",
+                                tab_title.text()
+                            );
                         }
                     }
                 }
@@ -1363,6 +1368,7 @@ impl Default for DesktopApp {
 }
 
 impl DesktopApp {
+    #[allow(unused)]
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         schan: watch::Sender<ClientInstruct>,
@@ -1371,10 +1377,15 @@ impl DesktopApp {
         hist_asset_data: Arc<Mutex<AssetData>>,
         live_price: Arc<Mutex<f64>>,
         collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
+        settings: Settings,
     ) -> Self {
-        cc.storage;
-        let live_plot = Rc::new(Mutex::new(LivePlot::new(asset_data.clone())));
+        let live_plot = Rc::new(Mutex::new(LivePlot::new(
+            asset_data.clone(),
+            &settings.default_intv,
+            &settings.default_asset,
+        )));
         let data_manager = Rc::new(Mutex::new(DataManager::new(hist_asset_data.clone())));
+        let settings = Rc::new(Mutex::new(settings));
         Self {
             send_to_cli: Some(schan),
             recv_from_cli: Some(rchan),
@@ -1384,6 +1395,7 @@ impl DesktopApp {
             asset_data,
             hist_asset_data,
             data_manager,
+            settings,
             ..Default::default()
         }
     }
@@ -1409,7 +1421,7 @@ impl eframe::App for DesktopApp {
                         let _chan = match self.send_to_cli.clone() {
                             Some(chan) => {
                                 let msg = ClientInstruct::Terminate;
-                                let _res=chan.send(msg);
+                                let _res = chan.send(msg);
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
                             None => {
@@ -1448,9 +1460,15 @@ impl eframe::App for DesktopApp {
                             PaneType::HistTrade => {
                                 self.man_orders
                                     .insert(self.pane_number + 1, ManualOrders::default());
+                                let settings =
+                                    self.settings.lock().expect("Unable to unlock settings");
                                 self.hist_plot.insert(
                                     self.pane_number + 1,
-                                    HistPlot::new(Arc::clone(&self.hist_asset_data)),
+                                    HistPlot::new(
+                                        Arc::clone(&self.hist_asset_data),
+                                        &settings.default_intv,
+                                        settings.defalt_next_wicks,
+                                    ),
                                 );
 
                                 new_child = tree.tiles.insert_pane(Pane::new(
@@ -1579,7 +1597,6 @@ pub fn password(password: &mut String) -> impl egui::Widget + '_ {
     move |ui: &mut egui::Ui| password_ui(ui, password)
 }
 
-
 #[derive(Dbg, Clone)]
 struct ManualOrders {
     man_orders: Option<HistTrade>,
@@ -1611,7 +1628,6 @@ struct ManualOrders {
 
     plot_extras: Option<PlotExtras>,
 }
-
 
 //TODO find a way to group GUI elements together. The horror...
 impl Default for ManualOrders {
@@ -2057,9 +2073,16 @@ impl Default for LivePlot {
 }
 
 impl LivePlot {
-    fn new(live_asset_data: Arc<Mutex<AssetData>>) -> Self {
+    fn new(
+        live_asset_data: Arc<Mutex<AssetData>>,
+        default_intv: &Intv,
+        default_symbol: &str,
+    ) -> Self {
         Self {
             live_asset_data,
+            intv: *default_intv,
+            last_intv: *default_intv,
+            symbol: default_symbol.to_string(),
             ..Default::default()
         }
     }
@@ -2111,7 +2134,8 @@ impl LivePlot {
                     });
                 let search = ui.add_sized(
                     egui::vec2(100.0, 20.0),
-                    egui::TextEdit::singleline(&mut live_plot.search_string).hint_text("Search for asset"),
+                    egui::TextEdit::singleline(&mut live_plot.search_string)
+                        .hint_text("Search for asset"),
                 );
                 let s = &live_plot.search_string.clone();
                 let i = live_plot.intv;
@@ -2156,7 +2180,6 @@ struct HistPlot {
     picked_date: chrono::NaiveDate,
     picked_date_end: chrono::NaiveDate,
 
-
     trade_h: u16,
     trade_min: u16,
 
@@ -2173,14 +2196,13 @@ struct HistPlot {
     trade_wicks_s: String,
 
     pub trade_time: i64,
-    pub last_trade_time:i64,
+    pub last_trade_time: i64,
 
     pub att_klines: Option<Klines>,
     pub all_loaded: bool,
-    
-    pub trade_slice_loaded:bool,
-}
 
+    pub trade_slice_loaded: bool,
+}
 
 impl Default for HistPlot {
     fn default() -> Self {
@@ -2217,26 +2239,22 @@ impl Default for HistPlot {
             navi_wicks_s: "200".to_string(),
             trade_wicks_s: "30".to_string(),
 
-
             trade_h: 0,
             trade_min: 0,
 
             trade_h_s: "00".to_string(),
             trade_min_s: "00".to_string(),
 
-            trade_time: curr_date.and_hms(0,0,0).timestamp_millis(),
-            last_trade_time: curr_date.and_hms(0,0,0).timestamp_millis(),
+            trade_time: curr_date.and_hms(0, 0, 0).timestamp_millis(),
+            last_trade_time: curr_date.and_hms(0, 0, 0).timestamp_millis(),
 
             att_klines: None,
             all_loaded: false,
 
-            trade_slice_loaded:false,
+            trade_slice_loaded: false,
         }
     }
 }
-
-const BACKLOAD_WICKS:i64=720;
-
 
 #[derive(Dbg, Default)]
 struct Account {
@@ -2250,11 +2268,11 @@ struct Account {
 
     balances: Vec<(String, f64)>,
 
-    binance_pub_key:Option<String>,
-    binance_priv_key:Option<String>,
+    binance_pub_key: Option<String>,
+    binance_priv_key: Option<String>,
 
-    enc_binance_pub_key:Option<String>,
-    enc_binance_priv_key:Option<String>,
+    enc_binance_pub_key: Option<String>,
+    enc_binance_priv_key: Option<String>,
 }
 
 #[derive(Dbg, Default)]
@@ -2373,39 +2391,37 @@ impl Account {
     }
 }
 
-
 #[derive(Dbg, Default, Encode, Decode, Clone)]
-struct Settings {
-    default_asset: String,
-    default_intv: Intv,
-    enc_api_keys: bool,
-    save_api_keys:bool,
+pub struct Settings {
+    pub default_asset: String,
+    pub default_intv: Intv,
+    pub enc_api_keys: bool,
+    pub save_api_keys: bool,
+    pub defalt_next_wicks: i64,
 
-    binance_pub_key:Option<String>,
-    binance_priv_key:Option<String>,
+    pub binance_pub_key: Option<String>,
+    pub binance_priv_key: Option<String>,
 
-    enc_binance_pub_key:Option<String>,
-    enc_binance_priv_key:Option<String>,
-    
-    password_string:String,
+    pub enc_binance_pub_key: Option<String>,
+    pub enc_binance_priv_key: Option<String>,
 
+    pub password_string: String,
 }
-
-const SETTINGS_SAVE_PATH:&str="./Settings.bin";
 
 #[allow(unused)]
 impl Settings {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Settings {
             default_asset: "BTCUSDT".to_string(),
             enc_api_keys: true,
-            save_api_keys:true,
+            save_api_keys: true,
+            defalt_next_wicks: 30,
             ..Default::default()
         }
     }
-    fn verify_password_req(password:&str)->bool{
-        if password.len() <15{
-            return false
+    pub fn verify_password_req(password: &str) -> bool {
+        if password.len() < 15 {
+            return false;
         };
         //FIXME add more requirements
         true
@@ -2416,97 +2432,133 @@ impl Settings {
             .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
-                ui.checkbox(&mut settings.save_api_keys,"Store api keys in settings file");
-                if settings.save_api_keys==true{
-                    ui.checkbox(&mut settings.enc_api_keys,"Encrypt api keys w password");
-                    if settings.enc_api_keys==true{
+                ui.checkbox(
+                    &mut settings.save_api_keys,
+                    "Store api keys in settings file",
+                );
+                if settings.save_api_keys == true {
+                    ui.checkbox(&mut settings.enc_api_keys, "Encrypt api keys w password");
+                    if settings.enc_api_keys == true {
                         ui.add_sized(
                             egui::vec2(250.0, 20.0),
                             egui::TextEdit::singleline(&mut settings.password_string)
                                 .hint_text("Add asset to download list for binance"),
                         );
-
                     };
                     if ui.button("Save settings").clicked() {
-                        let password=settings.password_string.clone();
-                        let password_ok=Settings::verify_password_req(&password);
-                        match password_ok{
-                            true=>{
-                                settings.password_string="".to_string();
-                                let res=settings.save_settings_file(Some(password));
-                                match res{
-                                    Ok(_)=>(),
-                                    Err(e)=>tracing::error!["Save setting encrypted ERROR: {}",e],
+                        let password = settings.password_string.clone();
+                        let password_ok = Settings::verify_password_req(&password);
+                        match password_ok {
+                            true => {
+                                settings.password_string = "".to_string();
+                                let res = settings.save_settings_file(Some(password));
+                                match res {
+                                    Ok(_) => (),
+                                    Err(e) => {
+                                        tracing::error!["Save setting encrypted ERROR: {}", e]
+                                    }
                                 };
-                            },
-                            false=>tracing::error!["Password less tha 15 characters"],
+                            }
+                            false => tracing::error!["Password less tha 15 characters"],
                         };
                     };
                 };
                 if ui.button("Save settings").clicked() {
-                    let res=settings.save_settings_file(None);
-                    match res{
-                        Ok(_)=>(),
-                        Err(e)=>tracing::error!["Save setting unencrypted ERROR: {}",e],
+                    let res = settings.save_settings_file(None);
+                    match res {
+                        Ok(_) => (),
+                        Err(e) => tracing::error!["Save setting unencrypted ERROR: {}", e],
                     };
                 };
             });
     }
-    fn encrypt_keys(&mut self, pass:String)->Result<()>{
+    pub fn encrypt_keys(&mut self, pass: String) -> Result<()> {
         let mc = new_magic_crypt!(&pass, 256);
-        let pub_key:String=self.binance_pub_key.take().ok_or(anyhow!["Pub key string not found!"])?;
-        let priv_key:String=self.binance_priv_key.take().ok_or(anyhow!["Private key string not found!"])?;
-        let enc_pub_key= mc.encrypt_str_to_base64(pub_key);
-        let enc_priv_key= mc.encrypt_str_to_base64(priv_key);
-        self.enc_binance_pub_key=Some(enc_pub_key);
-        self.enc_binance_priv_key=Some(enc_priv_key);
+        let pub_key: String = self
+            .binance_pub_key
+            .take()
+            .ok_or(anyhow!["Pub key string not found!"])?;
+        let priv_key: String = self
+            .binance_priv_key
+            .take()
+            .ok_or(anyhow!["Private key string not found!"])?;
+        let enc_pub_key = mc.encrypt_str_to_base64(pub_key);
+        let enc_priv_key = mc.encrypt_str_to_base64(priv_key);
+        self.enc_binance_pub_key = Some(enc_pub_key);
+        self.enc_binance_priv_key = Some(enc_priv_key);
         Ok(())
     }
-    fn decrypt_keys(&mut self, pass:String)->Result<()>{
+    pub fn decrypt_keys(&mut self, pass: String) -> Result<()> {
         let mc = new_magic_crypt!(&pass, 256);
-        let pub_key:String=self.enc_binance_pub_key.take().ok_or(anyhow!["Pub key string not found!"])?;
-        let priv_key:String=self.enc_binance_priv_key.take().ok_or(anyhow!["Private key string not found!"])?;
-        let pub_key= mc.decrypt_base64_to_string(pub_key)?;
-        let priv_key= mc.decrypt_base64_to_string(priv_key)?;
-        self.binance_pub_key=Some(pub_key);
-        self.binance_priv_key=Some(priv_key);
+        let pub_key: String = self
+            .enc_binance_pub_key
+            .take()
+            .ok_or(anyhow!["Pub key string not found!"])?;
+        let priv_key: String = self
+            .enc_binance_priv_key
+            .take()
+            .ok_or(anyhow!["Private key string not found!"])?;
+        let pub_key = mc.decrypt_base64_to_string(pub_key)?;
+        let priv_key = mc.decrypt_base64_to_string(priv_key)?;
+        self.binance_pub_key = Some(pub_key);
+        self.binance_priv_key = Some(priv_key);
         Ok(())
     }
-    fn save_settings_file(&mut self, password:Option<String>)->Result<()>{
-        match password{
-            Some(pass)=>{
+    pub fn save_settings_file(&mut self, password: Option<String>) -> Result<()> {
+        match password {
+            Some(pass) => {
                 self.encrypt_keys(pass);
             }
-            None=>{
-                if self.save_api_keys==false{
-                    self.binance_pub_key=None;
-                    self.binance_priv_key=None;
-                    self.enc_binance_pub_key=None;
-                    self.enc_binance_priv_key=None;
+            None => {
+                if self.save_api_keys == false {
+                    self.binance_pub_key = None;
+                    self.binance_priv_key = None;
+                    self.enc_binance_pub_key = None;
+                    self.enc_binance_priv_key = None;
                 };
             }
         }
         let config = config::standard();
-        let res=bincode::encode_to_vec(self.clone(), config)?;
+        let res = bincode::encode_to_vec(self.clone(), config)?;
         let mut file = std::fs::File::create(SETTINGS_SAVE_PATH)?;
         file.write_all(&res)?;
         Ok(())
     }
-    fn load_settings_file(password:Option<String>)->Result<Self>{
+    pub fn load_settings_enc() -> Result<Option<Self>> {
         let config = config::standard();
-        let mut file = std::fs::File::open(SETTINGS_SAVE_PATH)?;
-
-        let mut data:Vec<u8> = vec![];
-        file.read_to_end(&mut data)?;
-        let (mut settings,_):(Settings,usize)=bincode::decode_from_slice(&data, config)?;
-        match password{
-            Some(pass)=>{
-                settings.decrypt_keys(pass);
-            }
-            None=>{
+        let res = std::fs::File::open(SETTINGS_SAVE_PATH);
+        let mut file = match res {
+            Ok(file) => file,
+            Err(e) => {
+                tracing::error!["Load settings error: {}", e];
+                return Ok(None);
             }
         };
-        Ok(settings)
+        let mut data: Vec<u8> = vec![];
+        file.read_to_end(&mut data)?;
+        let (mut settings, _): (Settings, usize) = bincode::decode_from_slice(&data, config)?;
+        Ok(Some(settings))
+    }
+    pub fn load_settings_file(password: Option<String>) -> Result<Option<Self>> {
+        let config = config::standard();
+        let res = std::fs::File::open(SETTINGS_SAVE_PATH);
+        let mut file = match res {
+            Ok(file) => file,
+            Err(e) => {
+                tracing::error!["Load settings error: {}", e];
+                return Ok(None);
+            }
+        };
+        let mut data: Vec<u8> = vec![];
+        file.read_to_end(&mut data)?;
+        let (mut settings, _): (Settings, usize) = bincode::decode_from_slice(&data, config)?;
+        match password {
+            Some(pass) => {
+                settings.decrypt_keys(pass)?;
+            }
+            None => {}
+        };
+        Ok(Some(settings))
     }
 }
 
@@ -2571,13 +2623,13 @@ impl DataManager {
                         symbol: data_manager.coin_search_string.clone(),
                         exchange: "Binance".to_string(),
                     });
-                    let _res=cli_chan.send(msg);
+                    let _res = cli_chan.send(msg);
                     data_manager.asset_list_loaded = false;
                 };
                 ui.end_row();
                 if ui.button("Update all data").clicked() {
                     let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::UpdateDataAll);
-                    let _res=cli_chan.send(msg);
+                    let _res = cli_chan.send(msg);
                     data_manager.update_ran = true;
                     data_manager.update_success = true;
                     //TODO connect proper error handling...
@@ -2609,7 +2661,7 @@ impl DataManager {
         };
         if data_manager.asset_list_loaded == false {
             let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadDLAssetList);
-            let _res=cli_chan.send(msg);
+            let _res = cli_chan.send(msg);
             //problem here is timing... this repeats the signal several times... but it works so
             //wtf...
             let ad = data_manager
@@ -2697,7 +2749,7 @@ impl DataManager {
                                                 symbol: asset.asset.clone(),
                                             },
                                         );
-                                        let _res=cli_chan.send(msg);
+                                        let _res = cli_chan.send(msg);
                                         data_manager.asset_list_loaded = false;
                                     }
                                 });
@@ -2708,7 +2760,6 @@ impl DataManager {
         });
     }
 }
-
 
 #[allow(unused)]
 enum LineStyle {
@@ -2728,18 +2779,18 @@ enum HlineType {
     LastPrice((LineStyle, Color32)),
 }
 
-const BUY_ACTIVE:   LineState = LineState::ActiveColor(Color32::GREEN);
+const BUY_ACTIVE: LineState = LineState::ActiveColor(Color32::GREEN);
 const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::GREEN);
-const BUY_STYLE:    LineStyle = LineStyle::Solid(0.5);
+const BUY_STYLE: LineStyle = LineStyle::Solid(0.5);
 
-const SELL_ACTIVE:   LineState = LineState::ActiveColor(Color32::RED);
+const SELL_ACTIVE: LineState = LineState::ActiveColor(Color32::RED);
 const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::RED);
-const SELL_STYLE:    LineStyle = LineStyle::Solid(0.5);
+const SELL_STYLE: LineStyle = LineStyle::Solid(0.5);
 
 #[allow(unused)]
 const LAST_PRICE_COLOR: Color32 = Color32::YELLOW;
 #[allow(unused)]
-const LAST_PRICE_LINE:  LineStyle = LineStyle::Dotted(0.5);
+const LAST_PRICE_LINE: LineStyle = LineStyle::Dotted(0.5);
 
 #[allow(unused)]
 impl HlineType {
@@ -2806,8 +2857,13 @@ impl HistPlot {
             .map(|(order, active)| HlineType::hline_order(order, *active))
             .collect()
     }
-    fn new(hist_asset_data: Arc<Mutex<AssetData>>) -> Self {
+    fn new(hist_asset_data: Arc<Mutex<AssetData>>, intv: &Intv, default_trade_wicks: i64) -> Self {
         Self {
+            intv: *intv,
+            last_intv: *intv,
+
+            trade_wicks: default_trade_wicks as u16,
+            navi_wicks_s: format!["{}", default_trade_wicks],
             hist_asset_data,
             ..Default::default()
         }
@@ -2819,9 +2875,7 @@ impl HistPlot {
         hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
     ) {
-
-
-        let _res=hist_plot
+        let _res = hist_plot
             .kline_plot
             .show_live(ui, plot_extras, hist_ad, None);
 
@@ -2843,65 +2897,71 @@ impl HistPlot {
                     });
                 ui.add_sized(
                     egui::vec2(100.0, 20.0),
-                    egui::TextEdit::singleline(&mut hist_plot.search_load_string).hint_text("Search for asset"),
+                    egui::TextEdit::singleline(&mut hist_plot.search_load_string)
+                        .hint_text("Search for asset"),
                 );
                 ui.add(
                     egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
                         .id_salt("trade_time"),
                 );
-                ui.add(egui::TextEdit::singleline(&mut hist_plot.trade_h_s).hint_text("Trade hours"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut hist_plot.trade_h_s).hint_text("Trade hours"),
+                );
                 /*
                 ui.add_sized(
                     egui::vec2(0.5, 20.0),
                     egui::Label::new(":"),
                 );
                 */
-                ui.add(egui::TextEdit::singleline(&mut hist_plot.trade_min_s).hint_text("Trade mins"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut hist_plot.trade_min_s).hint_text("Trade mins"),
+                );
                 if ui.button("Go to").clicked() {
-                    
                     let res: Result<u16, ParseIntError> = hist_plot.trade_h_s.parse();
-                    let trade_h= match res {
+                    let trade_h = match res {
                         Ok(n) => {
-                            if n <= 23{
+                            if n <= 23 {
                                 n
-                            }else{
+                            } else {
                                 tracing::error!["Unable to parse hour: larger than 23"];
-                                hist_plot.trade_h_s="00".to_string();
+                                hist_plot.trade_h_s = "00".to_string();
                                 0
                             }
-                        },
+                        }
                         Err(e) => {
                             tracing::error!["Parsing error for hour: {}", e];
                             0
                         }
                     };
                     let res: Result<u16, ParseIntError> = hist_plot.trade_min_s.parse();
-                    let trade_min= match res {
+                    let trade_min = match res {
                         Ok(n) => {
-                            if n <= 59{
+                            if n <= 59 {
                                 n
-                            }else{
+                            } else {
                                 tracing::error!["Unable to parse minutes: larger than 59"];
-                                hist_plot.trade_min_s="00".to_string();
+                                hist_plot.trade_min_s = "00".to_string();
                                 0
                             }
-                        },
+                        }
                         Err(e) => {
                             tracing::error!["Parsing error for hour: {}", e];
                             0
                         }
                     };
-                    let trade_date=hist_plot.picked_date_end.clone();
-                    let trade_time=trade_date.and_hms(trade_h.into(),trade_min.into(),0).timestamp_millis();
+                    let trade_date = hist_plot.picked_date_end.clone();
+                    let trade_time = trade_date
+                        .and_hms(trade_h.into(), trade_min.into(), 0)
+                        .timestamp_millis();
                     tracing::trace!["GO to>> END: {}", trade_time];
                     let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
                         symbol: hist_plot.search_load_string.clone(),
-                        trade_time:trade_time,
-                        backload_wicks:BACKLOAD_WICKS,
+                        trade_time: trade_time,
+                        backload_wicks: BACKLOAD_WICKS,
                     });
-                    hist_plot.kline_plot.symbol =hist_plot.search_load_string.clone();
-                    hist_plot.trade_time=trade_time;
-                    let _res=cli_chan.send(msg);
+                    hist_plot.kline_plot.symbol = hist_plot.search_load_string.clone();
+                    hist_plot.trade_time = trade_time;
+                    let _res = cli_chan.send(msg);
                 };
                 //ui.end_row();
                 if ui.button("Trade N wicks >>").clicked() {
@@ -2910,27 +2970,32 @@ impl HistPlot {
                         Ok(n) => n,
                         Err(e) => {
                             tracing::error!["Parsing error for trade wicks: {}", e];
-                            hist_plot.trade_wicks_s=format!["{}",DEFAULT_TRADE_WICKS];
+                            hist_plot.trade_wicks_s = format!["{}", DEFAULT_TRADE_WICKS];
                             DEFAULT_TRADE_WICKS
                         }
                     };
 
-
                     hist_plot.navi_wicks = n_wicks;
 
-                    let new_trade_time=hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
-                    tracing::trace!["Trade >> START: {} END: {}", &hist_plot.trade_time, &new_trade_time];
+                    let new_trade_time =
+                        hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
+                    tracing::trace![
+                        "Trade >> START: {} END: {}",
+                        &hist_plot.trade_time,
+                        &new_trade_time
+                    ];
                     let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
                         symbol: hist_plot.search_load_string.clone(),
-                        trade_time:new_trade_time,
-                        backload_wicks:BACKLOAD_WICKS,
+                        trade_time: new_trade_time,
+                        backload_wicks: BACKLOAD_WICKS,
                     });
-                    let _res=cli_chan.send(msg);
+                    let _res = cli_chan.send(msg);
                     hist_plot.trade_time = new_trade_time;
                     //FIXME click here
                 }
                 ui.add(
-                    egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s).hint_text("Trade N wicks"),
+                    egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s)
+                        .hint_text("Trade N wicks"),
                 );
                 ui.end_row();
             });
