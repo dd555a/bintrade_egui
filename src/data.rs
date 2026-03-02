@@ -572,9 +572,20 @@ pub struct AssetData {
     pub downloaded_assets: Vec<DLAsset>,
     pub temp_kline: Option<Klines>,
     pub load_status: HashMap<String, bool>,
+
+    //NOTE live only
+    pub live_asset_symbol_changed:(bool,String),
+    pub acc_balances: HashMap<String, f64>,
+    pub current_pair_balances:(f64, f64)
 }
 
 impl AssetData {
+    pub fn add_balance(&mut self, asset:&str, balance:&f64){
+        self.acc_balances.insert(asset.to_string(), *balance);
+    }
+    pub fn get_balance(&self, asset:&str)->Option<f64>{
+        self.acc_balances.get(asset).copied()
+    }
     pub fn debug(&self) -> String {
         let mut ostring: String = "Available Hashmaps: \n".to_string();
         if self.kline_data.is_empty() == false {
@@ -591,11 +602,7 @@ impl AssetData {
     pub fn new(id: usize) -> Self {
         Self {
             id,
-            size: 0,
-            kline_data: HashMap::new(),
-            downloaded_assets: vec![],
-            temp_kline: None,
-            load_status: HashMap::new(),
+            ..Default::default()
         }
     }
     //#[instrument(level="trace")]
@@ -1189,6 +1196,70 @@ async fn update_asset_metadata_time(
     );
     exec_query(&metadata_pool, &q2).await?;
     Ok(())
+}
+
+pub async fn validate_asset_dl(symbol: &str) -> Result<bool> {
+    let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
+        .await
+        .context(anyhow!("SQL::Unable to metadata connect to db"))?;
+    let res: (Option<String>,) = sqlx::query_as(
+        format!(
+            "SELECT 
+[Asset] FROM assets_dl WHERE [Asset] = '{}';",
+            symbol
+        )
+        .as_str(),
+    )
+    .fetch_one(&meta_pool)
+    .await?;
+    meta_pool.close().await;
+    match res.0 {
+        Some(_) => Ok(true),
+        None => Ok(false),
+    }
+}
+pub async fn validate_asset_binance(
+    symbol: &str,
+) -> Result<bool> {
+    let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
+        .await
+        .context(anyhow!("SQL::Unable to metadata connect to db"))?;
+    let res: (Option<String>,) = sqlx::query_as(
+        format!(
+            "SELECT 
+[Asset] FROM assets WHERE Asset = '{}';",
+            symbol
+        )
+        .as_str(),
+    )
+    .fetch_one(&meta_pool)
+    .await?;
+    meta_pool.close().await;
+    match res.0 {
+        Some(_) => Ok(true),
+        None => Ok(false),
+    }
+}
+
+pub async fn get_asset_bases_binance(
+    symbol: &str,
+)->Result<Option<(String,String)>>{
+    let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
+        .await
+        .context(anyhow!("SQL::Unable to metadata connect to db"))?;
+
+    let q = &format![
+        "SELECT [BaseAsset], [QouteAsset] FROM assets WHERE Asset = '{}';",
+        symbol
+    ];
+    let (base,qoute): (Option<String>, Option<String>) =
+        sqlx::query_as(q).fetch_one(&meta_pool).await?;
+    let res=match (base,qoute){
+        (Some(bb), Some(qq))=>Some((bb,qq)),
+        _=>None
+    };
+    meta_pool.close().await;
+    Ok(res)
 }
 
 async fn get_asset_timestamps(
@@ -1868,6 +1939,8 @@ impl SQLConn {
                 };
                 resp
             }
+            SQLInstructs::ValidateDLAsset { .. }=>todo!(),
+            SQLInstructs::ValidateBinanceAsset { .. } => todo!(),
         }
     }
 }

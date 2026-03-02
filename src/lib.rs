@@ -21,7 +21,7 @@ pub enum ProcResp {
     Client,
 }
 
-#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Default, Hash)]
+#[derive(Debug, Clone, Default)]
 pub enum SQLInstructs {
     #[default]
     None,
@@ -57,6 +57,12 @@ pub enum SQLInstructs {
         symbol: String,
         exchange: String,
     },
+    ValidateDLAsset {
+        symbol: String,
+    },
+    ValidateBinanceAsset {
+        symbol: String,
+    },
 }
 impl SQLInstructs {
     pub fn to_str(&self) -> &str {
@@ -84,6 +90,12 @@ impl SQLInstructs {
                 symbol: _,
                 exchange: _,
             } => "SQLInstructs: Insert symbol for download",
+            SQLInstructs::ValidateDLAsset {
+                symbol: _,
+            } => "SQLInstructs: Validate symbol for download",
+            SQLInstructs::ValidateBinanceAsset {
+                symbol: _,
+            } => "SQLInstructs: Validate symbol for download",
         }
     }
 }
@@ -126,6 +138,7 @@ pub enum BinInstructs {
     CancelAllOrders {
         symbol: String,
     },
+    ChangeLiveAsset{ symbol: String, defualt_symbol:String },
 }
 impl BinInstructs {
     pub fn to_str(&self) -> &str {
@@ -140,6 +153,7 @@ impl BinInstructs {
                 "BinInstruct: Cancel and Replace Order:"
             }
             BinInstructs::CancelAllOrders { symbol: _ } => "BinInstruct: Cancel All Orders",
+            BinInstructs::ChangeLiveAsset{ symbol: _ , defualt_symbol:_} => "BinInstruct: Change symbol",
         }
     }
 }
@@ -152,7 +166,7 @@ pub enum ClientResponse {
     ProcResp(ProcResp),
 }
 
-#[derive(PartialEq, EnumIter, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum ClientInstruct {
     None,
 

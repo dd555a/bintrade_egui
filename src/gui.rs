@@ -36,7 +36,7 @@ use crate::data::{AssetData, DLAsset, Intv, Klines};
 use crate::trade::{
     HistTrade, HistTrade as HistTradeRunner, LimitStatus, Order, Quant, StopStatus,
 };
-use crate::{ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse};
+use crate::{ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse, BinInstructs};
 
 const WICKS_VISIBLE: usize = 90;
 const NAVI_WICKS_DEFAULT: u16 = 30;
@@ -45,6 +45,12 @@ const DEFAULT_TRADE_WICKS: u16 = 30;
 const BACKLOAD_WICKS: i64 = 720;
 
 const SETTINGS_SAVE_PATH: &str = "./Settings.bin";
+
+
+
+
+
+
 
 #[derive(Dbg, Clone)]
 struct KlinePlot {
@@ -82,6 +88,9 @@ struct KlinePlot {
     y_offset_s: String,
     y_increment: f64,
     x_bounds_set: bool,
+
+    live_asset_changed:bool
+
 }
 impl Default for KlinePlot {
     fn default() -> Self {
@@ -117,6 +126,8 @@ impl Default for KlinePlot {
             y_offset: 0,
             y_increment: 0.001,
             x_bounds_set: false,
+
+            live_asset_changed:false
         }
     }
 }
@@ -139,6 +150,7 @@ impl KlinePlot {
         plot_extras: &PlotExtras,
         live_ad: Arc<Mutex<AssetData>>,
         collected_data: Option<&HashMap<String, SymbolOutput>>,
+
     ) -> Result<()> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
 
@@ -402,6 +414,11 @@ impl KlinePlot {
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
         data: &SymbolOutput,
     ) -> Result<()> {
+
+        if ad.live_asset_symbol_changed.0 == true{
+            self.symbol=ad.live_asset_symbol_changed.1.clone();
+            self.live_asset_changed=true;
+        };
 
         let mut k = if let Some(ck) = data.closed_klines.get(&intv) {
             KlineTick::to_kline_vec(ck)
@@ -2051,10 +2068,12 @@ struct LivePlot {
     kline_plot: KlinePlot,
     search_string: String,
     symbol: String,
+    default_symbol: String,
     intv: Intv,
     last_intv: Intv,
     lines: Vec<HLine>,
     reload: bool,
+    last_symbol: String,
 }
 
 impl Default for LivePlot {
@@ -2069,6 +2088,8 @@ impl Default for LivePlot {
             last_intv: Intv::Min1,
             lines: vec![],
             reload: false,
+            default_symbol: "BTCUSDT".to_string(),
+            last_symbol: "BTCUSDT".to_string(),
         }
     }
 }
@@ -2084,6 +2105,7 @@ impl LivePlot {
             intv: *default_intv,
             last_intv: *default_intv,
             symbol: default_symbol.to_string(),
+            default_symbol: default_symbol.to_string(),
             ..Default::default()
         }
     }
@@ -2102,6 +2124,7 @@ impl LivePlot {
             live_plot.live_asset_data.clone(),
             Some(collect_data),
         );
+
 
         tracing::trace!["\x1b[36m Collected Data\x1b[0m: {:?}", &collect_data];
 
@@ -2129,13 +2152,25 @@ impl LivePlot {
                     egui::TextEdit::singleline(&mut live_plot.search_string)
                         .hint_text("Search for asset"),
                 );
-                let s = &live_plot.search_string.clone();
-                let i = live_plot.intv;
-
                 if ui.button("Search").clicked() {
-                    //FIXME add change symbol here...
-                };
-
+                    if live_plot.kline_plot.live_asset_changed==false{
+                        let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset{
+                            symbol: live_plot.search_string.clone(),
+                            defualt_symbol:live_plot.default_symbol.clone(),
+                        });
+                        let _res = cli_chan.send(msg);
+                    }else{
+                        if live_plot.last_symbol != live_plot.kline_plot.symbol{
+                            let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset{
+                                symbol: live_plot.search_string.clone(),
+                                defualt_symbol:live_plot.default_symbol.clone(),
+                            });
+                            let _res = cli_chan.send(msg);
+                            live_plot.last_symbol = live_plot.kline_plot.symbol.clone();
+                            live_plot.kline_plot.live_asset_changed=true;
+                        };
+                    };
+                }
             });
     }
 }

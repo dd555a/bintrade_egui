@@ -57,6 +57,7 @@ impl Tasks {
     }
     fn new_binws(global_settings: &Settings) -> Result<Tasks> {
         //FIXME API keys stored this way is not good...
+        //block out unencrypted keys
         let (api_key, api_secret) = match (
             global_settings.binance_pub_key.clone(),
             global_settings.binance_priv_key.clone(),
@@ -486,26 +487,27 @@ impl ClientTask {
     ) {
         let (send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
-        let mut cli = BinanceClient::new(api_key, api_secret, live_collect, live_price);
+        let mut cli = BinanceClient::new(api_key, api_secret, live_collect, live_price, live_ad);
         tracing::info!("Binclient started");
         loop {
-            let mut sub_params=vec![
-                format!["{}@aggTrade", default_symbol.to_lowercase()]
-            ];
-            for i in Intv::iter() {
-                sub_params.push(format!["{}@kline_{}", default_symbol.to_lowercase(), i.to_bin_str()])
+
+            let res=cli.get_ws_params(&default_symbol, &default_intv).await;
+            let params=match res{
+                Ok(params)=>params,
+                Err(_)=>{
+                    let mut sub_params=vec![
+                        format!["{}@aggTrade", default_symbol.to_lowercase()]
+                    ];
+                    for i in Intv::iter() {
+                        sub_params.push(format!["{}@kline_{}", default_symbol.to_lowercase(), i.to_bin_str()])
+                    };
+                    let mut params: HashMap<String, Vec<String>> = HashMap::new();
+                    params.insert(default_symbol.to_string(), sub_params);
+                    params
+
+                }
             };
-            let mut params: HashMap<String, Vec<String>> = HashMap::new();
-            params.insert(default_symbol.clone(), sub_params);
-            let res = cli
-                .get_initial_data(&default_symbol, &default_intv, 2_000, live_ad.clone())
-                .await;
-            match res {
-                Ok(_) => tracing::trace!["Initial data for BTCUSDT received"],
-                Err(e) => tracing::error!["Initial data connection failed, ERROR: {}", e],
-            };
-            //NOTE call this function every time an interval is switched for LIVE
-            //TODO match response, break and change asset as needed
+
             loop {
                 select! {
                     _ = cli.connect_ws(params.clone()) =>{
