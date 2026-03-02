@@ -13,6 +13,7 @@ use crate::{
     BinInstructs, BinResponse, ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse,
 };
 use serde_json::Value;
+use strum::IntoEnumIterator;
 
 use futures::future::join_all;
 
@@ -488,10 +489,12 @@ impl ClientTask {
         let mut cli = BinanceClient::new(api_key, api_secret, live_collect, live_price);
         tracing::info!("Binclient started");
         loop {
-            let sub_params = vec![
-                "btcusdt@aggTrade".to_string(),
-                "btcusdt@kline_1m".to_string(),
+            let mut sub_params=vec![
+                format!["{}@aggTrade", default_symbol.to_lowercase()]
             ];
+            for i in Intv::iter() {
+                sub_params.push(format!["{}@kline_{}", default_symbol.to_lowercase(), i.to_bin_str()])
+            };
             let mut params: HashMap<String, Vec<String>> = HashMap::new();
             params.insert(default_symbol.clone(), sub_params);
             let res = cli

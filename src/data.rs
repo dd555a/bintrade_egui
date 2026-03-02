@@ -658,13 +658,13 @@ impl AssetData {
         );
         let (start_index, end_index): (usize, usize) = if kl.kline.is_empty() == false {
             //NOTE this is to avoid using let index = vec.iter().position(|&r| r == "n").unwrap();
-            let kline_start_t = kl.kline[0].0.and_utc().timestamp_millis();
-            let kline_end_t = kl.kline[kl.kline.len() - 1].0.and_utc().timestamp_millis();
+            let kline_start_t = kl.kline[0].0.timestamp_millis();
+            let kline_end_t = kl.kline[kl.kline.len() - 1].0.timestamp_millis();
             let kline_length = kl.kline.len();
 
             let si = (start_time / (kline_end_t - kline_start_t)) as usize;
             let start_index: usize = si * kline_length;
-            let confirm: i64 = kl.kline[start_index].0.and_utc().timestamp_millis();
+            let confirm: i64 = kl.kline[start_index].0.timestamp_millis();
             let start_index = if confirm as usize != start_index {
                 let ss = if start_index < confirm as usize {
                     let s = start_index + 1;
@@ -710,11 +710,11 @@ impl AssetData {
             None => return None,
         };
         let step: i64 = intv.to_sec();
-        let kst = kk.start_time.and_utc().timestamp();
-        let ket = kk.end_time.and_utc().timestamp();
+        let kst = kk.start_time.timestamp();
+        let ket = kk.end_time.timestamp();
         let dur = (kst - ket) / step;
-        let start_t = start_time.and_utc().timestamp();
-        let end_t = end_time.and_utc().timestamp();
+        let start_t = start_time.timestamp();
+        let end_t = end_time.timestamp();
         let start_index = ((kst - start_t) / dur) as usize;
         let end_index = ((kst - end_t) / dur) as usize;
         return Some(&k.kline[start_index..end_index]);

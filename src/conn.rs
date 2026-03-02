@@ -1,5 +1,4 @@
 #![allow(unused)]
-#![allow(non_snake_case)]
 use binance_async::Binance;
 use binance_async::models::*;
 use binance_async::rest::spot::GetAccountRequest;
@@ -39,7 +38,7 @@ use crate::{BinInstructs, BinResponse, GeneralError};
 
 const ERR_CTX: &str = "Binance client | websocket:";
 
-#[allow(unused)]
+#[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
 pub struct SymbolInfo {
     pub symbol: String,
@@ -54,6 +53,7 @@ pub struct SymbolInfo {
     //filters: Value
 }
 #[allow(unused)]
+#[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
 pub struct FutSymbolInfo {
     pub symbol: String,
@@ -116,6 +116,7 @@ pub async fn get_exchange_info() -> Result<Vec<SymbolInfo>> {
 ]
 */
 
+#[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
 struct GetKline {
     open_time: i64,
@@ -180,6 +181,7 @@ async fn get_latest_wicks(
     };
 }
 
+#[allow(non_snake_case)]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct OrderBookWS {
     bid_price: f64,
@@ -188,6 +190,7 @@ struct OrderBookWS {
     ask_qnt: f64,
     transaction_time: u64,
 }
+#[allow(non_snake_case)]
 #[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
 struct AggTradeWS {
     E: i64,
@@ -203,6 +206,7 @@ struct AggTradeWS {
     //s: String,
 }
 //{'t': 1748736000000, 'T': 1751327999999, 's': 'TRUMPUSDT', 'i': '1M', 'f': 141621259, 'L': 142166556, 'o': '11.24000000', 'c': '11.19000000', 'h': '11.90000000', 'l': '10.94000000', 'v': '15876266.19100000', 'n': 545298, 'x': False, 'q': '179814040.65914000', 'V': '8111489.88500000', 'Q': '91972469.36091000', 'B': '0'}
+#[allow(non_snake_case)]
 #[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
 pub struct KlineTick {
     t: i64, // open time
@@ -299,10 +303,12 @@ impl BinWSResponse {
                     .as_i64()
                     .ok_or(anyhow!["Unable to parse E as i64"])?;
                 #[cfg(debug_assertions)]
-                tracing::debug![
+                tracing::trace![
                     "\x1b[34m (AGGTrade Current linux epoch - event_time)\x1b[0m: {}ms",
                     t_now - event_time
                 ];
+
+
                 Ok((
                     symbol,
                     BinWSResponse::AggTrade(
@@ -572,7 +578,7 @@ impl WSTick {
                     .live_price1
                     .lock()
                     .expect("Unable to unlock mutex: binance::append_tick()");
-                *lp1 = val.p.clone();
+                *lp1 = val.p;
             }
             (BinWSResponse::OrderBook(val), BinWSResponse::AggTrade(_)) => {
                 //todo!()
@@ -797,10 +803,29 @@ impl BinanceClient {
         let mut klines = Klines::new_empty();
         let client = reqwest::Client::new();
         for i in Intv::iter() {
-            let kl = get_latest_wicks(&client, &symbol, i.to_bin_str()).await?;
+            let k = get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
+            let kl=match k{
+                Ok(kli) => kli,
+                Err(e)=> {
+                    tracing::error!["Unable to get inital kline for interval: {} {}", i.to_str(),e];
+                    let mut kl=vec![];
+                    for n in 0..5{
+                        let res=get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
+                        match res{
+                            Ok(k)=>{
+                                kl =k;
+                                break;
+                            },
+                            Err(e)=>{
+                                tracing::error!["unable to get inital kline {}, retry {}/5",e, n];
+                            }
+                        };
+                    };
+                    kl
+                }
+            };
             let kl_0 = GetKline::to_kline(&kl);
-            tracing::trace!["GET REQUEST KLINE INSERTED for {:?}", &i];
-            //Kline is inserted properly
+            tracing::debug!["GET REQUEST KLINE INSERTED for {:?}", &i];
             klines.insert(&i, kl_0);
         }
         let mut live_b = live_ad
@@ -1034,6 +1059,7 @@ fn parse_order_to_ba(order: &Order) -> (OrderType, OrderSide, f64, f64, f64) {
     (res.0, side, res.2, res.3, res.4)
 }
 #[derive(Deserialize, Debug)]
+#[allow(non_snake_case)]
 pub struct AggTrade {
     E: i64,
     M: bool,

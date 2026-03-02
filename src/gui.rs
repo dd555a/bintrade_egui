@@ -276,7 +276,7 @@ impl KlinePlot {
                 ((t0.timestamp() as f64) + u) / self.chart_params.0,
                 ((t1.timestamp() as f64) + w + u) / self.chart_params.0,
             );
-            self.x_bounds_set = true;
+            //self.x_bounds_set = true;
         };
         for kline in kline_input.iter() {
             let (t, _, h, l, _, v) = kline;
@@ -402,6 +402,7 @@ impl KlinePlot {
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
         data: &SymbolOutput,
     ) -> Result<()> {
+
         let mut k = if let Some(ck) = data.closed_klines.get(&intv) {
             KlineTick::to_kline_vec(ck)
         } else {
@@ -952,7 +953,7 @@ fn time_format(input: &BoxElem, plot: &BoxPlot) -> String {
         green => (input.spread.quartile3, input.spread.quartile1),
     };
     format!(
-        "Time: {} \n Open: {} \n High: {} \n Low: {} \n Close: {} \n Average: {}",
+        "Time: {} \n Open: {} \n High: {} \n Low: {} \n Close: {} \n Average: {:.2}",
         input.name,
         o,
         input.spread.upper_whisker,
@@ -2095,15 +2096,6 @@ impl LivePlot {
         collect_data: &HashMap<String, SymbolOutput>,
         ui: &mut egui::Ui,
     ) {
-        //TODO clear this after debug
-        //
-        /*
-        let cl_unlocked=live_plot.live_asset_data.clone();
-        let unlocked=cl_unlocked.lock().expect("FFUCK");
-        let id2=unlocked.id.clone();
-        tracing::debug!["\x1b[36m Live asset data ID\x1b[0m: {:?}", &id2];
-         */
-
         live_plot.kline_plot.show_live(
             ui,
             plot_extras,
@@ -2116,7 +2108,7 @@ impl LivePlot {
         ui.end_row();
         if live_plot.intv != live_plot.last_intv {
             live_plot.reload = true;
-            tracing::debug!["\x1b[36m live chart reloaded\x1b[0m: "];
+            tracing::trace!["\x1b[36m live chart reloaded\x1b[0m: "];
 
             live_plot.last_intv = live_plot.intv;
             live_plot.kline_plot.intv = live_plot.intv;
@@ -2140,17 +2132,10 @@ impl LivePlot {
                 let s = &live_plot.search_string.clone();
                 let i = live_plot.intv;
 
-                if ui.button("Search").clicked() {};
-
-                if live_plot.reload == false {
-                    //let ad = live_plot
-                    //    .live_asset_data
-                    //    .lock()
-                    //    .expect("Live AD mutex poisoned! - LivePlot::show()");
-                    //tracing::debug!["\x1b[36m Live chart reloaded intv: {}\x1b[0m: ", &i.to_str()];
-                    //tracing::debug!["\x1b[36m Live chart reloaded intv: {}\x1b[0m: ", &live_plot.intv.to_str()];
-                    //let res = live_plot.kline_plot.live_from_ad(&ad, s, i, 1_000, None);
+                if ui.button("Search").clicked() {
+                    //FIXME add change symbol here...
                 };
+
             });
     }
 }
@@ -2436,6 +2421,7 @@ impl Settings {
                     &mut settings.save_api_keys,
                     "Store api keys in settings file",
                 );
+                ui.end_row();
                 if settings.save_api_keys == true {
                     ui.checkbox(&mut settings.enc_api_keys, "Encrypt api keys w password");
                     if settings.enc_api_keys == true {
@@ -2445,6 +2431,7 @@ impl Settings {
                                 .hint_text("Add asset to download list for binance"),
                         );
                     };
+                    ui.end_row();
                     if ui.button("Save settings").clicked() {
                         let password = settings.password_string.clone();
                         let password_ok = Settings::verify_password_req(&password);
@@ -2462,12 +2449,14 @@ impl Settings {
                             false => tracing::error!["Password less tha 15 characters"],
                         };
                     };
-                };
-                if ui.button("Save settings").clicked() {
-                    let res = settings.save_settings_file(None);
-                    match res {
-                        Ok(_) => (),
-                        Err(e) => tracing::error!["Save setting unencrypted ERROR: {}", e],
+                }else{
+                    ui.end_row();
+                    if ui.button("Save settings").clicked() {
+                        let res = settings.save_settings_file(None);
+                        match res {
+                            Ok(_) => (),
+                            Err(e) => tracing::error!["Save setting unencrypted ERROR: {}", e],
+                        };
                     };
                 };
             });
