@@ -691,7 +691,8 @@ pub struct BinanceClient {
     current_symbol:String,
     base_balances:(f64, f64),
     qoute_balances:(f64, f64),
-
+    balances:HashMap<String, (f64,f64)>,
+    current_symbol_bases:(String,String),
 }
 
 impl Default for BinanceClient {
@@ -711,6 +712,8 @@ impl Default for BinanceClient {
             current_symbol:String::default(),
             base_balances:(0.0, 0.0),
             qoute_balances:(0.0, 0.0),
+            balances:HashMap::new(),
+            current_symbol_bases:(String::default(),String::default()),
         }
     }
 }
@@ -865,12 +868,12 @@ impl BinanceClient {
             .lock()
             .expect("Poisoned live AD mutex at get_initial_data");
 
-        tracing::trace!["Insert kline ad ID! {:?}", live_b.id];
-        tracing::trace!["Insert klines {:?}", klines];
-
         live_b.kline_data.insert(symbol.to_string(), klines);
-        //tracing::debug!["Insert kline_data ad ID! {:?}, {:?}", live_b.id, &live_b.kline_data ];
-        //NOTE insert into the hashmap, not the fn
+        live_b.acc_balances=self.balances.clone();
+        live_b.current_pair_strings=self.current_symbol_bases.clone();
+        live_b.current_pair_free_balances=(self.base_balances.0, self.qoute_balances.1);
+        live_b.current_pair_locked_balances=(self.base_balances.1, self.qoute_balances.0);
+
         Ok(())
     }
     async fn get_balances(&mut self, symbol:&str)->Result<()>{
@@ -903,6 +906,8 @@ impl BinanceClient {
                 self.current_symbol=symbol.to_string();
                 self.base_balances=(*base_free, *base_locked);
                 self.qoute_balances=(*qoute_free, *qoute_locked);
+                self.balances=balances;
+                self.current_symbol_bases=(base,qoute);
             }
             None =>()
         };

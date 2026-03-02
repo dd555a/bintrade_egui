@@ -150,6 +150,7 @@ impl KlinePlot {
         plot_extras: &PlotExtras,
         live_ad: Arc<Mutex<AssetData>>,
         collected_data: Option<&HashMap<String, SymbolOutput>>,
+        live_info:Option<&mut LiveInfo>,
 
     ) -> Result<()> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
@@ -1068,6 +1069,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                 let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
                 let live_price = self.live_price.lock().expect("Live price mutex poisoned!");
                 let live_plot_l = self.live_plot.clone();
+                let live_info_l = self.live_info.clone();
                 let c_data = self
                     .collect_data
                     .lock()
@@ -1075,8 +1077,9 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 let p_extras: PlotExtras = PlotExtras::None;
                 let mut live_plot = live_plot_l.lock().expect("Live plot mutex posoned!");
-                //NOTE... see if chan works too... should...
-                LivePlot::show(&mut live_plot, &p_extras, chan, &live_price, &c_data, ui);
+                let mut live_info= live_info_l.lock().expect("Live plot mutex posoned!");
+
+                LivePlot::show(&mut live_plot, &p_extras, chan, &live_price, &c_data, ui, &mut live_info);
                 let mut man_orders = self
                     .man_orders
                     .get_mut(&pane.nr)
@@ -1093,6 +1096,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     ui,
                     Some(&mut live_plot.kline_plot.hlines),
                     None,
+                    Some(&live_info)
                 );
             }
             PaneType::HistTrade => {
@@ -1136,6 +1140,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     chan,
                     ui,
                     Some(&mut h_plot.kline_plot.hlines),
+                    None,
                     None,
                 );
             }
@@ -1234,6 +1239,17 @@ fn create_tree() -> egui_tiles::Tree<Pane> {
 enum PlotExtras {
     None,
     OrderHlines(Vec<HLine>),
+    LiveData(LiveInfo),
+}
+
+#[allow(unused)]
+#[derive(PartialEq, Debug, Clone, Default)]
+pub struct LiveInfo{
+    pub live_asset_symbol_changed:(bool,String),
+    pub acc_balances: HashMap<String, (f64, f64)>,
+    pub current_pair_strings:(String, String),
+    pub current_pair_free_balances:(f64, f64),
+    pub current_pair_locked_balances:(f64, f64),
 }
 
 #[derive(Dbg)]
@@ -1267,6 +1283,7 @@ pub struct DesktopApp {
     data_manager: Rc<Mutex<DataManager>>,
     account: Rc<Mutex<Account>>,
     settings: Rc<Mutex<Settings>>,
+    live_info: Rc<Mutex<LiveInfo>>,
 
     lp_chan_recv: watch::Receiver<f64>,
 
@@ -1374,6 +1391,7 @@ impl Default for DesktopApp {
 
             account: Rc::new(Mutex::new(Account::new())),
             settings: Rc::new(Mutex::new(Settings::new())),
+            live_info: Rc::new(Mutex::new(LiveInfo::default())),
 
             //Channels
             send_to_cli: None,
@@ -1728,6 +1746,7 @@ impl ManualOrders {
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
         hist_trading: Option<&mut HistTradeRunner>,
+        live_info:Option<&LiveInfo>,
     ) -> Result<()> {
         match hlines {
             Some(hline_ref) => link_hline_orders(&man_orders.orders, hline_ref),
@@ -2117,12 +2136,14 @@ impl LivePlot {
         live_price: &f64,
         collect_data: &HashMap<String, SymbolOutput>,
         ui: &mut egui::Ui,
+        live_info:&mut LiveInfo,
     ) {
         live_plot.kline_plot.show_live(
             ui,
             plot_extras,
             live_plot.live_asset_data.clone(),
             Some(collect_data),
+            Some(live_info)
         );
 
 
@@ -2137,7 +2158,7 @@ impl LivePlot {
             live_plot.kline_plot.intv = live_plot.intv;
             live_plot.reload = false;
         };
-        egui::Grid::new("Hplot order assets:")
+        egui::Grid::new("Lplot order assets:")
             .striped(true)
             .show(ui, |ui| {
                 egui::ComboBox::from_label("")
@@ -2171,6 +2192,9 @@ impl LivePlot {
                         };
                     };
                 }
+                if ui.button("Reload chart").clicked() {
+                    //FIXME add a way to reload chart
+                };
             });
     }
 }
@@ -2901,7 +2925,7 @@ impl HistPlot {
     ) {
         let _res = hist_plot
             .kline_plot
-            .show_live(ui, plot_extras, hist_ad, None);
+            .show_live(ui, plot_extras, hist_ad, None, None);
 
         if hist_plot.intv != hist_plot.last_intv {
             hist_plot.last_intv = hist_plot.intv;

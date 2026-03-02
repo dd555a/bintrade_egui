@@ -575,17 +575,13 @@ pub struct AssetData {
 
     //NOTE live only
     pub live_asset_symbol_changed:(bool,String),
-    pub acc_balances: HashMap<String, f64>,
-    pub current_pair_balances:(f64, f64)
+    pub acc_balances: HashMap<String, (f64, f64)>,
+    pub current_pair_strings:(String, String),
+    pub current_pair_free_balances:(f64, f64),
+    pub current_pair_locked_balances:(f64, f64),
 }
 
 impl AssetData {
-    pub fn add_balance(&mut self, asset:&str, balance:&f64){
-        self.acc_balances.insert(asset.to_string(), *balance);
-    }
-    pub fn get_balance(&self, asset:&str)->Option<f64>{
-        self.acc_balances.get(asset).copied()
-    }
     pub fn debug(&self) -> String {
         let mut ostring: String = "Available Hashmaps: \n".to_string();
         if self.kline_data.is_empty() == false {
