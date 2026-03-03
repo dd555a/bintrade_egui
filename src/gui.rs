@@ -1657,6 +1657,9 @@ struct ManualOrders {
 
     search_string: String,
     quant: Quant,
+    quant_selector: Quant,
+    last_quant: Quant,
+
     order: Order,
     new_order: Order,
     scalar_set: bool,
@@ -1693,6 +1696,8 @@ impl Default for ManualOrders {
 
             search_string: "".to_string(),
             quant: Quant::Q100,
+            last_quant: Quant::Q100,
+            quant_selector: Quant::Q100,
             order: Order::Market {
                 buy: true,
                 quant: Quant::Q100,
@@ -1849,13 +1854,52 @@ impl ManualOrders {
                 ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
 
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut man_orders.quant, Quant::Q25, "25%");
-                    ui.selectable_value(&mut man_orders.quant, Quant::Q50, "50%");
-                    ui.selectable_value(&mut man_orders.quant, Quant::Q75, "75%");
-                    ui.selectable_value(&mut man_orders.quant, Quant::Q100, "100%");
-                    //ui.selectable_value(&mut dummy, None, "");
+                    ui.selectable_value(&mut man_orders.quant_selector, Quant::Q25, "25%");
+                    ui.selectable_value(&mut man_orders.quant_selector, Quant::Q50, "50%");
+                    ui.selectable_value(&mut man_orders.quant_selector, Quant::Q75, "75%");
+                    ui.selectable_value(&mut man_orders.quant_selector, Quant::Q100, "100%");
                 });
                 ui.end_row();
+                if (man_orders.quant_selector != man_orders.last_quant){
+                    man_orders.quant=man_orders.quant_selector;
+                    man_orders.last_quant=man_orders.quant_selector;
+                    match man_orders.quant{
+                        Quant::Q25=>man_orders.scalar= 25.0,
+                        Quant::Q50=>man_orders.scalar= 50.0,
+                        Quant::Q75=>man_orders.scalar= 75.0,
+                        Quant::Q100=>man_orders.scalar= 100.0,
+                        _=>()
+                    };
+                }else{
+                    match man_orders.scalar{
+                        0.0=>(),
+                        25.0=>{
+                            man_orders.quant=Quant::Q25;
+                            man_orders.quant_selector=Quant::Q25;
+                            man_orders.scalar=25.0;
+                        }
+                        50.0=>{
+                            man_orders.quant=Quant::Q50;
+                            man_orders.quant_selector=Quant::Q50;
+                            man_orders.scalar=50.0;
+                        }
+                        75.0=>{
+                            man_orders.quant=Quant::Q75;
+                            man_orders.quant_selector=Quant::Q75;
+                            man_orders.scalar=75.0;
+                        }
+                        100.0=>{
+                            man_orders.quant=Quant::Q100;
+                            man_orders.quant_selector=Quant::Q100;
+                            man_orders.scalar=100.0;
+                        }
+                        _=>{
+                            man_orders.quant=Quant::Q{q:man_orders.scalar};
+                            man_orders.quant_selector=Quant::Q{q:man_orders.scalar};
+                        }
+                    };
+
+                };
 
                 ui.add(egui::Slider::new(&mut man_orders.scalar, 0.0..=100.0).suffix(format!("%")));
                 ui.end_row();
@@ -2045,9 +2089,11 @@ impl ManualOrders {
                         }
                     };
                 };
+                /*
                 if ui.button("Replace").clicked() {
-                    //FIXME find a way to add above code
                 };
+                */
+                    //FIXME find a way to add above code
                 ui.separator();
                 ui.end_row();
             });
@@ -2859,6 +2905,7 @@ enum LineStyle {
     Dotted(f32),
 }
 
+#[derive(Copy,Clone,Debug)]
 enum LineState {
     ActiveColor(Color32),
     InactiveColor(Color32),
@@ -2870,42 +2917,34 @@ enum HlineType {
     SellOrder((LineState, LineStyle)),
     LastPrice((LineStyle, Color32)),
 }
+
+const PRICE_STYLE: LineStyle = LineStyle::Solid(1.0);
+const LIMIT_STYLE: LineStyle = LineStyle::Dotted(0.5);
+const DOTT_LINE_SPACING:f32=0.5;
 const STOP_STYLE: LineStyle = LineStyle::Dotted(0.5);
 
 const BUY_ACTIVE: LineState = LineState::ActiveColor(Color32::GREEN);
 const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::GREEN);
-const BUY_STYLE: LineStyle = LineStyle::Solid(1.0);
 
 const SELL_ACTIVE: LineState = LineState::ActiveColor(Color32::RED);
 const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::RED);
-const SELL_STYLE: LineStyle = LineStyle::Solid(1.0);
 
 #[allow(unused)]
 const LAST_PRICE_COLOR: Color32 = Color32::YELLOW;
 #[allow(unused)]
 const LAST_PRICE_LINE: LineStyle = LineStyle::Dotted(0.5);
 
-const DOTT_LINE_SPACING:f32=0.5;
 
 #[allow(unused)]
 impl HlineType {
     fn hline_order(o: &Order, active: bool) -> Vec<HLine> {
         let side = o.get_side();
-        if side == true {
-            if active == true {
-                return HlineType::BuyOrder((BUY_ACTIVE, BUY_STYLE)).get_order_lines(&o);
-            } else {
-                return HlineType::BuyOrder((BUY_INACTIVE, BUY_STYLE)).get_order_lines(&o);
-            }
-        } else {
-            if active == true {
-                return HlineType::SellOrder((SELL_ACTIVE, SELL_STYLE)).get_order_lines(&o);
-            } else {
-                return HlineType::SellOrder((SELL_INACTIVE, SELL_STYLE)).get_order_lines(&o);
-            }
-        }
-    }
-    fn get_order_lines(&self, o:&Order)->Vec<HLine>{
+        let line_state=match (side,active){
+            (true,true)=>BUY_ACTIVE,
+            (true,false)=>BUY_INACTIVE,
+            (false,true)=>SELL_ACTIVE,
+            (false,false)=>SELL_INACTIVE,
+        };
         match o{
             Order::None=>{
                 vec![]
@@ -2914,7 +2953,8 @@ impl HlineType {
                 buy,
                 quant,
             }=>{
-                vec![]
+                vec![
+                ]
             },
             Order::Limit {
                 buy,
@@ -2922,7 +2962,11 @@ impl HlineType {
                 price,
                 limit_status,
             }=>{
-                vec![]
+                if side==true{
+                    vec![HlineType::BuyOrder((line_state,PRICE_STYLE)).to_hline(price)]
+                }else{
+                    vec![HlineType::SellOrder((line_state,PRICE_STYLE)).to_hline(price)]
+                }
             },
             Order::StopLimit {
                 buy,
@@ -2932,7 +2976,18 @@ impl HlineType {
                 stop_price,
                 stop_status,
             }=>{
-                vec![]
+                if side==true{
+                    vec![
+                        HlineType::BuyOrder((line_state ,LIMIT_STYLE)).to_hline(price),
+                        HlineType::BuyOrder((line_state,STOP_STYLE)).to_hline(&(*stop_price as f64)),
+
+                    ]
+                }else{
+                    vec![
+                        HlineType::SellOrder((line_state,LIMIT_STYLE)).to_hline(price),
+                        HlineType::SellOrder((line_state,STOP_STYLE)).to_hline(&(*stop_price as f64)),
+                    ]
+                }
             },
             Order::StopMarket {
                 buy,
@@ -2940,7 +2995,15 @@ impl HlineType {
                 price,
                 stop_status,
             }=>{
-                vec![]
+                if side==true{
+                    vec![
+                        HlineType::BuyOrder((line_state,STOP_STYLE)).to_hline(price),
+                    ]
+                }else{
+                    vec![
+                        HlineType::SellOrder((line_state,STOP_STYLE)).to_hline(price),
+                    ]
+                }
             },
         }
     }
@@ -2953,12 +3016,12 @@ impl HlineType {
                 };
                 match bs {
                     LineStyle::Solid(width) => {
-                        let s = Stroke::new(width.clone(), color.clone());
-                        HLine::new("Buy order", value.clone()).stroke(s).style(LineStyleEgui::Solid)
+                        let s = Stroke::new(*width, *color);
+                        HLine::new("Buy order", *value).stroke(s).style(LineStyleEgui::Solid)
                     },
                     LineStyle::Dotted(width) => {
-                        let s = Stroke::new(width.clone(), color.clone());
-                        HLine::new("Buy order", value.clone()).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
+                        let s = Stroke::new(*width, *color);
+                        HLine::new("Buy order", *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
                     },
                 }
             }
@@ -2969,24 +3032,24 @@ impl HlineType {
                 };
                 match ss {
                     LineStyle::Solid(width) => {
-                        let s = Stroke::new(width.clone(), color.clone());
-                        HLine::new("Sell order", value.clone()).stroke(s).style(LineStyleEgui::Solid)
+                        let s = Stroke::new(*width, *color);
+                        HLine::new("Sell order", *value).stroke(s).style(LineStyleEgui::Solid)
                     },
                     LineStyle::Dotted(width) => {
-                        let s = Stroke::new(width.clone(), color.clone());
-                        HLine::new("Sell order", value.clone()).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
+                        let s = Stroke::new(*width, *color);
+                        HLine::new("Sell order", *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
                     },
                 }
             }
             HlineType::LastPrice((l, color)) => {
                 match l {
                     LineStyle::Solid(width) => {
-                        let s=Stroke::new(width.clone(), color.clone());
-                        HLine::new("Last price", value.clone()).stroke(s).style(LineStyleEgui::Solid)
+                        let s = Stroke::new(*width, *color);
+                        HLine::new("Last price", *value).stroke(s).style(LineStyleEgui::Solid)
                     }
                     LineStyle::Dotted(width) => {
-                        let s=Stroke::new(width.clone(), color.clone());
-                        HLine::new("Last price", value.clone()).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
+                        let s = Stroke::new(*width, *color);
+                        HLine::new("Last price", *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
                     },
                 }
             }

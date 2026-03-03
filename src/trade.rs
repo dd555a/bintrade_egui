@@ -315,8 +315,9 @@ pub enum StopStatus {
     Triggered,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Quant {
+    #[default]
     Q100,
     Q75,
     Q50,
