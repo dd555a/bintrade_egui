@@ -1508,6 +1508,7 @@ impl eframe::App for DesktopApp {
                             }
                             PaneType::HistTrade => {
                                 self.man_orders
+                                    //FIXME add CTX here
                                     .insert(self.pane_number + 1, ManualOrders::default());
                                 let settings =
                                     self.settings.lock().expect("Unable to unlock settings");
@@ -1572,30 +1573,10 @@ impl eframe::App for DesktopApp {
             self.recv_from_cli = Some(recv);
             self.resp_buff = Some(buff);
             self.last_resp = Some(last_resp);
-
-            //if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-            /*
-            if let Some(pos) = ctx.input_mut(|i| {
-                let mods=egui::Modifiers { ctrl: true, alt: true, ..Default::default() };
-                let key=egui::Key::A;
-                let shortcut=egui::KeyboardShortcut::new(mods,key);
-                let bool_state=i.consume_key(&shortcut);
-            });
-            */
-
-            if ctx.input(|i| i.key_pressed(egui::Key::A)) {
-                println!("\n A Pressed");
-            }
-            if ctx.input(|i| i.key_down(egui::Key::A)) {
-                println!("\n A Held");
-                ui.ctx().request_repaint(); // make sure we note the holding.
-            }
-            if ctx.input(|i| i.key_released(egui::Key::A)) {
-                println!("\n A Released");
-            }
             let tt = self.tree.clone();
             let mut tree = tt.lock().expect("Posoned mutex on pane tree!");
             tree.ui(self, ui);
+
         });
     }
 }
@@ -1652,6 +1633,7 @@ struct ManualOrders {
     active_orders: Option<Vec<Order>>,
 
     hist_trade_runner: HistTradeRunner,
+    hotkeys:bool,
 
     current_symbol: String,
 
@@ -1691,6 +1673,7 @@ impl Default for ManualOrders {
         Self {
             man_orders: None,
             active_orders: None,
+            hotkeys:false,
 
             current_symbol: "BTCUSDT".to_string(),
 
@@ -1706,7 +1689,7 @@ impl Default for ManualOrders {
                 buy: true,
                 quant: Quant::Q100,
             },
-            scalar: 0.0,
+            scalar: 100.0,
             scalar_set: false,
             buy: true,
 
@@ -1842,8 +1825,32 @@ impl ManualOrders {
             });
         });
         ui.ctx().request_repaint();
+        //FIXME
+        //IMPLEMENT HOTKEYS, pass CTX through ManualOrders::default()
+        /*
+        ui.checkbox(
+            &mut man_orders.hotkeys,
+            "Hotkeysapi keys in settings file",
+        );
+        if man_orders.hotkeys==true{
+            if ctx.input(|i| i.key_pressed(egui::Key::A)) {
+                println!("\n A Pressed");
+            }
+            if ctx.input(|i| i.key_down(egui::Key::A)) {
+                println!("\n A Held");
+                ui.ctx().request_repaint(); // make sure we note the holding.
+            }
+            if ctx.input(|i| i.key_released(egui::Key::A)) {
+                println!("\n A Released");
+            }
+
+        }else{
+
+        };
+         * */
 
         ui.end_row();
+
 
         egui::Grid::new("parent grid").striped(true).show(ui, |ui| {
             ui.vertical(|ui| {
@@ -1876,22 +1883,26 @@ impl ManualOrders {
                         25.0=>{
                             man_orders.quant=Quant::Q25;
                             man_orders.quant_selector=Quant::Q25;
+                            man_orders.last_quant=man_orders.quant_selector;
                             man_orders.scalar=25.0;
                         }
                         50.0=>{
                             man_orders.quant=Quant::Q50;
                             man_orders.quant_selector=Quant::Q50;
                             man_orders.scalar=50.0;
+                            man_orders.last_quant=man_orders.quant_selector;
                         }
                         75.0=>{
                             man_orders.quant=Quant::Q75;
                             man_orders.quant_selector=Quant::Q75;
                             man_orders.scalar=75.0;
+                            man_orders.last_quant=man_orders.quant_selector;
                         }
                         100.0=>{
                             man_orders.quant=Quant::Q100;
                             man_orders.quant_selector=Quant::Q100;
                             man_orders.scalar=100.0;
+                            man_orders.last_quant=man_orders.quant_selector;
                         }
                         _=>{
                             man_orders.quant=Quant::Q{q:man_orders.scalar};
@@ -2052,6 +2063,66 @@ impl ManualOrders {
                             0.0
                         }
                     };
+                    ///////////////
+                    //FIXME neaten this up somehow
+                    //
+                    let bb = man_orders.buy;
+                    let qq = man_orders.quant;
+                    let sp = man_orders.stop_price;
+                    let pp = man_orders.price;
+                    match man_orders.new_order {
+                        Order::Market { buy: _, quant: _ } => {
+                            man_orders.order = Order::Market { buy: bb, quant: qq };
+                        }
+                        Order::Limit {
+                            buy: _,
+                            quant: _,
+                            price: _,
+                            limit_status: _,
+                        } => {
+                            man_orders.order = Order::Limit {
+                                buy: bb,
+                                quant: qq,
+                                price: pp,
+                                limit_status: LimitStatus::Untouched,
+                            };
+                        }
+                        Order::StopLimit {
+                            buy: _,
+                            quant: _,
+                            price: _,
+                            limit_status: _,
+                            stop_price: _,
+                            stop_status: _,
+                        } => {
+                            man_orders.order = Order::StopLimit {
+                                buy: bb,
+                                quant: qq,
+                                price: pp,
+                                limit_status: LimitStatus::Untouched,
+                                stop_price: sp as f32,
+                                stop_status: StopStatus::Untouched,
+                            };
+                        }
+                        Order::StopMarket {
+                            buy: _,
+                            quant: _,
+                            price: _,
+                            stop_status: _,
+                        } => {
+                            man_orders.order = Order::StopMarket {
+                                buy: bb,
+                                quant: qq,
+                                price: pp,
+                                stop_status: StopStatus::Untouched,
+                            };
+                        }
+                        Order::None => {}
+                    };
+                    //
+                    //
+                    //
+                    //
                     //for hist tade this if fine but if live have this on the outside XXX
                     let o = man_orders.order.clone();
                     let res: Result<()> = match hist_trade {
@@ -2919,9 +2990,10 @@ enum HlineType {
 }
 
 const PRICE_STYLE: LineStyle = LineStyle::Solid(1.0);
-const LIMIT_STYLE: LineStyle = LineStyle::Dotted(0.5);
-const DOTT_LINE_SPACING:f32=0.5;
-const STOP_STYLE: LineStyle = LineStyle::Dotted(0.5);
+const LIMIT_STYLE: LineStyle = LineStyle::Solid(1.0);
+
+const DOTT_LINE_SPACING:f32=10.0;
+const STOP_STYLE: LineStyle = LineStyle::Dotted(1.0);
 
 const BUY_ACTIVE: LineState = LineState::ActiveColor(Color32::GREEN);
 const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::GREEN);
@@ -2963,9 +3035,9 @@ impl HlineType {
                 limit_status,
             }=>{
                 if side==true{
-                    vec![HlineType::BuyOrder((line_state,PRICE_STYLE)).to_hline(price)]
+                    vec![HlineType::BuyOrder((line_state,PRICE_STYLE)).to_hline(price,"Limit price" )]
                 }else{
-                    vec![HlineType::SellOrder((line_state,PRICE_STYLE)).to_hline(price)]
+                    vec![HlineType::SellOrder((line_state,PRICE_STYLE)).to_hline(price,"Limit price" )]
                 }
             },
             Order::StopLimit {
@@ -2978,14 +3050,14 @@ impl HlineType {
             }=>{
                 if side==true{
                     vec![
-                        HlineType::BuyOrder((line_state ,LIMIT_STYLE)).to_hline(price),
-                        HlineType::BuyOrder((line_state,STOP_STYLE)).to_hline(&(*stop_price as f64)),
+                        HlineType::BuyOrder((line_state,LIMIT_STYLE)).to_hline(price, "Stop Limit stop"),
+                        HlineType::BuyOrder((line_state,STOP_STYLE)).to_hline(&(*stop_price as f64), "Stop Limit stop"),
 
                     ]
                 }else{
                     vec![
-                        HlineType::SellOrder((line_state,LIMIT_STYLE)).to_hline(price),
-                        HlineType::SellOrder((line_state,STOP_STYLE)).to_hline(&(*stop_price as f64)),
+                        HlineType::SellOrder((line_state,LIMIT_STYLE)).to_hline(price, "Stop Limit stop"),
+                        HlineType::SellOrder((line_state,STOP_STYLE)).to_hline(&(*stop_price as f64), "Stop Limit stop"),
                     ]
                 }
             },
@@ -2997,17 +3069,17 @@ impl HlineType {
             }=>{
                 if side==true{
                     vec![
-                        HlineType::BuyOrder((line_state,STOP_STYLE)).to_hline(price),
+                        HlineType::BuyOrder((line_state,STOP_STYLE)).to_hline(price, "Stop Market"),
                     ]
                 }else{
                     vec![
-                        HlineType::SellOrder((line_state,STOP_STYLE)).to_hline(price),
+                        HlineType::SellOrder((line_state,STOP_STYLE)).to_hline(price, "Stop Market"),
                     ]
                 }
             },
         }
     }
-    fn to_hline(&self, value: &f64) -> HLine {
+    fn to_hline(&self, value: &f64, label:&str) -> HLine {
         match &self {
             HlineType::BuyOrder((ba, bs)) => {
                 let color = match ba {
@@ -3017,11 +3089,11 @@ impl HlineType {
                 match bs {
                     LineStyle::Solid(width) => {
                         let s = Stroke::new(*width, *color);
-                        HLine::new("Buy order", *value).stroke(s).style(LineStyleEgui::Solid)
+                        HLine::new(format!["Buy {} {:.2}",label, value], *value).stroke(s).style(LineStyleEgui::Solid)
                     },
                     LineStyle::Dotted(width) => {
                         let s = Stroke::new(*width, *color);
-                        HLine::new("Buy order", *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
+                        HLine::new(format!["Buy {} {:.2}", label, value], *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
                     },
                 }
             }
@@ -3033,11 +3105,11 @@ impl HlineType {
                 match ss {
                     LineStyle::Solid(width) => {
                         let s = Stroke::new(*width, *color);
-                        HLine::new("Sell order", *value).stroke(s).style(LineStyleEgui::Solid)
+                        HLine::new(format!["Sell {} {:.2}",label, value], *value).stroke(s).style(LineStyleEgui::Solid)
                     },
                     LineStyle::Dotted(width) => {
                         let s = Stroke::new(*width, *color);
-                        HLine::new("Sell order", *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
+                        HLine::new(format!["Sell {} {:.2}",label, value], *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
                     },
                 }
             }
