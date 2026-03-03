@@ -1,5 +1,4 @@
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap,HashMap};
 use std::fmt;
 use std::io::{Read, Write};
 use std::num::ParseIntError;
@@ -21,7 +20,7 @@ use egui::{Color32, ComboBox, RichText, epaint};
 use egui_extras::{Column, TableBuilder};
 use egui_plot_bintrade::{
     AxisHints, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, HPlacement,
-    Legend, Plot,
+    Legend, Plot, LineStyle as LineStyleEgui
 };
 use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
@@ -1096,7 +1095,8 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     ui,
                     Some(&mut live_plot.kline_plot.hlines),
                     None,
-                    Some(&live_info)
+                    Some(&live_info),
+                    None,
                 );
             }
             PaneType::HistTrade => {
@@ -1105,12 +1105,17 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     None => None,
                 };
                 let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+                let ts=self.trade_slice.clone();
+
+                let mut t_slice= ts.lock().expect("Trade slice!");
+
                 let hist_extras = HistExtras::default();
                 let p_extras: PlotExtras = PlotExtras::None;
                 let mut h_plot = self
                     .hist_plot
                     .get_mut(&pane.nr)
                     .expect("Hist plot gui struct not found!");
+
                 if h_plot.hist_extras.is_some() != true {
                     h_plot.hist_extras = Some(hist_extras);
                 };
@@ -1123,6 +1128,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     chan,
                     self.hist_asset_data.clone(),
                     ui,
+                    Some(&mut t_slice),
                 );
 
                 let mut man_orders = self
@@ -1142,6 +1148,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     Some(&mut h_plot.kline_plot.hlines),
                     None,
                     None,
+                    Some(&t_slice),
                 );
             }
             PaneType::ManageData => {
@@ -1239,7 +1246,7 @@ fn create_tree() -> egui_tiles::Tree<Pane> {
 enum PlotExtras {
     None,
     OrderHlines(Vec<HLine>),
-    LiveData(LiveInfo),
+    TradeSlice(Vec<(chrono::NaiveDateTime, f64,f64,f64,f64,f64)>)
 }
 
 #[allow(unused)]
@@ -1254,6 +1261,8 @@ pub struct LiveInfo{
 
 #[derive(Dbg)]
 pub struct DesktopApp {
+    trade_slice:Rc<Mutex<Vec<(chrono::NaiveDateTime, f64,f64,f64,f64,f64)>>>,
+
     simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
     gap_width: f32,
@@ -1344,11 +1353,12 @@ impl DesktopApp {
 impl Default for DesktopApp {
     fn default() -> Self {
         // NOTE this struct should never be initiated this way, all refs need to be passed
-        // using :
+        //
         let lp = Arc::new(Mutex::new(0.0));
         let asset_data = Arc::new(Mutex::new(AssetData::new(6661)));
         let hist_asset_data = Arc::new(Mutex::new(AssetData::new(6662)));
         let cd = Arc::new(Mutex::new(HashMap::new()));
+        let trade_slice=Rc::new(Mutex::new(vec![]));
 
         let (_, lp_chan_recv) = watch::channel(0.0);
 
@@ -1357,6 +1367,9 @@ impl Default for DesktopApp {
         man_o_default.insert(0, man_o);
 
         Self {
+
+            trade_slice,
+
             last_resp: Some(ClientResponse::None),
             resp_buff: Some(HashMap::new()),
             simplification_options: egui_tiles::SimplificationOptions {
@@ -1658,6 +1671,10 @@ struct ManualOrders {
     asset1_name: String,
     asset2_name: String,
 
+
+    price:f64,
+    stop_price:f64,
+
     last_price_buffer: Vec<f64>,
     last_price_buffer_size: usize,
     last_price_s: f64,
@@ -1703,6 +1720,9 @@ impl Default for ManualOrders {
             last_price_s: 0.0,
             last_id: 0,
 
+            stop_price:0.0,
+            price:0.0,
+
             plot_extras: None,
         }
     }
@@ -1710,13 +1730,13 @@ impl Default for ManualOrders {
 
 #[instrument(level = "trace")]
 fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLine>) {
-    let mut hl: Vec<HLine> = orders
+   hlines.clear();
+   let _=orders
         .iter()
-        .map(|(_, (order, active))| HlineType::hline_order(order, *active))
-        .collect();
-    tracing::trace!["Hlines (link_hline_orders):{:?}", &hl];
-    hlines.clear();
-    hlines.append(&mut hl);
+        .map(|(_, (order, active))| {
+            let mut hh=HlineType::hline_order(order, *active);
+            hlines.append(&mut hh);})
+        .collect::<Vec<_>>();
 }
 
 #[allow(unused)]
@@ -1747,7 +1767,8 @@ impl ManualOrders {
         hlines: Option<&mut Vec<HLine>>,
         hist_trading: Option<&mut HistTradeRunner>,
         live_info:Option<&LiveInfo>,
-    ) -> Result<()> {
+        trade_slice:Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
+    ){
         match hlines {
             Some(hline_ref) => link_hline_orders(&man_orders.orders, hline_ref),
             None => {
@@ -1818,8 +1839,6 @@ impl ManualOrders {
         ui.ctx().request_repaint();
 
         ui.end_row();
-        let pp: f64 = man_orders.price_string.parse()?;
-        let sp: f64 = man_orders.price_string.parse()?;
 
         egui::Grid::new("parent grid").striped(true).show(ui, |ui| {
             ui.vertical(|ui| {
@@ -1853,12 +1872,10 @@ impl ManualOrders {
                     );
                 });
                 ui.end_row();
-                /*
-                let bb = man_orders.buy.clone();
-                let qq = man_orders.quant.clone();
-                */
                 let bb = man_orders.buy;
                 let qq = man_orders.quant;
+                let sp = man_orders.stop_price;
+                let pp = man_orders.price;
 
                 egui::ComboBox::from_label("Order Type")
                     .selected_text(man_orders.order.to_str())
@@ -1885,7 +1902,7 @@ impl ManualOrders {
                                 quant: qq,
                                 price: pp,
                                 limit_status: LimitStatus::Untouched,
-                                stop_price: sp.clone() as f32,
+                                stop_price: sp as f32,
                                 stop_status: StopStatus::Untouched,
                             },
                             "Stop Limit",
@@ -1947,7 +1964,7 @@ impl ManualOrders {
                             quant: qq,
                             price: pp,
                             limit_status: LimitStatus::Untouched,
-                            stop_price: sp.clone() as f32,
+                            stop_price: sp as f32,
                             stop_status: StopStatus::Untouched,
                         };
                     }
@@ -1973,6 +1990,24 @@ impl ManualOrders {
                 }
 
                 if ui.button("Add").clicked() {
+                    let res=man_orders.price_string.parse();
+                    man_orders.price = match res{
+                        Ok(pp)=>pp,
+                        Err(e)=>{
+                            tracing::error!["Unable to parse price string!"];
+                            man_orders.price_string="0.0".to_string();
+                            0.0
+                        }
+                    };
+                    let res=man_orders.stop_price_string.parse();
+                    man_orders.stop_price= match res{
+                        Ok(sp)=>sp,
+                        Err(e)=>{
+                            tracing::error!["Unable to stop parse price string!"];
+                            man_orders.stop_price_string="0.0".to_string();
+                            0.0
+                        }
+                    };
                     //for hist tade this if fine but if live have this on the outside XXX
                     let o = man_orders.order.clone();
                     let res: Result<()> = match hist_trade {
@@ -1993,6 +2028,8 @@ impl ManualOrders {
                             }
                         }
                         None => {
+                            //FIXME
+                            //For live orders place orders here...
                             todo!();
                         }
                     };
@@ -2004,10 +2041,13 @@ impl ManualOrders {
                             //NOTE allow only one order for now...
                         }
                         Err(e) => {
-                            tracing::error!["Invalid order:{:?}, error:{}", &o, e];
+                            tracing::error!["Invalid order: {:?}, error:{}", &o, e];
                         }
                     };
-                }
+                };
+                if ui.button("Replace").clicked() {
+                    //FIXME find a way to add above code
+                };
                 ui.separator();
                 ui.end_row();
             });
@@ -2077,7 +2117,6 @@ impl ManualOrders {
                     });
             });
         });
-        Ok(())
     }
 }
 
@@ -2194,6 +2233,9 @@ impl LivePlot {
                 }
                 if ui.button("Reload chart").clicked() {
                     //FIXME add a way to reload chart
+                    //
+                    //
+                    //
                 };
             });
     }
@@ -2450,6 +2492,7 @@ pub struct Settings {
     pub enc_binance_priv_key: Option<String>,
 
     pub password_string: String,
+    pub backload_wicks:usize,
 }
 
 #[allow(unused)]
@@ -2460,6 +2503,7 @@ impl Settings {
             enc_api_keys: true,
             save_api_keys: true,
             defalt_next_wicks: 30,
+            backload_wicks: 740,
             ..Default::default()
         }
     }
@@ -2826,37 +2870,78 @@ enum HlineType {
     SellOrder((LineState, LineStyle)),
     LastPrice((LineStyle, Color32)),
 }
+const STOP_STYLE: LineStyle = LineStyle::Dotted(0.5);
 
 const BUY_ACTIVE: LineState = LineState::ActiveColor(Color32::GREEN);
 const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::GREEN);
-const BUY_STYLE: LineStyle = LineStyle::Solid(0.5);
+const BUY_STYLE: LineStyle = LineStyle::Solid(1.0);
 
 const SELL_ACTIVE: LineState = LineState::ActiveColor(Color32::RED);
 const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::RED);
-const SELL_STYLE: LineStyle = LineStyle::Solid(0.5);
+const SELL_STYLE: LineStyle = LineStyle::Solid(1.0);
 
 #[allow(unused)]
 const LAST_PRICE_COLOR: Color32 = Color32::YELLOW;
 #[allow(unused)]
 const LAST_PRICE_LINE: LineStyle = LineStyle::Dotted(0.5);
 
+const DOTT_LINE_SPACING:f32=0.5;
+
 #[allow(unused)]
 impl HlineType {
-    fn hline_order(o: &Order, active: bool) -> HLine {
+    fn hline_order(o: &Order, active: bool) -> Vec<HLine> {
         let side = o.get_side();
-        let price = o.get_price();
         if side == true {
             if active == true {
-                return HlineType::BuyOrder((BUY_ACTIVE, BUY_STYLE)).to_hline(price);
+                return HlineType::BuyOrder((BUY_ACTIVE, BUY_STYLE)).get_order_lines(&o);
             } else {
-                return HlineType::BuyOrder((BUY_INACTIVE, BUY_STYLE)).to_hline(price);
+                return HlineType::BuyOrder((BUY_INACTIVE, BUY_STYLE)).get_order_lines(&o);
             }
         } else {
             if active == true {
-                return HlineType::SellOrder((SELL_ACTIVE, SELL_STYLE)).to_hline(price);
+                return HlineType::SellOrder((SELL_ACTIVE, SELL_STYLE)).get_order_lines(&o);
             } else {
-                return HlineType::SellOrder((SELL_INACTIVE, SELL_STYLE)).to_hline(price);
+                return HlineType::SellOrder((SELL_INACTIVE, SELL_STYLE)).get_order_lines(&o);
             }
+        }
+    }
+    fn get_order_lines(&self, o:&Order)->Vec<HLine>{
+        match o{
+            Order::None=>{
+                vec![]
+            },
+            Order::Market {
+                buy,
+                quant,
+            }=>{
+                vec![]
+            },
+            Order::Limit {
+                buy,
+                quant,
+                price,
+                limit_status,
+            }=>{
+                vec![]
+            },
+            Order::StopLimit {
+                buy,
+                quant,
+                price,
+                limit_status,
+                stop_price,
+                stop_status,
+            }=>{
+                vec![]
+            },
+            Order::StopMarket {
+                buy,
+                quant,
+                price,
+                stop_status,
+            }=>{
+                vec![]
+            },
         }
     }
     fn to_hline(&self, value: &f64) -> HLine {
@@ -2866,45 +2951,51 @@ impl HlineType {
                     LineState::ActiveColor(color) => color,
                     LineState::InactiveColor(color) => color,
                 };
-                let width = match bs {
-                    LineStyle::Solid(width) => width,
-                    LineStyle::Dotted(width) => width,
-                };
-                let s = Stroke::new(width.clone(), color.clone());
-                HLine::new("Buy order", value.clone()).stroke(s)
+                match bs {
+                    LineStyle::Solid(width) => {
+                        let s = Stroke::new(width.clone(), color.clone());
+                        HLine::new("Buy order", value.clone()).stroke(s).style(LineStyleEgui::Solid)
+                    },
+                    LineStyle::Dotted(width) => {
+                        let s = Stroke::new(width.clone(), color.clone());
+                        HLine::new("Buy order", value.clone()).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
+                    },
+                }
             }
             HlineType::SellOrder((si, ss)) => {
                 let color = match si {
                     LineState::ActiveColor(color) => color,
                     LineState::InactiveColor(color) => color,
                 };
-                let width = match ss {
-                    LineStyle::Solid(width) => width,
-                    LineStyle::Dotted(width) => width,
-                };
-                let s = Stroke::new(width.clone(), color.clone());
-                HLine::new("Sell order", value.clone()).stroke(s)
+                match ss {
+                    LineStyle::Solid(width) => {
+                        let s = Stroke::new(width.clone(), color.clone());
+                        HLine::new("Sell order", value.clone()).stroke(s).style(LineStyleEgui::Solid)
+                    },
+                    LineStyle::Dotted(width) => {
+                        let s = Stroke::new(width.clone(), color.clone());
+                        HLine::new("Sell order", value.clone()).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
+                    },
+                }
             }
             HlineType::LastPrice((l, color)) => {
-                let width = match l {
-                    LineStyle::Solid(width) => width,
-                    LineStyle::Dotted(width) => width,
-                };
-                let s = Stroke::new(width.clone(), color.clone());
-                HLine::new("Last price", value.clone()).stroke(s)
+                match l {
+                    LineStyle::Solid(width) => {
+                        let s=Stroke::new(width.clone(), color.clone());
+                        HLine::new("Last price", value.clone()).stroke(s).style(LineStyleEgui::Solid)
+                    }
+                    LineStyle::Dotted(width) => {
+                        let s=Stroke::new(width.clone(), color.clone());
+                        HLine::new("Last price", value.clone()).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
+                    },
+                }
             }
         }
     }
 }
 
+
 impl HistPlot {
-    #[allow(unused)]
-    fn create_hlines(&self, order_price: &[(Order, bool)]) -> Vec<HLine> {
-        order_price
-            .iter()
-            .map(|(order, active)| HlineType::hline_order(order, *active))
-            .collect()
-    }
     fn new(hist_asset_data: Arc<Mutex<AssetData>>, intv: &Intv, default_trade_wicks: i64) -> Self {
         Self {
             intv: *intv,
@@ -2922,6 +3013,7 @@ impl HistPlot {
         cli_chan: watch::Sender<ClientInstruct>,
         hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
+        trade_slice:Option<&mut Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>>,
     ) {
         let _res = hist_plot
             .kline_plot

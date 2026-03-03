@@ -185,8 +185,12 @@ async fn append_kline(
         f64,
     )],
 ) -> Result<()> {
-    let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
-        "INSERT OR REPLACE INTO {}( [Timestamp MS], [Open Time], Open, High, Low, Close, Volume, [Close Timestamp MS], [Close Time], [Quote Asset Volume], [Number of Trades], [Taker Buy Base Asset Volume], [Taker Buy Quote Asset Volume] ) ",
+    let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(    
+        "
+        BEGIN TRANSACTION;
+        INSERT OR REPLACE INTO {}( [Timestamp MS], [Open Time], Open, High, Low, Close, Volume, [Close Timestamp MS], [Close Time], [Quote Asset Volume], [Number of Trades], [Taker Buy Base Asset Volume], [Taker Buy Quote Asset Volume] ) 
+        COMMIT;
+        ",
         table
     ));
     assert!(input.len() <= 65535 / 11);
@@ -977,7 +981,11 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
 
     for symbol_info in symbol_inf {
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
-            "INSERT OR REPLACE INTO assets(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset])"
+            "
+            BEGIN TRANSACTION;
+            INSERT OR REPLACE INTO assets(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset])
+            COMMIT;
+            "
         ));
         query_builder.push_values(symbol_info.iter(), |mut b, si| {
             b.push_bind(si.symbol.clone())
@@ -992,7 +1000,11 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
     }
     for fut_symbol_info in fut_symbol_inf {
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
-            "INSERT OR REPLACE INTO assets_fut(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset] , [onboardDate], [deliveryDate])"
+            "
+            BEGIN TRANSACTION;
+            INSERT OR REPLACE INTO assets_fut(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset] , [onboardDate], [deliveryDate])
+            COMMIT;
+            "
         ));
         query_builder.push_values(fut_symbol_info.iter(), |mut b, si| {
             b.push_bind(si.symbol.clone())
@@ -1572,6 +1584,7 @@ impl SQLConn {
         //doesn't have it... idk
         //
         //Asset list loaded here, and operations executed for each asset
+        //FIXME add a vecdeque like queue where downloader dumps data and sql writer takes it
         meta_pool.close().await;
 
         let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
