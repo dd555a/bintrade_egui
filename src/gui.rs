@@ -33,7 +33,7 @@ use magic_crypt::{MagicCryptTrait, new_magic_crypt};
 use crate::conn::{KlineTick, SymbolOutput};
 use crate::data::{AssetData, DLAsset, Intv, Klines};
 use crate::trade::{
-    HistTrade, HistTrade as HistTradeRunner, LimitStatus, Order, Quant, StopStatus,
+    HistTrade, LimitStatus, Order, Quant, StopStatus,
 };
 use crate::{ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse, BinInstructs};
 
@@ -150,9 +150,48 @@ impl KlinePlot {
         live_ad: Arc<Mutex<AssetData>>,
         collected_data: Option<&HashMap<String, SymbolOutput>>,
         live_info:Option<&mut LiveInfo>,
+        return_wicks:Option<usize>,
+        last_price_hist:Option<&mut f64>,
+        hist_symbol_info:Option<&mut (String, String, String)>
 
-    ) -> Result<()> {
+    ) -> Option<Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
+        let ret=match return_wicks{
+            Some(ret_wicks) =>{
+                let ret=ad.kline_data.get(&self.symbol);
+                match ret{
+                    Some(klines)=>{
+                        let ret2=klines.dat.get(&self.intv);
+                        match ret2{
+                            Some(kline)=>Some(kline.kline[ret_wicks..].to_vec()),
+                            None =>{
+                                tracing::error!["Unable to find interval: {} in ad for ret_wicks", &self.intv.to_str()];
+                                None
+                            }
+                        }
+                    }
+                    None => {
+                        tracing::error!["Unable to find symbol: {} in ad for ret_wicks", &self.symbol];
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+
+        //NOTE AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        if let (Some(last_price_h),Some(hist_symbol_inf))=(last_price_hist, hist_symbol_info){
+            if let Some(klines)=&ad.kline_data.get(&self.symbol){
+                hist_symbol_inf.0=klines.asset_pair.clone();
+                hist_symbol_inf.1=klines.s1_string.clone();
+                hist_symbol_inf.2=klines.s2_string.clone();
+                if let Some(kl)=klines.dat.get(&self.intv){
+                    if kl.kline.is_empty() ==false{
+                        *last_price_h=kl.kline[kl.kline.len()-1].4;
+                    };
+                };
+            };
+        };
 
         let symbol = self.symbol.clone();
         if let Some(col_data) = collected_data {
@@ -244,7 +283,7 @@ impl KlinePlot {
                 self.y_offset = 0;
             }
         });
-        Ok(())
+        return ret;
     }
     fn mk_plt(&self) -> (Plot<'_>, Plot<'_>) {
         let (x_lower, x_higher) = self.x_bounds;
@@ -1094,8 +1133,8 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     chan,
                     ui,
                     Some(&mut live_plot.kline_plot.hlines),
-                    None,
                     Some(&live_info),
+                    None,
                     None,
                 );
             }
@@ -1109,18 +1148,12 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 let mut t_slice= ts.lock().expect("Trade slice!");
 
-                let hist_extras = HistExtras::default();
+                let mut hist_extras = self.hist_extras.get_mut(&pane.nr).expect("Hist plot extras struct not found!");
                 let p_extras: PlotExtras = PlotExtras::None;
                 let mut h_plot = self
                     .hist_plot
                     .get_mut(&pane.nr)
                     .expect("Hist plot gui struct not found!");
-
-                if h_plot.hist_extras.is_some() != true {
-                    h_plot.hist_extras = Some(hist_extras);
-                };
-
-                //let hist_trading=&mut h_plot.hist_trade;
 
                 HistPlot::show(
                     &mut h_plot,
@@ -1129,6 +1162,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     self.hist_asset_data.clone(),
                     ui,
                     Some(&mut t_slice),
+                    &mut hist_extras,
                 );
 
                 let mut man_orders = self
@@ -1147,8 +1181,8 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     ui,
                     Some(&mut h_plot.kline_plot.hlines),
                     None,
-                    None,
                     Some(&t_slice),
+                    Some(&hist_extras.symbol_info),
                 );
             }
             PaneType::ManageData => {
@@ -1199,6 +1233,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                         PaneType::HistTrade => {
                             self.hist_plot.remove(&pane.nr);
                             self.man_orders.remove(&pane.nr);
+                            self.hist_extras.remove(&pane.nr);
                         }
                         PaneType::ManageData => {}
                         PaneType::Account => {}
@@ -1304,6 +1339,7 @@ pub struct DesktopApp {
 
     man_orders: BTreeMap<usize, ManualOrders>,
     hist_plot: BTreeMap<usize, HistPlot>,
+    hist_extras: BTreeMap<usize, HistExtras>,
 }
 
 impl DesktopApp {
@@ -1412,6 +1448,7 @@ impl Default for DesktopApp {
 
             man_orders: man_o_default,
             hist_plot: BTreeMap::new(),
+            hist_extras: BTreeMap::new(),
         }
     }
 }
@@ -1520,6 +1557,7 @@ impl eframe::App for DesktopApp {
                                         settings.defalt_next_wicks,
                                     ),
                                 );
+                                self.hist_extras.insert(self.pane_number+1, HistExtras::default());
 
                                 new_child = tree.tiles.insert_pane(Pane::new(
                                     self.pane_number + 1,
@@ -1632,7 +1670,6 @@ struct ManualOrders {
     man_orders: Option<HistTrade>,
     active_orders: Option<Vec<Order>>,
 
-    hist_trade_runner: HistTradeRunner,
     hotkeys:bool,
 
     current_symbol: String,
@@ -1693,8 +1730,6 @@ impl Default for ManualOrders {
             scalar_set: false,
             buy: true,
 
-            hist_trade_runner: HistTradeRunner::default(),
-
             price_string: "0.0".to_string(),
             stop_price_string: "0.0".to_string(),
             orders: HashMap::new(),
@@ -1753,9 +1788,9 @@ impl ManualOrders {
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
-        hist_trading: Option<&mut HistTradeRunner>,
         live_info:Option<&LiveInfo>,
         trade_slice:Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
+        symbol_info:Option<&(String,String,String)>,
     ){
         match hlines {
             Some(hline_ref) => link_hline_orders(&man_orders.orders, hline_ref),
@@ -1763,8 +1798,50 @@ impl ManualOrders {
                 tracing::debug!["Hlines not available!"];
             }
         };
-        //man_orders.sync(hist_trade.as_deref());
-        //man_orders.sync(hist_trade.as_deref());
+        tracing::trace!["Manual orders last_price {}",&last_price];
+
+        match (hist_trade, trade_slice){
+            (Some( mut h_trade ), Some( t_slice ))=>{
+                man_orders.asset1=h_trade.asset1;
+                man_orders.asset2=h_trade.asset2;
+                if let Some(symbol_inf)= symbol_info{
+                    //NOTE symbol can also be gotten here
+                    man_orders.asset1_name=symbol_inf.1.clone();
+                    man_orders.asset2_name=symbol_inf.2.clone();
+                };
+                if let Some((o,active))=man_orders.orders.get(&man_orders.last_id){
+                    if *active==true{
+                        let res1 = man_orders.check_order_price(o, &last_price);
+                        match res1 {
+                            Ok(_) => {
+                                let res = man_orders.check_order_hist(o, &mut h_trade);
+                                match res {
+                                    Ok(_) => {
+                                        h_trade.place_order(o);
+                                        Ok(())
+                                    }
+                                    Err(e) => Err(e),
+                                }
+                            }
+                            Err(e) => Err(e),
+                        };
+                    };
+                };
+                let res=h_trade.trade_forward(t_slice,0);
+                match res{
+                    Ok(_)=>(),
+                    Err(e)=>{
+                        tracing::error!["Trade forward error: {}", e];
+                    }
+                };
+            }
+            (None, None)=>{
+                //FIXME place live orders here
+            }
+            _=>{
+                //???
+            }
+        };
         egui::Grid::new("Current symboll:")
             .striped(true)
             .show(ui, |ui| {
@@ -1782,26 +1859,29 @@ impl ManualOrders {
         egui::Grid::new("Man order assets:")
             .striped(true)
             .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(format!["{}:{}", man_orders.asset1_name, man_orders.asset1])
-                            .color(Color32::GREEN),
-                    );
-                    ui.end_row();
-                });
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(format!["{}:{}", man_orders.asset2_name, man_orders.asset2])
-                            .color(Color32::RED),
-                    );
-                    ui.end_row();
-                });
+                ui.add_sized(
+                    egui::vec2(50.0, 20.0),
+                    egui::Label::new(RichText::new(format!["{}:{}", man_orders.asset1_name, man_orders.asset1])
+                        .color(Color32::ORANGE)),
+                );
+                ui.add_sized(
+                    egui::vec2(50.0, 20.0),
+                    egui::Label::new(RichText::new(format!["{}:{}", man_orders.asset2_name, man_orders.asset2])
+                        .color(Color32::GREEN)),
+                );
+                ui.end_row();
             });
         ui.end_row();
         egui::Grid::new("Last price:").striped(true).show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!["Last price: {}", last_price])
+                        .color(Color32::WHITE),
+                );
+                ui.end_row();
+                /*NOTE the bellow doesn't work, FIXME
                 man_orders.last_price_s = *last_price;
-                man_orders.last_price_buffer.push(last_price.clone());
+                man_orders.last_price_buffer.push(last_price);
                 let n = man_orders.last_price_buffer.len();
                 if n < man_orders.last_price_buffer_size {
                     ui.label(
@@ -1821,7 +1901,7 @@ impl ManualOrders {
                         );
                     }
                 }
-                ui.end_row();
+                */
             });
         });
         ui.ctx().request_repaint();
@@ -2119,52 +2199,16 @@ impl ManualOrders {
                         }
                         Order::None => {}
                     };
-                    //
-                    //
-                    //
-                    //
-                    //for hist tade this if fine but if live have this on the outside XXX
-                    let o = man_orders.order.clone();
-                    let res: Result<()> = match hist_trade {
-                        Some(mut hist_trade) => {
-                            let res1 = man_orders.check_order_price(&o, &last_price);
-                            match res1 {
-                                Ok(_) => {
-                                    let res = man_orders.check_order_hist(&o, &mut hist_trade);
-                                    match res {
-                                        Ok(_) => {
-                                            hist_trade.place_order(&o);
-                                            Ok(())
-                                        }
-                                        Err(e) => Err(e),
-                                    }
-                                }
-                                Err(e) => Err(e),
-                            }
-                        }
-                        None => {
-                            //FIXME
-                            //For live orders place orders here...
-                            todo!();
-                        }
-                    };
-                    match res {
-                        Ok(_) => {
-                            man_orders.last_id += 1;
-                            let oid = man_orders.last_id.clone();
-                            man_orders.orders.insert(oid, (o, false));
-                            //NOTE allow only one order for now...
-                        }
-                        Err(e) => {
-                            tracing::error!["Invalid order: {:?}, error:{}", &o, e];
-                        }
-                    };
+                    let o = man_orders.order;
+                    man_orders.last_id += 1;
+                    let oid = man_orders.last_id;
+                    man_orders.orders.insert(oid, (o, false));
                 };
                 /*
                 if ui.button("Replace").clicked() {
                 };
                 */
-                    //FIXME find a way to add above code
+                    //FIXME find a way to non-duplicate above code
                 ui.separator();
                 ui.end_row();
             });
@@ -2299,7 +2343,10 @@ impl LivePlot {
             plot_extras,
             live_plot.live_asset_data.clone(),
             Some(collect_data),
-            Some(live_info)
+            Some(live_info),
+            None,
+            None,
+            None,
         );
 
 
@@ -2358,14 +2405,10 @@ impl LivePlot {
     }
 }
 
-#[derive(Copy, Clone, Dbg)]
+#[derive(Clone, Dbg, Default)]
 struct HistExtras {
     last_price: f64,
-}
-impl Default for HistExtras {
-    fn default() -> Self {
-        Self { last_price: 0.0 }
-    }
+    symbol_info: (String,String,String)
 }
 
 #[derive(Dbg)]
@@ -3149,10 +3192,26 @@ impl HistPlot {
         hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
         trade_slice:Option<&mut Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>>,
+        hist_extras:&mut HistExtras,
     ) {
-        let _res = hist_plot
-            .kline_plot
-            .show_live(ui, plot_extras, hist_ad, None, None);
+        if hist_plot.trade_slice_loaded==true{
+            let res = hist_plot
+                .kline_plot
+                .show_live(ui, plot_extras, hist_ad, None, None, Some(hist_plot.trade_wicks as usize), None, Some(&mut hist_extras.symbol_info));
+            match (res, trade_slice){
+                (Some(ret_slice),Some( t_slice))=>{
+                    hist_extras.last_price=ret_slice[ret_slice.len()-1].4;
+                    tracing::debug!["hist_extras.last_price {}",hist_extras.last_price];
+                    *t_slice=ret_slice;
+                }
+                _=>{
+                }
+            };
+        }else{
+            let _res = hist_plot
+                .kline_plot
+                .show_live(ui, plot_extras, hist_ad, None, None, None, Some(&mut hist_extras.last_price), Some(&mut hist_extras.symbol_info));
+        };
 
         if hist_plot.intv != hist_plot.last_intv {
             hist_plot.last_intv = hist_plot.intv;
@@ -3266,7 +3325,12 @@ impl HistPlot {
                     });
                     let _res = cli_chan.send(msg);
                     hist_plot.trade_time = new_trade_time;
+                    hist_plot.trade_slice_loaded=true;
                     //FIXME click here
+                    //
+                    //
+                    //
+                    //
                 }
                 ui.add(
                     egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s)

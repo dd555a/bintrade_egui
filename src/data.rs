@@ -492,14 +492,13 @@ impl FatKline {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Kline {
-    //(time o h l c volume)
+    //NOTE (time o h l c volume)
     pub kline: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>,
 }
 impl Kline {
     pub fn new_sql(k: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>) -> Self {
         Self { kline: k }
     }
-    #[instrument(level = "trace")]
     pub fn split(
         &self,
         no_splits: usize,
@@ -508,10 +507,15 @@ impl Kline {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Klines {
     start_time: chrono::NaiveDateTime,
     end_time: chrono::NaiveDateTime,
+
+    pub asset_pair:String,
+    pub s1_string:String,
+    pub s2_string:String,
+
     full_dat: HashMap<Intv, FatKline>,
     pub dat: HashMap<Intv, Kline>,
 }
@@ -522,8 +526,7 @@ impl Klines {
         Self {
             end_time,
             start_time,
-            full_dat: HashMap::new(),
-            dat: HashMap::new(),
+            ..Default::default()
         }
     }
     pub fn insert(&mut self, i: &Intv, kl: Kline) {
@@ -576,6 +579,8 @@ pub struct AssetData {
     pub downloaded_assets: Vec<DLAsset>,
     pub temp_kline: Option<Klines>,
     pub load_status: HashMap<String, bool>,
+
+
 
     //NOTE live only
     pub live_asset_symbol_changed:(bool,String),
@@ -1248,6 +1253,22 @@ pub async fn validate_asset_binance(
         None => Ok(false),
     }
 }
+pub async fn get_asset_bases_binance2(
+    symbol: &str,
+    meta_pool:&Pool<Sqlite>
+)->Result<Option<(String,String)>>{
+    let q = &format![
+        "SELECT [BaseAsset], [QouteAsset] FROM assets WHERE Asset = '{}';",
+        symbol
+    ];
+    let (base,qoute): (Option<String>, Option<String>) =
+        sqlx::query_as(q).fetch_one(meta_pool).await?;
+    let res=match (base,qoute){
+        (Some(bb), Some(qq))=>Some((bb,qq)),
+        _=>None
+    };
+    Ok(res)
+}
 
 pub async fn get_asset_bases_binance(
     symbol: &str,
@@ -1331,6 +1352,10 @@ impl SQLConn {
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
 
+        let bases=get_asset_bases_binance2(symbol, &meta_pool).await?;
+
+        
+
         let elapsed = now.elapsed();
         tracing::info!("load_part_data2 Elapsed pool connect: {:?}", elapsed);
 
@@ -1365,8 +1390,12 @@ impl SQLConn {
         if let Some(_) = ad.kline_data.get(symbol) {
             ad.kline_data.remove(symbol);
         };
+        if let Some((s1,s2)) = bases {
+            klines.asset_pair=symbol.to_string();
+            klines.s1_string=s1;
+            klines.s2_string=s2;
+        };
         ad.kline_data.insert(symbol.to_string(), klines);
-
         let elapsed = now.elapsed();
         tracing::info!("load_part_data2 Elapsed total: {:?}", elapsed);
         Ok(())

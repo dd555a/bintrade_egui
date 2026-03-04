@@ -1,6 +1,5 @@
-use crate::data::{AssetData, Intv};
+use crate::data::{ Intv};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use tracing::instrument;
@@ -516,7 +515,6 @@ fn hist_eval_kline(
     asset2: f64,
     eval_mode: i32,
 ) -> Option<(chrono::NaiveDateTime, f64, f64, Order)> {
-    //TODO get this working then fix the performance bullshit with the .clone()
     for k in kline.iter() {
         let (t, o, h, l, c, _) = *k;
         let result = eval_order_basic(h, o, c, l, asset1, asset2, order, eval_mode);
@@ -530,7 +528,7 @@ fn hist_eval_kline(
             }
             None => continue,
         }
-    }
+    };
     return None;
 }
 
@@ -560,7 +558,6 @@ pub struct HistTrade {
     pub current_data_end_index: usize,
 
     pub current_index: usize,
-    asset_data: Arc<Mutex<AssetData>>,
     current_order: Option<Order>,
 }
 impl Default for HistTrade {
@@ -568,10 +565,9 @@ impl Default for HistTrade {
         Self {
             asset_pair: "BTCUSDT".to_string(),
             start_time: 0,
-            asset_data: Arc::new(Mutex::new(AssetData::new(666))),
 
-            asset1: 10_000.0,
-            asset2: 0.0,
+            asset1: 0.0,
+            asset2: 10_000.0,
             last_ch_a1: 0.0,
             last_ch_a2: 0.0,
 
@@ -592,54 +588,25 @@ impl Default for HistTrade {
     }
 }
 impl HistTrade {
-    pub fn new(asset_data: Arc<Mutex<AssetData>>) -> Self {
+    pub fn new(asset_pair:String) -> Self {
         Self {
-            asset_data,
+            asset_pair,
             ..Default::default()
         }
     }
     pub fn place_order(&mut self, order: &Order) {
         self.current_order = Some(*order);
     }
-    pub fn start(asset_pair: String, start_time: i64, asset_data: Arc<Mutex<AssetData>>) -> Self {
-        Self {
-            asset_pair,
-            start_time,
-            asset_data,
-            ..Default::default()
-        }
-    }
-    pub fn trade_forward(&mut self, next_wicks: u16, eval_mode: i32) -> Result<()> {
-        let ad = Arc::clone(&self.asset_data);
-        let asset_data = ad.lock().expect("(TRADE) ad mutex poisoned");
-        let trade_slice = asset_data.find_slice_n(
-            &self.asset_pair,
-            &self.current_intv,
-            &self.trade_time,
-            next_wicks,
-        );
-        let ts = match trade_slice {
-            Some(t) => {
-                tracing::debug!["Trade slice start time {}", t[0].0];
-                t
-            }
+    pub fn trade_forward(&mut self, trade_slice:&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)], eval_mode: i32) -> Result<()> {
+        let o=match self.current_order {
+            Some(o) => o,
             None => {
-                tracing::error!["Trade slice not found"];
+                tracing::trace!["No order set"];
                 return Ok(());
             }
         };
-        let o: Order;
-        match self.current_order {
-            Some(oo) => o = oo,
-            None => {
-                tracing::error!["No order set"];
-                return Ok(());
-            }
-        }
         tracing::debug!["HistTradingRunner {:?}", self.trade_time];
-        //TODO replace this with index
-        let result = hist_eval_kline(ts, o, self.asset1, self.asset2, eval_mode);
-        tracing::debug!["Hist_eval_kline result: {:?}", result];
+        let result = hist_eval_kline(trade_slice, o, self.asset1, self.asset2, eval_mode);
         match result {
             Some((transaction_time, asset1, asset2, order)) => {
                 tracing::debug![
@@ -649,7 +616,9 @@ impl HistTrade {
                     asset2,
                     order
                 ];
+                self.calculate_change();
                 let tr = TradeRecord {
+                    asset_pair:self.asset_pair.clone(),
                     transaction_time,
                     trades_made: self.trades_made,
                     asset1_held: self.asset1_held,
@@ -703,8 +672,9 @@ impl HistTrade {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct TradeRecord {
+    asset_pair:String,
     transaction_time: chrono::NaiveDateTime,
     trades_made: i32,
     asset1_held: bool,
@@ -717,8 +687,9 @@ pub struct TradeRecord {
 }
 
 impl TradeRecord {
-    pub fn new() -> Self {
+    pub fn new(pair:&str) -> Self {
         TradeRecord {
+            asset_pair:pair.to_string(),
             transaction_time: chrono::NaiveDateTime::default(),
             trades_made: 0,
             asset1_held: false,
