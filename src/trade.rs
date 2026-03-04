@@ -1,4 +1,4 @@
-use crate::data::{ Intv};
+use crate::data::Intv;
 use serde::{Deserialize, Serialize};
 
 use anyhow::Result;
@@ -321,7 +321,9 @@ pub enum Quant {
     Q75,
     Q50,
     Q25,
-    Q { q: f64 },
+    Q {
+        q: f64,
+    },
 }
 impl Quant {
     pub const fn get_f64(&self) -> f64 {
@@ -528,7 +530,7 @@ fn hist_eval_kline(
             }
             None => continue,
         }
-    };
+    }
     return None;
 }
 
@@ -588,7 +590,7 @@ impl Default for HistTrade {
     }
 }
 impl HistTrade {
-    pub fn new(asset_pair:String) -> Self {
+    pub fn new(asset_pair: String) -> Self {
         Self {
             asset_pair,
             ..Default::default()
@@ -597,8 +599,12 @@ impl HistTrade {
     pub fn place_order(&mut self, order: &Order) {
         self.current_order = Some(*order);
     }
-    pub fn trade_forward(&mut self, trade_slice:&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)], eval_mode: i32) -> Result<()> {
-        let o=match self.current_order {
+    pub fn trade_forward(
+        &mut self,
+        trade_slice: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
+        eval_mode: i32,
+    ) -> Result<()> {
+        let o = match self.current_order {
             Some(o) => o,
             None => {
                 tracing::trace!["No order set"];
@@ -618,7 +624,7 @@ impl HistTrade {
                 ];
                 self.calculate_change();
                 let tr = TradeRecord {
-                    asset_pair:self.asset_pair.clone(),
+                    asset_pair: self.asset_pair.clone(),
                     transaction_time,
                     trades_made: self.trades_made,
                     asset1_held: self.asset1_held,
@@ -674,7 +680,7 @@ impl HistTrade {
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct TradeRecord {
-    asset_pair:String,
+    asset_pair: String,
     transaction_time: chrono::NaiveDateTime,
     trades_made: i32,
     asset1_held: bool,
@@ -687,9 +693,9 @@ pub struct TradeRecord {
 }
 
 impl TradeRecord {
-    pub fn new(pair:&str) -> Self {
+    pub fn new(pair: &str) -> Self {
         TradeRecord {
-            asset_pair:pair.to_string(),
+            asset_pair: pair.to_string(),
             transaction_time: chrono::NaiveDateTime::default(),
             trades_made: 0,
             asset1_held: false,

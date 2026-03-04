@@ -22,19 +22,19 @@ use binance::api::Binance as Binance2;
 use derive_debug::Dbg;
 use futures::StreamExt;
 use num::FromPrimitive;
+use num::ToPrimitive;
 use reqwest;
 use rust_decimal::Decimal;
 use serde_json::json;
 use tokio::sync::watch::{Receiver, Sender};
 use tracing::instrument;
 use websockets::WebSocket;
-use num::ToPrimitive;
 
 use crate::data::AssetData;
 use crate::data::Intv;
 use crate::data::Kline as KlineMine;
 use crate::data::Klines;
-use crate::data::{validate_asset_dl,validate_asset_binance, get_asset_bases_binance};
+use crate::data::{get_asset_bases_binance, validate_asset_binance, validate_asset_dl};
 use crate::trade::Order;
 use crate::{BinInstructs, BinResponse, GeneralError};
 
@@ -309,7 +309,6 @@ impl BinWSResponse {
                     "\x1b[34m (AGGTrade Current linux epoch - event_time)\x1b[0m: {}ms",
                     t_now - event_time
                 ];
-
 
                 Ok((
                     symbol,
@@ -683,16 +682,16 @@ pub struct BinanceClient {
     ws_buffer_size: usize,
     ws_tick: WSTick,
 
-    api_keys_valid:bool,
+    api_keys_valid: bool,
     account_info: Option<AccountInformation>,
     exchange_info: Vec<SymbolInfo>,
-    live_ad:Arc<Mutex<AssetData>>,
+    live_ad: Arc<Mutex<AssetData>>,
 
-    current_symbol:String,
-    base_balances:(f64, f64),
-    qoute_balances:(f64, f64),
-    balances:HashMap<String, (f64,f64)>,
-    current_symbol_bases:(String,String),
+    current_symbol: String,
+    base_balances: (f64, f64),
+    qoute_balances: (f64, f64),
+    balances: HashMap<String, (f64, f64)>,
+    current_symbol_bases: (String, String),
 }
 
 impl Default for BinanceClient {
@@ -707,13 +706,13 @@ impl Default for BinanceClient {
             account_info: None,
             exchange_info: vec![],
             live_ad: Arc::new(Mutex::new(AssetData::default())),
-            api_keys_valid:false,
+            api_keys_valid: false,
 
-            current_symbol:String::default(),
-            base_balances:(0.0, 0.0),
-            qoute_balances:(0.0, 0.0),
-            balances:HashMap::new(),
-            current_symbol_bases:(String::default(),String::default()),
+            current_symbol: String::default(),
+            base_balances: (0.0, 0.0),
+            qoute_balances: (0.0, 0.0),
+            balances: HashMap::new(),
+            current_symbol_bases: (String::default(), String::default()),
         }
     }
 }
@@ -724,7 +723,7 @@ impl BinanceClient {
         sec_key: Option<String>,
         collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         live_price_watch: Arc<Mutex<f64>>,
-        live_ad: Arc<Mutex<AssetData>>
+        live_ad: Arc<Mutex<AssetData>>,
     ) -> Self {
         Self {
             binance_client: Binance::default(),
@@ -823,11 +822,14 @@ impl BinanceClient {
     ) -> Result<()> {
         tracing::trace!["Get init client called!"];
 
-        let res=validate_asset_binance(symbol).await?;
-        match res{
-            true=>(),
-            false=>{
-                tracing::error!["get_initial_data: unable to find asset {} on Binance", &symbol];
+        let res = validate_asset_binance(symbol).await?;
+        match res {
+            true => (),
+            false => {
+                tracing::error![
+                    "get_initial_data: unable to find asset {} on Binance",
+                    &symbol
+                ];
                 return Ok(());
             }
         };
@@ -835,32 +837,36 @@ impl BinanceClient {
         let client = reqwest::Client::new();
         for i in Intv::iter() {
             let k = get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
-            let kl=match k{
+            let kl = match k {
                 Ok(kli) => kli,
-                Err(e)=> {
-                    tracing::error!["Unable to get inital kline for interval: {} {}", i.to_str(),e];
-                    let mut kl=vec![];
-                    for n in 0..5{
-                        let res=get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
-                        match res{
-                            Ok(k)=>{
-                                kl =k;
+                Err(e) => {
+                    tracing::error![
+                        "Unable to get inital kline for interval: {} {}",
+                        i.to_str(),
+                        e
+                    ];
+                    let mut kl = vec![];
+                    for n in 0..5 {
+                        let res = get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
+                        match res {
+                            Ok(k) => {
+                                kl = k;
                                 break;
-                            },
-                            Err(e)=>{
-                                tracing::error!["unable to get inital kline {}, retry {}/5",e, n];
+                            }
+                            Err(e) => {
+                                tracing::error!["unable to get inital kline {}, retry {}/5", e, n];
                             }
                         };
-                    };
+                    }
                     kl
                 }
             };
             let kl_0 = GetKline::to_kline(&kl);
             tracing::debug!["GET REQUEST KLINE INSERTED for {:?}", &i];
             klines.insert(&i, kl_0);
-        };
+        }
         //FIXME
-        if self.api_keys_valid == true{
+        if self.api_keys_valid == true {
             self.get_balances(&symbol);
         };
 
@@ -869,47 +875,50 @@ impl BinanceClient {
             .expect("Poisoned live AD mutex at get_initial_data");
 
         live_b.kline_data.insert(symbol.to_string(), klines);
-        live_b.acc_balances=self.balances.clone();
-        live_b.current_pair_strings=self.current_symbol_bases.clone();
-        live_b.current_pair_free_balances=(self.base_balances.0, self.qoute_balances.1);
-        live_b.current_pair_locked_balances=(self.base_balances.1, self.qoute_balances.0);
+        live_b.acc_balances = self.balances.clone();
+        live_b.current_pair_strings = self.current_symbol_bases.clone();
+        live_b.current_pair_free_balances = (self.base_balances.0, self.qoute_balances.1);
+        live_b.current_pair_locked_balances = (self.base_balances.1, self.qoute_balances.0);
 
         Ok(())
     }
-    async fn get_balances(&mut self, symbol:&str)->Result<()>{
-        let res=self.binance_client.request(GetAccountRequest{}).await;
-        let mut balances:HashMap<String,(f64,f64)>=HashMap::new();
-        match res{
-            Ok(acc)=>{
-                acc.balances.iter().map(| a |{
-                    let free=match a.free.to_f64(){
-                        Some(res)=>res,
+    async fn get_balances(&mut self, symbol: &str) -> Result<()> {
+        let res = self.binance_client.request(GetAccountRequest {}).await;
+        let mut balances: HashMap<String, (f64, f64)> = HashMap::new();
+        match res {
+            Ok(acc) => {
+                acc.balances.iter().map(|a| {
+                    let free = match a.free.to_f64() {
+                        Some(res) => res,
                         None => 0.0,
                     };
-                    let locked=match a.locked.to_f64(){
-                        Some(res)=>res,
+                    let locked = match a.locked.to_f64() {
+                        Some(res) => res,
                         None => 0.0,
                     };
                     balances.insert(a.asset.clone(), (free, locked))
                 });
-            } 
-            Err(e) =>{
+            }
+            Err(e) => {
                 tracing::error!["Get balances error: {}", e];
-
             }
         };
-        let res=get_asset_bases_binance(&symbol).await?;
-        match res{
-            Some((base,qoute))=>{
-                let (base_free, base_locked)=balances.get(&base).ok_or(anyhow!["Base asset: {} not found in balances!", &base])?;
-                let (qoute_free, qoute_locked)=balances.get(&qoute).ok_or(anyhow!["Base asset: {} not found in balances!", &qoute])?;
-                self.current_symbol=symbol.to_string();
-                self.base_balances=(*base_free, *base_locked);
-                self.qoute_balances=(*qoute_free, *qoute_locked);
-                self.balances=balances;
-                self.current_symbol_bases=(base,qoute);
+        let res = get_asset_bases_binance(&symbol).await?;
+        match res {
+            Some((base, qoute)) => {
+                let (base_free, base_locked) = balances
+                    .get(&base)
+                    .ok_or(anyhow!["Base asset: {} not found in balances!", &base])?;
+                let (qoute_free, qoute_locked) = balances
+                    .get(&qoute)
+                    .ok_or(anyhow!["Base asset: {} not found in balances!", &qoute])?;
+                self.current_symbol = symbol.to_string();
+                self.base_balances = (*base_free, *base_locked);
+                self.qoute_balances = (*qoute_free, *qoute_locked);
+                self.balances = balances;
+                self.current_symbol_bases = (base, qoute);
             }
-            None =>()
+            None => (),
         };
         Ok(())
     }
@@ -944,13 +953,19 @@ impl BinanceClient {
         Ok(())
     }
     #[instrument(level = "trace")]
-    pub async fn get_ws_params(&mut self, symbol:&str, default_intv:&Intv)->Result<HashMap<String, Vec<String>>>{
-        let mut sub_params=vec![
-            format!["{}@aggTrade", symbol.to_lowercase()]
-        ];
+    pub async fn get_ws_params(
+        &mut self,
+        symbol: &str,
+        default_intv: &Intv,
+    ) -> Result<HashMap<String, Vec<String>>> {
+        let mut sub_params = vec![format!["{}@aggTrade", symbol.to_lowercase()]];
         for i in Intv::iter() {
-            sub_params.push(format!["{}@kline_{}", symbol.to_lowercase(), i.to_bin_str()])
-        };
+            sub_params.push(format![
+                "{}@kline_{}",
+                symbol.to_lowercase(),
+                i.to_bin_str()
+            ])
+        }
         let mut params: HashMap<String, Vec<String>> = HashMap::new();
         params.insert(symbol.to_string(), sub_params);
 
@@ -960,9 +975,12 @@ impl BinanceClient {
         match res {
             Ok(_) => {
                 tracing::trace!["Initial data for BTCUSDT received"];
-                let mut ad=self.live_ad.lock().expect("get_ws_params: Unable to unlock mutex");
-                ad.live_asset_symbol_changed=(true, symbol.to_string());
-            },
+                let mut ad = self
+                    .live_ad
+                    .lock()
+                    .expect("get_ws_params: Unable to unlock mutex");
+                ad.live_asset_symbol_changed = (true, symbol.to_string());
+            }
             Err(e) => tracing::error!["Initial data connection failed, ERROR: {}", e],
         };
 
@@ -1112,24 +1130,32 @@ impl BinanceClient {
                 };
                 resp
             }
-            BinInstructs::ChangeLiveAsset{ symbol: ref s, defualt_symbol: ref ss } => {
-                let res=self.get_ws_params(s, &Intv::default()).await;
+            BinInstructs::ChangeLiveAsset {
+                symbol: ref s,
+                defualt_symbol: ref ss,
+            } => {
+                let res = self.get_ws_params(s, &Intv::default()).await;
                 let params = match res {
                     Ok(params) => params,
                     Err(e) => {
                         let string_error = format!["{}", &e];
                         tracing::error!(
                             "{}",
-                            anyhow!["Unable to change asset: {}, connecting with default parameters", string_error]
+                            anyhow![
+                                "Unable to change asset: {}, connecting with default parameters",
+                                string_error
+                            ]
                         );
 
-                        let symbol=ss;
-                        let mut sub_params=vec![
-                            format!["{}@aggTrade", symbol.to_lowercase()]
-                        ];
+                        let symbol = ss;
+                        let mut sub_params = vec![format!["{}@aggTrade", symbol.to_lowercase()]];
                         for i in Intv::iter() {
-                            sub_params.push(format!["{}@kline_{}", symbol.to_lowercase(), i.to_bin_str()])
-                        };
+                            sub_params.push(format![
+                                "{}@kline_{}",
+                                symbol.to_lowercase(),
+                                i.to_bin_str()
+                            ])
+                        }
                         let mut params: HashMap<String, Vec<String>> = HashMap::new();
                         params.insert(symbol.to_string(), sub_params);
                         params
@@ -1137,26 +1163,21 @@ impl BinanceClient {
                 };
                 self.disconnect_ws().await;
 
-                let res=self.connect_ws(params).await;
+                let res = self.connect_ws(params).await;
                 let resp = match res {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", &e];
-                        tracing::error!(
-                            "{}",
-                            anyhow!["Unable to change asset: {}", string_error]
-                        );
+                        tracing::error!("{}", anyhow!["Unable to change asset: {}", string_error]);
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
                 resp
-
             }
             BinInstructs::None => BinResponse::None,
         }
     }
 }
-
 
 #[instrument(level = "trace")]
 fn parse_order_to_ba(order: &Order) -> (OrderType, OrderSide, f64, f64, f64) {

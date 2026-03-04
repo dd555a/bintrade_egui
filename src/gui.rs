@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap,HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io::{Read, Write};
 use std::num::ParseIntError;
@@ -20,7 +20,7 @@ use egui::{Color32, ComboBox, RichText, epaint};
 use egui_extras::{Column, TableBuilder};
 use egui_plot_bintrade::{
     AxisHints, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, HPlacement,
-    Legend, Plot, LineStyle as LineStyleEgui
+    Legend, LineStyle as LineStyleEgui, Plot,
 };
 use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
@@ -32,10 +32,8 @@ use magic_crypt::{MagicCryptTrait, new_magic_crypt};
 
 use crate::conn::{KlineTick, SymbolOutput};
 use crate::data::{AssetData, DLAsset, Intv, Klines};
-use crate::trade::{
-    HistTrade, LimitStatus, Order, Quant, StopStatus,
-};
-use crate::{ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse, BinInstructs};
+use crate::trade::{HistTrade, LimitStatus, Order, Quant, StopStatus};
+use crate::{BinInstructs, ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse};
 
 const WICKS_VISIBLE: usize = 90;
 const NAVI_WICKS_DEFAULT: u16 = 30;
@@ -44,12 +42,6 @@ const DEFAULT_TRADE_WICKS: u16 = 30;
 const BACKLOAD_WICKS: i64 = 720;
 
 const SETTINGS_SAVE_PATH: &str = "./Settings.bin";
-
-
-
-
-
-
 
 #[derive(Dbg, Clone)]
 struct KlinePlot {
@@ -88,8 +80,7 @@ struct KlinePlot {
     y_increment: f64,
     x_bounds_set: bool,
 
-    live_asset_changed:bool
-
+    live_asset_changed: bool,
 }
 impl Default for KlinePlot {
     fn default() -> Self {
@@ -126,7 +117,7 @@ impl Default for KlinePlot {
             y_increment: 0.001,
             x_bounds_set: false,
 
-            live_asset_changed:false
+            live_asset_changed: false,
         }
     }
 }
@@ -149,29 +140,35 @@ impl KlinePlot {
         plot_extras: &PlotExtras,
         live_ad: Arc<Mutex<AssetData>>,
         collected_data: Option<&HashMap<String, SymbolOutput>>,
-        live_info:Option<&mut LiveInfo>,
-        return_wicks:Option<usize>,
-        last_price_hist:Option<&mut f64>,
-        hist_symbol_info:Option<&mut (String, String, String)>
-
+        live_info: Option<&mut LiveInfo>,
+        return_wicks: Option<usize>,
+        last_price_hist: Option<&mut f64>,
+        hist_symbol_info: Option<&mut (String, String, String)>,
     ) -> Option<Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>> {
+
         let ad = live_ad.lock().expect("Live AD mutex locked");
-        let ret=match return_wicks{
-            Some(ret_wicks) =>{
-                let ret=ad.kline_data.get(&self.symbol);
-                match ret{
-                    Some(klines)=>{
-                        let ret2=klines.dat.get(&self.intv);
-                        match ret2{
-                            Some(kline)=>Some(kline.kline[ret_wicks..].to_vec()),
-                            None =>{
-                                tracing::error!["Unable to find interval: {} in ad for ret_wicks", &self.intv.to_str()];
+        let ret = match return_wicks {
+            Some(ret_wicks) => {
+                let ret = ad.kline_data.get(&self.symbol);
+                match ret {
+                    Some(klines) => {
+                        let ret2 = klines.dat.get(&self.intv);
+                        match ret2 {
+                            Some(kline) => Some(kline.kline[ret_wicks..].to_vec()),
+                            None => {
+                                tracing::error![
+                                    "Unable to find interval: {} in ad for ret_wicks",
+                                    &self.intv.to_str()
+                                ];
                                 None
                             }
                         }
                     }
                     None => {
-                        tracing::error!["Unable to find symbol: {} in ad for ret_wicks", &self.symbol];
+                        tracing::error![
+                            "Unable to find symbol: {} in ad for ret_wicks",
+                            &self.symbol
+                        ];
                         None
                     }
                 }
@@ -180,17 +177,22 @@ impl KlinePlot {
         };
 
         //NOTE AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-        if let (Some(last_price_h),Some(hist_symbol_inf))=(last_price_hist, hist_symbol_info){
-            if let Some(klines)=&ad.kline_data.get(&self.symbol){
-                hist_symbol_inf.0=klines.asset_pair.clone();
-                hist_symbol_inf.1=klines.s1_string.clone();
-                hist_symbol_inf.2=klines.s2_string.clone();
-                if let Some(kl)=klines.dat.get(&self.intv){
-                    if kl.kline.is_empty() ==false{
-                        *last_price_h=kl.kline[kl.kline.len()-1].4;
+        if let (Some(last_price_h), Some(hist_symbol_inf)) = (last_price_hist, hist_symbol_info) {
+            if let Some(klines) = &ad.kline_data.get(&self.symbol) {
+                hist_symbol_inf.0 = klines.asset_pair.clone();
+                hist_symbol_inf.1 = klines.s1_string.clone();
+                hist_symbol_inf.2 = klines.s2_string.clone();
+                if let Some(kl) = klines.dat.get(&self.intv) {
+                    if kl.kline.is_empty() == false {
+                        *last_price_h = kl.kline[kl.kline.len() - 1].4;
                     };
                 };
             };
+        };
+
+        if let Some(live_inf)=live_info{
+            //FIXME here... DO IT
+
         };
 
         let symbol = self.symbol.clone();
@@ -453,10 +455,9 @@ impl KlinePlot {
         timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
         data: &SymbolOutput,
     ) -> Result<()> {
-
-        if ad.live_asset_symbol_changed.0 == true{
-            self.symbol=ad.live_asset_symbol_changed.1.clone();
-            self.live_asset_changed=true;
+        if ad.live_asset_symbol_changed.0 == true {
+            self.symbol = ad.live_asset_symbol_changed.1.clone();
+            self.live_asset_changed = true;
         };
 
         let mut k = if let Some(ck) = data.closed_klines.get(&intv) {
@@ -1115,9 +1116,17 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 let p_extras: PlotExtras = PlotExtras::None;
                 let mut live_plot = live_plot_l.lock().expect("Live plot mutex posoned!");
-                let mut live_info= live_info_l.lock().expect("Live plot mutex posoned!");
+                let mut live_info = live_info_l.lock().expect("Live plot mutex posoned!");
 
-                LivePlot::show(&mut live_plot, &p_extras, chan, &live_price, &c_data, ui, &mut live_info);
+                LivePlot::show(
+                    &mut live_plot,
+                    &p_extras,
+                    chan,
+                    &live_price,
+                    &c_data,
+                    ui,
+                    &mut live_info,
+                );
                 let mut man_orders = self
                     .man_orders
                     .get_mut(&pane.nr)
@@ -1144,11 +1153,14 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     None => None,
                 };
                 let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
-                let ts=self.trade_slice.clone();
+                let ts = self.trade_slice.clone();
 
-                let mut t_slice= ts.lock().expect("Trade slice!");
+                let mut t_slice = ts.lock().expect("Trade slice!");
 
-                let mut hist_extras = self.hist_extras.get_mut(&pane.nr).expect("Hist plot extras struct not found!");
+                let mut hist_extras = self
+                    .hist_extras
+                    .get_mut(&pane.nr)
+                    .expect("Hist plot extras struct not found!");
                 let p_extras: PlotExtras = PlotExtras::None;
                 let mut h_plot = self
                     .hist_plot
@@ -1281,22 +1293,23 @@ fn create_tree() -> egui_tiles::Tree<Pane> {
 enum PlotExtras {
     None,
     OrderHlines(Vec<HLine>),
-    TradeSlice(Vec<(chrono::NaiveDateTime, f64,f64,f64,f64,f64)>)
+    TradeSlice(Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>),
 }
 
 #[allow(unused)]
 #[derive(PartialEq, Debug, Clone, Default)]
-pub struct LiveInfo{
-    pub live_asset_symbol_changed:(bool,String),
+pub struct LiveInfo {
+    pub live_asset_symbol_changed: (bool, String),
     pub acc_balances: HashMap<String, (f64, f64)>,
-    pub current_pair_strings:(String, String),
-    pub current_pair_free_balances:(f64, f64),
-    pub current_pair_locked_balances:(f64, f64),
+    pub current_pair_strings: (String, String),
+    pub current_pair_free_balances: (f64, f64),
+    pub current_pair_locked_balances: (f64, f64),
+    pub live_orders: HashMap<i32, (Order, bool)>,
 }
 
 #[derive(Dbg)]
 pub struct DesktopApp {
-    trade_slice:Rc<Mutex<Vec<(chrono::NaiveDateTime, f64,f64,f64,f64,f64)>>>,
+    trade_slice: Rc<Mutex<Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>>>,
 
     simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
@@ -1394,7 +1407,7 @@ impl Default for DesktopApp {
         let asset_data = Arc::new(Mutex::new(AssetData::new(6661)));
         let hist_asset_data = Arc::new(Mutex::new(AssetData::new(6662)));
         let cd = Arc::new(Mutex::new(HashMap::new()));
-        let trade_slice=Rc::new(Mutex::new(vec![]));
+        let trade_slice = Rc::new(Mutex::new(vec![]));
 
         let (_, lp_chan_recv) = watch::channel(0.0);
 
@@ -1403,7 +1416,6 @@ impl Default for DesktopApp {
         man_o_default.insert(0, man_o);
 
         Self {
-
             trade_slice,
 
             last_resp: Some(ClientResponse::None),
@@ -1557,7 +1569,8 @@ impl eframe::App for DesktopApp {
                                         settings.defalt_next_wicks,
                                     ),
                                 );
-                                self.hist_extras.insert(self.pane_number+1, HistExtras::default());
+                                self.hist_extras
+                                    .insert(self.pane_number + 1, HistExtras::default());
 
                                 new_child = tree.tiles.insert_pane(Pane::new(
                                     self.pane_number + 1,
@@ -1614,63 +1627,17 @@ impl eframe::App for DesktopApp {
             let tt = self.tree.clone();
             let mut tree = tt.lock().expect("Posoned mutex on pane tree!");
             tree.ui(self, ui);
-
         });
     }
 }
 
-pub fn password_ui(ui: &mut egui::Ui, password: &mut String) -> egui::Response {
-    // This widget has its own state — show or hide password characters (`show_plaintext`).
-    // In this case we use a simple `bool`, but you can also declare your own type.
-    // It must implement at least `Clone` and be `'static`.
-    // If you use the `persistence` feature, it also must implement `serde::{Deserialize, Serialize}`.
-
-    // Generate an id for the state
-    let state_id = ui.id().with("show_plaintext");
-
-    // Get state for this widget.
-    // You should get state by value, not by reference to avoid borrowing of [`Memory`].
-    let mut show_plaintext = ui.data_mut(|d| d.get_temp::<bool>(state_id).unwrap_or(false));
-
-    // Process ui, change a local copy of the state
-    // We want TextEdit to fill entire space, and have button after that, so in that case we can
-    // change direction to right_to_left.
-    let result = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        // Toggle the `show_plaintext` bool with a button:
-        let response = ui
-            .selectable_label(show_plaintext, "👁")
-            .on_hover_text("Show/hide password");
-
-        if response.clicked() {
-            show_plaintext = !show_plaintext;
-        }
-
-        // Show the password field:
-        ui.add_sized(
-            ui.available_size(),
-            egui::TextEdit::singleline(password).password(!show_plaintext),
-        );
-    });
-
-    // Store the (possibly changed) state:
-    ui.data_mut(|d| d.insert_temp(state_id, show_plaintext));
-
-    // All done! Return the interaction response so the user can check what happened
-    // (hovered, clicked, …) and maybe show a tooltip:
-    result.response
-}
-
-//ui.add(password(&mut my_password));
-pub fn password(password: &mut String) -> impl egui::Widget + '_ {
-    move |ui: &mut egui::Ui| password_ui(ui, password)
-}
 
 #[derive(Dbg, Clone)]
 struct ManualOrders {
     man_orders: Option<HistTrade>,
     active_orders: Option<Vec<Order>>,
 
-    hotkeys:bool,
+    hotkeys: bool,
 
     current_symbol: String,
 
@@ -1693,9 +1660,8 @@ struct ManualOrders {
     asset1_name: String,
     asset2_name: String,
 
-
-    price:f64,
-    stop_price:f64,
+    price: f64,
+    stop_price: f64,
 
     last_price_buffer: Vec<f64>,
     last_price_buffer_size: usize,
@@ -1710,7 +1676,7 @@ impl Default for ManualOrders {
         Self {
             man_orders: None,
             active_orders: None,
-            hotkeys:false,
+            hotkeys: false,
 
             current_symbol: "BTCUSDT".to_string(),
 
@@ -1743,8 +1709,8 @@ impl Default for ManualOrders {
             last_price_s: 0.0,
             last_id: 0,
 
-            stop_price:0.0,
-            price:0.0,
+            stop_price: 0.0,
+            price: 0.0,
 
             plot_extras: None,
         }
@@ -1753,12 +1719,13 @@ impl Default for ManualOrders {
 
 #[instrument(level = "trace")]
 fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLine>) {
-   hlines.clear();
-   let _=orders
+    hlines.clear();
+    let _ = orders
         .iter()
         .map(|(_, (order, active))| {
-            let mut hh=HlineType::hline_order(order, *active);
-            hlines.append(&mut hh);})
+            let mut hh = HlineType::hline_order(order, *active);
+            hlines.append(&mut hh);
+        })
         .collect::<Vec<_>>();
 }
 
@@ -1788,29 +1755,29 @@ impl ManualOrders {
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
-        live_info:Option<&LiveInfo>,
-        trade_slice:Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
-        symbol_info:Option<&(String,String,String)>,
-    ){
+        live_info: Option<&LiveInfo>,
+        trade_slice: Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
+        symbol_info: Option<&(String, String, String)>,
+    ) {
         match hlines {
             Some(hline_ref) => link_hline_orders(&man_orders.orders, hline_ref),
             None => {
                 tracing::debug!["Hlines not available!"];
             }
         };
-        tracing::trace!["Manual orders last_price {}",&last_price];
+        tracing::trace!["Manual orders last_price {}", &last_price];
 
-        match (hist_trade, trade_slice){
-            (Some( mut h_trade ), Some( t_slice ))=>{
-                man_orders.asset1=h_trade.asset1;
-                man_orders.asset2=h_trade.asset2;
-                if let Some(symbol_inf)= symbol_info{
+        match (hist_trade, trade_slice) {
+            (Some(mut h_trade), Some(t_slice)) => {
+                man_orders.asset1 = h_trade.asset1;
+                man_orders.asset2 = h_trade.asset2;
+                if let Some(symbol_inf) = symbol_info {
                     //NOTE symbol can also be gotten here
-                    man_orders.asset1_name=symbol_inf.1.clone();
-                    man_orders.asset2_name=symbol_inf.2.clone();
+                    man_orders.asset1_name = symbol_inf.1.clone();
+                    man_orders.asset2_name = symbol_inf.2.clone();
                 };
-                if let Some((o,active))=man_orders.orders.get(&man_orders.last_id){
-                    if *active==true{
+                if let Some((o, active)) = man_orders.orders.get(&man_orders.last_id) {
+                    if *active == true {
                         let res1 = man_orders.check_order_price(o, &last_price);
                         match res1 {
                             Ok(_) => {
@@ -1827,19 +1794,20 @@ impl ManualOrders {
                         };
                     };
                 };
-                let res=h_trade.trade_forward(t_slice,0);
-                match res{
-                    Ok(_)=>(),
-                    Err(e)=>{
+                let res = h_trade.trade_forward(t_slice, 0);
+                match res {
+                    Ok(_) => (),
+                    Err(e) => {
                         tracing::error!["Trade forward error: {}", e];
                     }
                 };
             }
-            (None, None)=>{
+            (None, None) => {
                 //FIXME place live orders here
+                //
             }
-            _=>{
-                //???
+            _ => {
+                tracing::error!["This shouldn't happen manual_orders"]
             }
         };
         egui::Grid::new("Current symboll:")
@@ -1861,13 +1829,17 @@ impl ManualOrders {
             .show(ui, |ui| {
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
-                    egui::Label::new(RichText::new(format!["{}:{}", man_orders.asset1_name, man_orders.asset1])
-                        .color(Color32::ORANGE)),
+                    egui::Label::new(
+                        RichText::new(format!["{}:{}", man_orders.asset1_name, man_orders.asset1])
+                            .color(Color32::from_rgb(255, 207, 38)),
+                    ),
                 );
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
-                    egui::Label::new(RichText::new(format!["{}:{}", man_orders.asset2_name, man_orders.asset2])
-                        .color(Color32::GREEN)),
+                    egui::Label::new(
+                        RichText::new(format!["{}:{}", man_orders.asset2_name, man_orders.asset2])
+                            .color(Color32::from_rgb(71,200,38)),
+                    ),
                 );
                 ui.end_row();
             });
@@ -1875,11 +1847,14 @@ impl ManualOrders {
         egui::Grid::new("Last price:").striped(true).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(format!["Last price: {}", last_price])
-                        .color(Color32::WHITE),
+                    RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
                 );
-                ui.end_row();
+                ui.checkbox(
+                    &mut man_orders.hotkeys,
+                    "Hotkeys",
+                );
                 /*NOTE the bellow doesn't work, FIXME
+                ui.end_row();
                 man_orders.last_price_s = *last_price;
                 man_orders.last_price_buffer.push(last_price);
                 let n = man_orders.last_price_buffer.len();
@@ -1904,33 +1879,23 @@ impl ManualOrders {
                 */
             });
         });
+        ui.end_row();
         ui.ctx().request_repaint();
-        //FIXME
-        //IMPLEMENT HOTKEYS, pass CTX through ManualOrders::default()
-        /*
-        ui.checkbox(
-            &mut man_orders.hotkeys,
-            "Hotkeysapi keys in settings file",
-        );
         if man_orders.hotkeys==true{
-            if ctx.input(|i| i.key_pressed(egui::Key::A)) {
+            /*
+            if ui.ctx().input(|i| i.key_pressed(egui::Key::A)) {
                 println!("\n A Pressed");
             }
-            if ctx.input(|i| i.key_down(egui::Key::A)) {
+            if ui.ctx().input(|i| i.key_down(egui::Key::A)) {
                 println!("\n A Held");
                 ui.ctx().request_repaint(); // make sure we note the holding.
             }
-            if ctx.input(|i| i.key_released(egui::Key::A)) {
+            if ui.ctx().input(|i| i.key_released(egui::Key::A)) {
                 println!("\n A Released");
             }
-
-        }else{
-
+            */
         };
-         * */
-
         ui.end_row();
-
 
         egui::Grid::new("parent grid").striped(true).show(ui, |ui| {
             ui.vertical(|ui| {
@@ -1947,49 +1912,52 @@ impl ManualOrders {
                     ui.selectable_value(&mut man_orders.quant_selector, Quant::Q100, "100%");
                 });
                 ui.end_row();
-                if (man_orders.quant_selector != man_orders.last_quant){
-                    man_orders.quant=man_orders.quant_selector;
-                    man_orders.last_quant=man_orders.quant_selector;
-                    match man_orders.quant{
-                        Quant::Q25=>man_orders.scalar= 25.0,
-                        Quant::Q50=>man_orders.scalar= 50.0,
-                        Quant::Q75=>man_orders.scalar= 75.0,
-                        Quant::Q100=>man_orders.scalar= 100.0,
-                        _=>()
+                if (man_orders.quant_selector != man_orders.last_quant) {
+                    man_orders.quant = man_orders.quant_selector;
+                    man_orders.last_quant = man_orders.quant_selector;
+                    match man_orders.quant {
+                        Quant::Q25 => man_orders.scalar = 25.0,
+                        Quant::Q50 => man_orders.scalar = 50.0,
+                        Quant::Q75 => man_orders.scalar = 75.0,
+                        Quant::Q100 => man_orders.scalar = 100.0,
+                        _ => (),
                     };
-                }else{
-                    match man_orders.scalar{
-                        0.0=>(),
-                        25.0=>{
-                            man_orders.quant=Quant::Q25;
-                            man_orders.quant_selector=Quant::Q25;
-                            man_orders.last_quant=man_orders.quant_selector;
-                            man_orders.scalar=25.0;
+                } else {
+                    match man_orders.scalar {
+                        0.0 => (),
+                        25.0 => {
+                            man_orders.quant = Quant::Q25;
+                            man_orders.quant_selector = Quant::Q25;
+                            man_orders.last_quant = man_orders.quant_selector;
+                            man_orders.scalar = 25.0;
                         }
-                        50.0=>{
-                            man_orders.quant=Quant::Q50;
-                            man_orders.quant_selector=Quant::Q50;
-                            man_orders.scalar=50.0;
-                            man_orders.last_quant=man_orders.quant_selector;
+                        50.0 => {
+                            man_orders.quant = Quant::Q50;
+                            man_orders.quant_selector = Quant::Q50;
+                            man_orders.scalar = 50.0;
+                            man_orders.last_quant = man_orders.quant_selector;
                         }
-                        75.0=>{
-                            man_orders.quant=Quant::Q75;
-                            man_orders.quant_selector=Quant::Q75;
-                            man_orders.scalar=75.0;
-                            man_orders.last_quant=man_orders.quant_selector;
+                        75.0 => {
+                            man_orders.quant = Quant::Q75;
+                            man_orders.quant_selector = Quant::Q75;
+                            man_orders.scalar = 75.0;
+                            man_orders.last_quant = man_orders.quant_selector;
                         }
-                        100.0=>{
-                            man_orders.quant=Quant::Q100;
-                            man_orders.quant_selector=Quant::Q100;
-                            man_orders.scalar=100.0;
-                            man_orders.last_quant=man_orders.quant_selector;
+                        100.0 => {
+                            man_orders.quant = Quant::Q100;
+                            man_orders.quant_selector = Quant::Q100;
+                            man_orders.scalar = 100.0;
+                            man_orders.last_quant = man_orders.quant_selector;
                         }
-                        _=>{
-                            man_orders.quant=Quant::Q{q:man_orders.scalar};
-                            man_orders.quant_selector=Quant::Q{q:man_orders.scalar};
+                        _ => {
+                            man_orders.quant = Quant::Q {
+                                q: man_orders.scalar,
+                            };
+                            man_orders.quant_selector = Quant::Q {
+                                q: man_orders.scalar,
+                            };
                         }
                     };
-
                 };
 
                 ui.add(egui::Slider::new(&mut man_orders.scalar, 0.0..=100.0).suffix(format!("%")));
@@ -2125,21 +2093,21 @@ impl ManualOrders {
                 }
 
                 if ui.button("Add").clicked() {
-                    let res=man_orders.price_string.parse();
-                    man_orders.price = match res{
-                        Ok(pp)=>pp,
-                        Err(e)=>{
+                    let res = man_orders.price_string.parse();
+                    man_orders.price = match res {
+                        Ok(pp) => pp,
+                        Err(e) => {
                             tracing::error!["Unable to parse price string!"];
-                            man_orders.price_string="0.0".to_string();
+                            man_orders.price_string = "0.0".to_string();
                             0.0
                         }
                     };
-                    let res=man_orders.stop_price_string.parse();
-                    man_orders.stop_price= match res{
-                        Ok(sp)=>sp,
-                        Err(e)=>{
+                    let res = man_orders.stop_price_string.parse();
+                    man_orders.stop_price = match res {
+                        Ok(sp) => sp,
+                        Err(e) => {
                             tracing::error!["Unable to stop parse price string!"];
-                            man_orders.stop_price_string="0.0".to_string();
+                            man_orders.stop_price_string = "0.0".to_string();
                             0.0
                         }
                     };
@@ -2202,13 +2170,25 @@ impl ManualOrders {
                     let o = man_orders.order;
                     man_orders.last_id += 1;
                     let oid = man_orders.last_id;
+                    if let Some(live_inf)=live_info{
+                        //FIXME - get a response before adding the order... link hashmap from
+                        //binclient in here directly?
+                        let msg =
+                            ClientInstruct::SendBinInstructs(BinInstructs::PlaceOrder {
+                                symbol: live_inf.live_asset_symbol_changed.1.clone(),
+                                o:o.clone(),
+                            });
+                        let _res = cli_chan.send(msg);
+
+                    };
                     man_orders.orders.insert(oid, (o, false));
                 };
+
                 /*
                 if ui.button("Replace").clicked() {
                 };
                 */
-                    //FIXME find a way to non-duplicate above code
+                //FIXME find a way to non-duplicate above code
                 ui.separator();
                 ui.end_row();
             });
@@ -2336,7 +2316,7 @@ impl LivePlot {
         live_price: &f64,
         collect_data: &HashMap<String, SymbolOutput>,
         ui: &mut egui::Ui,
-        live_info:&mut LiveInfo,
+        live_info: &mut LiveInfo,
     ) {
         live_plot.kline_plot.show_live(
             ui,
@@ -2348,7 +2328,6 @@ impl LivePlot {
             None,
             None,
         );
-
 
         tracing::trace!["\x1b[36m Collected Data\x1b[0m: {:?}", &collect_data];
 
@@ -2377,30 +2356,33 @@ impl LivePlot {
                         .hint_text("Search for asset"),
                 );
                 if ui.button("Search").clicked() {
-                    if live_plot.kline_plot.live_asset_changed==false{
-                        let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset{
+                    if live_plot.kline_plot.live_asset_changed == false {
+                        let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset {
                             symbol: live_plot.search_string.clone(),
-                            defualt_symbol:live_plot.default_symbol.clone(),
+                            defualt_symbol: live_plot.default_symbol.clone(),
                         });
                         let _res = cli_chan.send(msg);
-                    }else{
-                        if live_plot.last_symbol != live_plot.kline_plot.symbol{
-                            let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset{
-                                symbol: live_plot.search_string.clone(),
-                                defualt_symbol:live_plot.default_symbol.clone(),
-                            });
+                    } else {
+                        if live_plot.last_symbol != live_plot.kline_plot.symbol {
+                            let msg =
+                                ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset {
+                                    symbol: live_plot.search_string.clone(),
+                                    defualt_symbol: live_plot.default_symbol.clone(),
+                                });
                             let _res = cli_chan.send(msg);
                             live_plot.last_symbol = live_plot.kline_plot.symbol.clone();
-                            live_plot.kline_plot.live_asset_changed=true;
+                            live_plot.kline_plot.live_asset_changed = true;
                         };
                     };
                 }
+                /*
                 if ui.button("Reload chart").clicked() {
                     //FIXME add a way to reload chart
                     //
                     //
                     //
                 };
+                */
             });
     }
 }
@@ -2408,7 +2390,7 @@ impl LivePlot {
 #[derive(Clone, Dbg, Default)]
 struct HistExtras {
     last_price: f64,
-    symbol_info: (String,String,String)
+    symbol_info: (String, String, String),
 }
 
 #[derive(Dbg)]
@@ -2652,7 +2634,7 @@ pub struct Settings {
     pub enc_binance_priv_key: Option<String>,
 
     pub password_string: String,
-    pub backload_wicks:usize,
+    pub backload_wicks: usize,
 }
 
 #[allow(unused)]
@@ -2712,7 +2694,7 @@ impl Settings {
                             false => tracing::error!["Password less tha 15 characters"],
                         };
                     };
-                }else{
+                } else {
                     ui.end_row();
                     if ui.button("Save settings").clicked() {
                         let res = settings.save_settings_file(None);
@@ -3019,7 +3001,7 @@ enum LineStyle {
     Dotted(f32),
 }
 
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy, Clone, Debug)]
 enum LineState {
     ActiveColor(Color32),
     InactiveColor(Color32),
@@ -3035,7 +3017,7 @@ enum HlineType {
 const PRICE_STYLE: LineStyle = LineStyle::Solid(1.0);
 const LIMIT_STYLE: LineStyle = LineStyle::Solid(1.0);
 
-const DOTT_LINE_SPACING:f32=10.0;
+const DOTT_LINE_SPACING: f32 = 10.0;
 const STOP_STYLE: LineStyle = LineStyle::Dotted(1.0);
 
 const BUY_ACTIVE: LineState = LineState::ActiveColor(Color32::GREEN);
@@ -3049,40 +3031,41 @@ const LAST_PRICE_COLOR: Color32 = Color32::YELLOW;
 #[allow(unused)]
 const LAST_PRICE_LINE: LineStyle = LineStyle::Dotted(0.5);
 
-
 #[allow(unused)]
 impl HlineType {
     fn hline_order(o: &Order, active: bool) -> Vec<HLine> {
         let side = o.get_side();
-        let line_state=match (side,active){
-            (true,true)=>BUY_ACTIVE,
-            (true,false)=>BUY_INACTIVE,
-            (false,true)=>SELL_ACTIVE,
-            (false,false)=>SELL_INACTIVE,
+        let line_state = match (side, active) {
+            (true, true) => BUY_ACTIVE,
+            (true, false) => BUY_INACTIVE,
+            (false, true) => SELL_ACTIVE,
+            (false, false) => SELL_INACTIVE,
         };
-        match o{
-            Order::None=>{
+        match o {
+            Order::None => {
                 vec![]
-            },
-            Order::Market {
-                buy,
-                quant,
-            }=>{
-                vec![
-                ]
-            },
+            }
+            Order::Market { buy, quant } => {
+                vec![]
+            }
             Order::Limit {
                 buy,
                 quant,
                 price,
                 limit_status,
-            }=>{
-                if side==true{
-                    vec![HlineType::BuyOrder((line_state,PRICE_STYLE)).to_hline(price,"Limit price" )]
-                }else{
-                    vec![HlineType::SellOrder((line_state,PRICE_STYLE)).to_hline(price,"Limit price" )]
+            } => {
+                if side == true {
+                    vec![
+                        HlineType::BuyOrder((line_state, PRICE_STYLE))
+                            .to_hline(price, "Limit price"),
+                    ]
+                } else {
+                    vec![
+                        HlineType::SellOrder((line_state, PRICE_STYLE))
+                            .to_hline(price, "Limit price"),
+                    ]
                 }
-            },
+            }
             Order::StopLimit {
                 buy,
                 quant,
@@ -3090,39 +3073,44 @@ impl HlineType {
                 limit_status,
                 stop_price,
                 stop_status,
-            }=>{
-                if side==true{
+            } => {
+                if side == true {
                     vec![
-                        HlineType::BuyOrder((line_state,LIMIT_STYLE)).to_hline(price, "Stop Limit stop"),
-                        HlineType::BuyOrder((line_state,STOP_STYLE)).to_hline(&(*stop_price as f64), "Stop Limit stop"),
-
+                        HlineType::BuyOrder((line_state, LIMIT_STYLE))
+                            .to_hline(price, "Stop Limit stop"),
+                        HlineType::BuyOrder((line_state, STOP_STYLE))
+                            .to_hline(&(*stop_price as f64), "Stop Limit stop"),
                     ]
-                }else{
+                } else {
                     vec![
-                        HlineType::SellOrder((line_state,LIMIT_STYLE)).to_hline(price, "Stop Limit stop"),
-                        HlineType::SellOrder((line_state,STOP_STYLE)).to_hline(&(*stop_price as f64), "Stop Limit stop"),
+                        HlineType::SellOrder((line_state, LIMIT_STYLE))
+                            .to_hline(price, "Stop Limit stop"),
+                        HlineType::SellOrder((line_state, STOP_STYLE))
+                            .to_hline(&(*stop_price as f64), "Stop Limit stop"),
                     ]
                 }
-            },
+            }
             Order::StopMarket {
                 buy,
                 quant,
                 price,
                 stop_status,
-            }=>{
-                if side==true{
+            } => {
+                if side == true {
                     vec![
-                        HlineType::BuyOrder((line_state,STOP_STYLE)).to_hline(price, "Stop Market"),
+                        HlineType::BuyOrder((line_state, STOP_STYLE))
+                            .to_hline(price, "Stop Market"),
                     ]
-                }else{
+                } else {
                     vec![
-                        HlineType::SellOrder((line_state,STOP_STYLE)).to_hline(price, "Stop Market"),
+                        HlineType::SellOrder((line_state, STOP_STYLE))
+                            .to_hline(price, "Stop Market"),
                     ]
                 }
-            },
+            }
         }
     }
-    fn to_hline(&self, value: &f64, label:&str) -> HLine {
+    fn to_hline(&self, value: &f64, label: &str) -> HLine {
         match &self {
             HlineType::BuyOrder((ba, bs)) => {
                 let color = match ba {
@@ -3132,12 +3120,18 @@ impl HlineType {
                 match bs {
                     LineStyle::Solid(width) => {
                         let s = Stroke::new(*width, *color);
-                        HLine::new(format!["Buy {} {:.2}",label, value], *value).stroke(s).style(LineStyleEgui::Solid)
-                    },
+                        HLine::new(format!["Buy {} {:.2}", label, value], *value)
+                            .stroke(s)
+                            .style(LineStyleEgui::Solid)
+                    }
                     LineStyle::Dotted(width) => {
                         let s = Stroke::new(*width, *color);
-                        HLine::new(format!["Buy {} {:.2}", label, value], *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
-                    },
+                        HLine::new(format!["Buy {} {:.2}", label, value], *value)
+                            .stroke(s)
+                            .style(LineStyleEgui::Dotted {
+                                spacing: DOTT_LINE_SPACING,
+                            })
+                    }
                 }
             }
             HlineType::SellOrder((si, ss)) => {
@@ -3148,30 +3142,39 @@ impl HlineType {
                 match ss {
                     LineStyle::Solid(width) => {
                         let s = Stroke::new(*width, *color);
-                        HLine::new(format!["Sell {} {:.2}",label, value], *value).stroke(s).style(LineStyleEgui::Solid)
-                    },
-                    LineStyle::Dotted(width) => {
-                        let s = Stroke::new(*width, *color);
-                        HLine::new(format!["Sell {} {:.2}",label, value], *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
-                    },
-                }
-            }
-            HlineType::LastPrice((l, color)) => {
-                match l {
-                    LineStyle::Solid(width) => {
-                        let s = Stroke::new(*width, *color);
-                        HLine::new("Last price", *value).stroke(s).style(LineStyleEgui::Solid)
+                        HLine::new(format!["Sell {} {:.2}", label, value], *value)
+                            .stroke(s)
+                            .style(LineStyleEgui::Solid)
                     }
                     LineStyle::Dotted(width) => {
                         let s = Stroke::new(*width, *color);
-                        HLine::new("Last price", *value).stroke(s).style(LineStyleEgui::Dotted{spacing:DOTT_LINE_SPACING})
-                    },
+                        HLine::new(format!["Sell {} {:.2}", label, value], *value)
+                            .stroke(s)
+                            .style(LineStyleEgui::Dotted {
+                                spacing: DOTT_LINE_SPACING,
+                            })
+                    }
                 }
             }
+            HlineType::LastPrice((l, color)) => match l {
+                LineStyle::Solid(width) => {
+                    let s = Stroke::new(*width, *color);
+                    HLine::new("Last price", *value)
+                        .stroke(s)
+                        .style(LineStyleEgui::Solid)
+                }
+                LineStyle::Dotted(width) => {
+                    let s = Stroke::new(*width, *color);
+                    HLine::new("Last price", *value)
+                        .stroke(s)
+                        .style(LineStyleEgui::Dotted {
+                            spacing: DOTT_LINE_SPACING,
+                        })
+                }
+            },
         }
     }
 }
-
 
 impl HistPlot {
     fn new(hist_asset_data: Arc<Mutex<AssetData>>, intv: &Intv, default_trade_wicks: i64) -> Self {
@@ -3191,26 +3194,39 @@ impl HistPlot {
         cli_chan: watch::Sender<ClientInstruct>,
         hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
-        trade_slice:Option<&mut Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>>,
-        hist_extras:&mut HistExtras,
+        trade_slice: Option<&mut Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>>,
+        hist_extras: &mut HistExtras,
     ) {
-        if hist_plot.trade_slice_loaded==true{
-            let res = hist_plot
-                .kline_plot
-                .show_live(ui, plot_extras, hist_ad, None, None, Some(hist_plot.trade_wicks as usize), None, Some(&mut hist_extras.symbol_info));
-            match (res, trade_slice){
-                (Some(ret_slice),Some( t_slice))=>{
-                    hist_extras.last_price=ret_slice[ret_slice.len()-1].4;
-                    tracing::debug!["hist_extras.last_price {}",hist_extras.last_price];
-                    *t_slice=ret_slice;
+        if hist_plot.trade_slice_loaded == true {
+            let res = hist_plot.kline_plot.show_live(
+                ui,
+                plot_extras,
+                hist_ad,
+                None,
+                None,
+                Some(hist_plot.trade_wicks as usize),
+                None,
+                Some(&mut hist_extras.symbol_info),
+            );
+            match (res, trade_slice) {
+                (Some(ret_slice), Some(t_slice)) => {
+                    hist_extras.last_price = ret_slice[ret_slice.len() - 1].4;
+                    tracing::debug!["hist_extras.last_price {}", hist_extras.last_price];
+                    *t_slice = ret_slice;
                 }
-                _=>{
-                }
+                _ => {}
             };
-        }else{
-            let _res = hist_plot
-                .kline_plot
-                .show_live(ui, plot_extras, hist_ad, None, None, None, Some(&mut hist_extras.last_price), Some(&mut hist_extras.symbol_info));
+        } else {
+            let _res = hist_plot.kline_plot.show_live(
+                ui,
+                plot_extras,
+                hist_ad,
+                None,
+                None,
+                None,
+                Some(&mut hist_extras.last_price),
+                Some(&mut hist_extras.symbol_info),
+            );
         };
 
         if hist_plot.intv != hist_plot.last_intv {
@@ -3325,7 +3341,7 @@ impl HistPlot {
                     });
                     let _res = cli_chan.send(msg);
                     hist_plot.trade_time = new_trade_time;
-                    hist_plot.trade_slice_loaded=true;
+                    hist_plot.trade_slice_loaded = true;
                     //FIXME click here
                     //
                     //

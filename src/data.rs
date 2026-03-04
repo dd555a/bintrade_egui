@@ -185,14 +185,13 @@ async fn append_kline(
         f64,
     )],
 ) -> Result<()> {
-    let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(    
-        "
+    let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!["
         BEGIN TRANSACTION;
         INSERT OR REPLACE INTO {}( [Timestamp MS], [Open Time], Open, High, Low, Close, Volume, [Close Timestamp MS], [Close Time], [Quote Asset Volume], [Number of Trades], [Taker Buy Base Asset Volume], [Taker Buy Quote Asset Volume] ) 
         COMMIT;
         ",
         table
-    ));
+    ]);
     assert!(input.len() <= 65535 / 11);
     query_builder.push_values(
         input.iter(),
@@ -512,9 +511,9 @@ pub struct Klines {
     start_time: chrono::NaiveDateTime,
     end_time: chrono::NaiveDateTime,
 
-    pub asset_pair:String,
-    pub s1_string:String,
-    pub s2_string:String,
+    pub asset_pair: String,
+    pub s1_string: String,
+    pub s2_string: String,
 
     full_dat: HashMap<Intv, FatKline>,
     pub dat: HashMap<Intv, Kline>,
@@ -580,14 +579,12 @@ pub struct AssetData {
     pub temp_kline: Option<Klines>,
     pub load_status: HashMap<String, bool>,
 
-
-
     //NOTE live only
-    pub live_asset_symbol_changed:(bool,String),
+    pub live_asset_symbol_changed: (bool, String),
     pub acc_balances: HashMap<String, (f64, f64)>,
-    pub current_pair_strings:(String, String),
-    pub current_pair_free_balances:(f64, f64),
-    pub current_pair_locked_balances:(f64, f64),
+    pub current_pair_strings: (String, String),
+    pub current_pair_free_balances: (f64, f64),
+    pub current_pair_locked_balances: (f64, f64),
 }
 
 impl AssetData {
@@ -1231,9 +1228,7 @@ pub async fn validate_asset_dl(symbol: &str) -> Result<bool> {
         None => Ok(false),
     }
 }
-pub async fn validate_asset_binance(
-    symbol: &str,
-) -> Result<bool> {
+pub async fn validate_asset_binance(symbol: &str) -> Result<bool> {
     let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
         .await
         .context(anyhow!("SQL::Unable to metadata connect to db"))?;
@@ -1255,24 +1250,22 @@ pub async fn validate_asset_binance(
 }
 pub async fn get_asset_bases_binance2(
     symbol: &str,
-    meta_pool:&Pool<Sqlite>
-)->Result<Option<(String,String)>>{
+    meta_pool: &Pool<Sqlite>,
+) -> Result<Option<(String, String)>> {
     let q = &format![
         "SELECT [BaseAsset], [QouteAsset] FROM assets WHERE Asset = '{}';",
         symbol
     ];
-    let (base,qoute): (Option<String>, Option<String>) =
+    let (base, qoute): (Option<String>, Option<String>) =
         sqlx::query_as(q).fetch_one(meta_pool).await?;
-    let res=match (base,qoute){
-        (Some(bb), Some(qq))=>Some((bb,qq)),
-        _=>None
+    let res = match (base, qoute) {
+        (Some(bb), Some(qq)) => Some((bb, qq)),
+        _ => None,
     };
     Ok(res)
 }
 
-pub async fn get_asset_bases_binance(
-    symbol: &str,
-)->Result<Option<(String,String)>>{
+pub async fn get_asset_bases_binance(symbol: &str) -> Result<Option<(String, String)>> {
     let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
         .await
         .context(anyhow!("SQL::Unable to metadata connect to db"))?;
@@ -1281,11 +1274,11 @@ pub async fn get_asset_bases_binance(
         "SELECT [BaseAsset], [QouteAsset] FROM assets WHERE Asset = '{}';",
         symbol
     ];
-    let (base,qoute): (Option<String>, Option<String>) =
+    let (base, qoute): (Option<String>, Option<String>) =
         sqlx::query_as(q).fetch_one(&meta_pool).await?;
-    let res=match (base,qoute){
-        (Some(bb), Some(qq))=>Some((bb,qq)),
-        _=>None
+    let res = match (base, qoute) {
+        (Some(bb), Some(qq)) => Some((bb, qq)),
+        _ => None,
     };
     meta_pool.close().await;
     Ok(res)
@@ -1352,9 +1345,7 @@ impl SQLConn {
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
 
-        let bases=get_asset_bases_binance2(symbol, &meta_pool).await?;
-
-        
+        let bases = get_asset_bases_binance2(symbol, &meta_pool).await?;
 
         let elapsed = now.elapsed();
         tracing::info!("load_part_data2 Elapsed pool connect: {:?}", elapsed);
@@ -1390,10 +1381,10 @@ impl SQLConn {
         if let Some(_) = ad.kline_data.get(symbol) {
             ad.kline_data.remove(symbol);
         };
-        if let Some((s1,s2)) = bases {
-            klines.asset_pair=symbol.to_string();
-            klines.s1_string=s1;
-            klines.s2_string=s2;
+        if let Some((s1, s2)) = bases {
+            klines.asset_pair = symbol.to_string();
+            klines.s1_string = s1;
+            klines.s2_string = s2;
         };
         ad.kline_data.insert(symbol.to_string(), klines);
         let elapsed = now.elapsed();
@@ -1977,7 +1968,7 @@ impl SQLConn {
                 };
                 resp
             }
-            SQLInstructs::ValidateDLAsset { .. }=>todo!(),
+            SQLInstructs::ValidateDLAsset { .. } => todo!(),
             SQLInstructs::ValidateBinanceAsset { .. } => todo!(),
         }
     }

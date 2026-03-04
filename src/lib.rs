@@ -90,12 +90,12 @@ impl SQLInstructs {
                 symbol: _,
                 exchange: _,
             } => "SQLInstructs: Insert symbol for download",
-            SQLInstructs::ValidateDLAsset {
-                symbol: _,
-            } => "SQLInstructs: Validate symbol for download",
-            SQLInstructs::ValidateBinanceAsset {
-                symbol: _,
-            } => "SQLInstructs: Validate symbol for download",
+            SQLInstructs::ValidateDLAsset { symbol: _ } => {
+                "SQLInstructs: Validate symbol for download"
+            }
+            SQLInstructs::ValidateBinanceAsset { symbol: _ } => {
+                "SQLInstructs: Validate symbol for download"
+            }
         }
     }
 }
@@ -138,7 +138,10 @@ pub enum BinInstructs {
     CancelAllOrders {
         symbol: String,
     },
-    ChangeLiveAsset{ symbol: String, defualt_symbol:String },
+    ChangeLiveAsset {
+        symbol: String,
+        defualt_symbol: String,
+    },
 }
 impl BinInstructs {
     pub fn to_str(&self) -> &str {
@@ -153,7 +156,10 @@ impl BinInstructs {
                 "BinInstruct: Cancel and Replace Order:"
             }
             BinInstructs::CancelAllOrders { symbol: _ } => "BinInstruct: Cancel All Orders",
-            BinInstructs::ChangeLiveAsset{ symbol: _ , defualt_symbol:_} => "BinInstruct: Change symbol",
+            BinInstructs::ChangeLiveAsset {
+                symbol: _,
+                defualt_symbol: _,
+            } => "BinInstruct: Change symbol",
         }
     }
 }

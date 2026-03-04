@@ -490,21 +490,22 @@ impl ClientTask {
         let mut cli = BinanceClient::new(api_key, api_secret, live_collect, live_price, live_ad);
         tracing::info!("Binclient started");
         loop {
-
-            let res=cli.get_ws_params(&default_symbol, &default_intv).await;
-            let params=match res{
-                Ok(params)=>params,
-                Err(_)=>{
-                    let mut sub_params=vec![
-                        format!["{}@aggTrade", default_symbol.to_lowercase()]
-                    ];
+            let res = cli.get_ws_params(&default_symbol, &default_intv).await;
+            let params = match res {
+                Ok(params) => params,
+                Err(_) => {
+                    let mut sub_params =
+                        vec![format!["{}@aggTrade", default_symbol.to_lowercase()]];
                     for i in Intv::iter() {
-                        sub_params.push(format!["{}@kline_{}", default_symbol.to_lowercase(), i.to_bin_str()])
-                    };
+                        sub_params.push(format![
+                            "{}@kline_{}",
+                            default_symbol.to_lowercase(),
+                            i.to_bin_str()
+                        ])
+                    }
                     let mut params: HashMap<String, Vec<String>> = HashMap::new();
                     params.insert(default_symbol.to_string(), sub_params);
                     params
-
                 }
             };
 
