@@ -29,6 +29,7 @@ use std::time::Instant;
 use tracing::instrument;
 
 use crate::conn::{fut_get_exchange_info, get_exchange_info};
+use crate::gui::Settings;
 use crate::{GeneralError, SQLInstructs, SQLResponse};
 
 #[cfg(feature = "yfinance")]
@@ -1706,14 +1707,26 @@ impl SQLConn {
         }
         //NOTE this return a bug that will need to be fixed later, when addint
         //YAHOO. bit is fine for now. Maybe make a different asset list for
-        //each exhcange...or simply append yahoo
+        //each exhcange...or simply append yahoo to a differet table
     }
+    pub fn update_settings(&mut self, settings: &Settings) -> Result<()> {
+        //TODO
+        Ok(())
+    }
+
     pub async fn parse_sql_instructs(&mut self, i: SQLInstructs) -> SQLResponse {
         match i {
             SQLInstructs::UpdateSettings(settings) => {
-                //TODO add upate settings here
-                let a = 0;
-                SQLResponse::Success
+                let res = self.update_settings(&settings);
+                let resp = match res {
+                    Ok(_) => SQLResponse::Success,
+                    Err(e) => {
+                        let err_string = format!["{}", e];
+                        tracing::error!("{}", err_string);
+                        return SQLResponse::Failure((err_string, GeneralError::Generic));
+                    }
+                };
+                resp
             }
             SQLInstructs::LoadHistData { symbol: ref s } => {
                 tracing::info!("Loading historical data for:{}", s);

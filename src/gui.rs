@@ -32,7 +32,7 @@ use magic_crypt::{MagicCryptTrait, new_magic_crypt};
 
 use crate::conn::{KlineTick, SymbolOutput};
 use crate::data::{AssetData, DLAsset, Intv, Klines};
-use crate::trade::{HistTrade, LimitStatus, Order, Quant, StopStatus};
+use crate::trade::{EvalMode, HistTrade, LimitStatus, Order, Quant, StopStatus};
 use crate::{BinInstructs, ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse};
 
 const WICKS_VISIBLE: usize = 90;
@@ -91,7 +91,7 @@ impl Default for KlinePlot {
             l_tick_barchart: vec![],
             tick_kline: None,
             intv: Intv::Min1,
-            name: "".to_string(),
+            name: String::default(),
             loading: false,
             static_loaded: false,
             chart_params: (1.0, 1.0),
@@ -140,7 +140,7 @@ impl KlinePlot {
         plot_extras: &PlotExtras,
         live_ad: Arc<Mutex<AssetData>>,
         collected_data: Option<&HashMap<String, SymbolOutput>>,
-        live_info: Option<&mut LiveInfo>,
+        _live_info: Option<&mut LiveInfo>,
         return_wicks: Option<usize>,
         last_price_hist: Option<&mut f64>,
         hist_symbol_info: Option<&mut (String, String, String)>,
@@ -1635,6 +1635,10 @@ struct ManualOrders {
     orders: HashMap<i32, (Order, bool)>,
     asset1: f64,
     asset2: f64,
+
+    asset1_locked: f64,
+    asset2_locked: f64,
+
     last_id: i32,
     asset1_name: String,
     asset2_name: String,
@@ -1647,19 +1651,21 @@ struct ManualOrders {
     last_price_s: f64,
 
     plot_extras: Option<PlotExtras>,
+    eval_mode: EvalMode,
 }
 
 //TODO find a way to group GUI elements together. The horror...
 impl Default for ManualOrders {
     fn default() -> Self {
         Self {
+            eval_mode: EvalMode::default(),
             man_orders: None,
             active_orders: None,
             hotkeys: false,
 
-            current_symbol: "BTCUSDT".to_string(),
+            current_symbol: String::default(),
 
-            search_string: "".to_string(),
+            search_string: String::default(),
             quant: Quant::Q100,
             last_quant: Quant::Q100,
             quant_selector: Quant::Q100,
@@ -1681,8 +1687,12 @@ impl Default for ManualOrders {
             //NOTE if live replace hashmap with an arc mutex to hte clientshit
             asset1: 0.0,
             asset2: 0.0,
-            asset1_name: "".to_string(),
-            asset2_name: "".to_string(),
+
+            asset1_locked: 0.0,
+            asset2_locked: 0.0,
+
+            asset1_name: String::default(),
+            asset2_name: String::default(),
             last_price_buffer: vec![],
             last_price_buffer_size: 20,
             last_price_s: 0.0,
@@ -1710,25 +1720,144 @@ fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLin
 
 #[allow(unused)]
 impl ManualOrders {
-    fn hist_validate_order(o: &Order, asset1: &f64, asset2: &f64) -> Result<()> {
-        todo!()
+    fn hist_del_order(
+        o: &Order,
+        asset1_locked: &f64,
+        asset2_locked: &f64,
+        asset1: &f64,
+        asset2: &f64,
+    ) -> (f64, f64, f64, f64) {
+        let (unlocked_a1, unlocked_a2, buy) = match o {
+            Order::None => {
+                tracing::error!["Order::None should not be passed here"];
+                panic!["Order::None should never be placed let alone deleted..."]
+            }
+            Order::Market { buy, quant } => {
+                if *buy == true {
+                    (*asset1_locked, *asset2_locked * quant.get_f64(), *buy)
+                } else {
+                    (*asset1_locked * quant.get_f64(), *asset2_locked, *buy)
+                }
+            }
+            Order::Limit {
+                buy,
+                quant,
+                price,
+                limit_status,
+            } => {
+                if *buy == true {
+                    (*asset1_locked, *asset2_locked * quant.get_f64(), *buy)
+                } else {
+                    (*asset1_locked * quant.get_f64(), *asset2_locked, *buy)
+                }
+            }
+            Order::StopLimit {
+                buy,
+                quant,
+                price,
+                limit_status,
+                stop_price,
+                stop_status,
+            } => {
+                if *buy == true {
+                    (*asset1_locked, *asset2_locked * quant.get_f64(), *buy)
+                } else {
+                    (*asset1_locked * quant.get_f64(), *asset2_locked, *buy)
+                }
+            }
+            Order::StopMarket {
+                buy,
+                quant,
+                price,
+                stop_status,
+            } => {
+                if *buy == true {
+                    (*asset1_locked, *asset2_locked * quant.get_f64(), *buy)
+                } else {
+                    (*asset1_locked * quant.get_f64(), *asset2_locked, *buy)
+                }
+            }
+        };
+        let (a1, a2, a1_l, a2_l) = (
+            asset1 + unlocked_a1,
+            asset2 + unlocked_a2,
+            asset1_locked - unlocked_a1,
+            asset2_locked - unlocked_a2,
+        );
+        (a1, a2, a1_l, a2_l)
+    }
+    fn hist_validate_order(o: &Order, asset1: &f64, asset2: &f64) -> Option<(f64, f64, f64, f64)> {
+        let (locked_a1, locked_a2, buy) = match o {
+            Order::None => {
+                tracing::error!["Order::None should not be passed here"];
+                return None;
+            }
+            Order::Market { buy, quant } => {
+                if *buy == true {
+                    (*asset1, *asset2 * quant.get_f64(), *buy)
+                } else {
+                    (*asset1 * quant.get_f64(), *asset2, *buy)
+                }
+            }
+            Order::Limit {
+                buy,
+                quant,
+                price,
+                limit_status,
+            } => {
+                if *buy == true {
+                    (*asset1, *asset2 * quant.get_f64(), *buy)
+                } else {
+                    (*asset1 * quant.get_f64(), *asset2, *buy)
+                }
+            }
+            Order::StopLimit {
+                buy,
+                quant,
+                price,
+                limit_status,
+                stop_price,
+                stop_status,
+            } => {
+                if *buy == true {
+                    (*asset1, *asset2 * quant.get_f64(), *buy)
+                } else {
+                    (*asset1 * quant.get_f64(), *asset2, *buy)
+                }
+            }
+            Order::StopMarket {
+                buy,
+                quant,
+                price,
+                stop_status,
+            } => {
+                if *buy == true {
+                    (*asset1, *asset2 * quant.get_f64(), *buy)
+                } else {
+                    (*asset1 * quant.get_f64(), *asset2, *buy)
+                }
+            }
+        };
+        let (a1, a2) = (asset1 - locked_a1, asset2 - locked_a2);
+        if buy == true {
+            if a1 == 0.0 {
+                None
+            } else {
+                Some((a1, a2, locked_a1, locked_a2))
+            }
+        } else {
+            if a2 == 0.0 {
+                None
+            } else {
+                Some((a1, a2, locked_a1, locked_a2))
+            }
+        }
     }
     fn new(man_orders: HistTrade) -> Self {
         Self {
             man_orders: Some(man_orders),
             ..Default::default()
         }
-    }
-    fn check_order_hist(&self, order: &Order, hist_trade: &mut HistTrade) -> Result<()> {
-        //todo!()
-        Ok(())
-    }
-    fn check_order_price(&self, order: &Order, last_price: &f64) -> Result<()> {
-        Ok(())
-        //todo!()
-    }
-    fn sync(&mut self, hist_trade: Option<&HistTrade>) {
-        todo!()
     }
     fn show(
         mut man_orders: &mut ManualOrders,
@@ -1763,7 +1892,9 @@ impl ManualOrders {
                     man_orders.asset1_name = symbol_inf.1.clone();
                     man_orders.asset2_name = symbol_inf.2.clone();
                 };
+
                 //NOTE if the slice is long the evaluation might brick perormance
+                //spawn a different thread and return result, checking on it each iteration
                 let active_orders: Vec<(i32, Order)> = man_orders
                     .orders
                     .iter()
@@ -1776,7 +1907,8 @@ impl ManualOrders {
                     .filter(|(_, (_, active))| *active == false)
                     .map(|(id, (order, active))| (*id, *order))
                     .collect();
-                let remaining_active_orders = h_trade.trade_forward(t_slice, 0, active_orders);
+                let remaining_active_orders =
+                    h_trade.trade_forward(t_slice, &man_orders.eval_mode, active_orders);
                 let mut remaining_orders: HashMap<i32, (Order, bool)> = inactive_orders
                     .iter()
                     .map(|(id, order)| (*id, (*order, false)))
@@ -1788,6 +1920,14 @@ impl ManualOrders {
                     })
                     .collect();
                 man_orders.orders = remaining_orders;
+
+                egui::ComboBox::from_label("HistEvalSelect")
+                    .selected_text(format!("{}", man_orders.eval_mode.to_str()))
+                    .show_ui(ui, |ui| {
+                        for e in EvalMode::iter() {
+                            ui.selectable_value(&mut man_orders.eval_mode, e, e.to_str());
+                        }
+                    });
             }
             (None, None) => {}
             _ => {
@@ -2163,13 +2303,19 @@ impl ManualOrders {
                             &man_orders.asset2,
                         );
                         match order_valid_hist {
-                            Ok(_) => {
+                            Some((a1, a2, a1_locked, a2_locked)) => {
+                                man_orders.asset1 = a1;
+                                man_orders.asset2 = a2;
+
+                                man_orders.asset1_locked = a1_locked;
+                                man_orders.asset2_locked = a2_locked;
+
                                 man_orders.last_id += 1;
                                 let oid = man_orders.last_id;
                                 man_orders.orders.insert(oid, (o, false));
                             }
-                            Err(e) => {
-                                tracing::error!["Hist order invalid ERROR: {}", e];
+                            None => {
+                                tracing::error!["Hist order invalid ERROR"];
                             }
                         };
                     };
@@ -2263,8 +2409,30 @@ impl ManualOrders {
                                 });
                                 row.col(|ui| {
                                     if ui.button("Delete").clicked() {
-                                        man_orders.orders.remove(id);
-                                    }
+                                        if let Some(live_inf) = live_info {
+                                            let msg = ClientInstruct::SendBinInstructs(
+                                                BinInstructs::CancelOrder {
+                                                    id: *id,
+                                                    symbol: man_orders.current_symbol.clone(),
+                                                    o: *order,
+                                                },
+                                            );
+                                            let _res = cli_chan.send(msg);
+                                        } else {
+                                            let (a1, a2, a1_l, a2_l) = ManualOrders::hist_del_order(
+                                                &order,
+                                                &man_orders.asset1_locked,
+                                                &man_orders.asset2_locked,
+                                                &man_orders.asset1,
+                                                &man_orders.asset2,
+                                            );
+                                            man_orders.asset1_locked = a1_l;
+                                            man_orders.asset2_locked = a2_l;
+                                            man_orders.asset1 = a1;
+                                            man_orders.asset2 = a2;
+                                            man_orders.orders.remove(id);
+                                        };
+                                    };
                                 });
                             });
                         }
@@ -2294,7 +2462,7 @@ impl Default for LivePlot {
             kline_plot: KlinePlot::default(),
             live_asset_data: Arc::new(Mutex::new(AssetData::new(666))),
 
-            search_string: "".to_string(),
+            search_string: String::default(),
             symbol: "BTCUSDT".to_string(),
             intv: Intv::Min1,
             last_intv: Intv::Min1,
@@ -2459,11 +2627,11 @@ impl Default for HistPlot {
             kline_plot: KlinePlot::default(),
             hist_asset_data: Arc::new(Mutex::new(AssetData::new(666))),
 
-            search_string: "".to_string(),
-            search_date: "".to_string(),
-            unload_search_string: "".to_string(),
-            loaded_search_string: "".to_string(),
-            search_load_string: "".to_string(),
+            search_string: String::default(),
+            search_date: String::default(),
+            unload_search_string: String::default(),
+            loaded_search_string: String::default(),
+            search_load_string: String::default(),
 
             intv: Intv::Min1,
             last_intv: Intv::Min1,

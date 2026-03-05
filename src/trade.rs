@@ -1,8 +1,8 @@
 use crate::data::Intv;
 use serde::{Deserialize, Serialize};
 
-use anyhow::Result;
-use tracing::instrument;
+const M_FEE: f64 = 0.0015;
+const T_FEE: f64 = 0.0015;
 
 const fn exec_order(
     asset1: f64,
@@ -41,6 +41,22 @@ const fn eval_stop(stop: f64, h: f64, o: f64, _c: f64, l: f64) -> Option<f64> {
         }
     }
 }
+use strum_macros::EnumIter;
+
+#[derive(EnumIter, Debug, Clone, Copy, PartialEq, Default)]
+pub enum EvalMode {
+    #[default]
+    LHTriggerLimit,
+    OCTriggerLimit,
+}
+impl EvalMode {
+    pub fn to_str(&self) -> &str {
+        match &self {
+            EvalMode::LHTriggerLimit => "Low High triggers limits",
+            EvalMode::OCTriggerLimit => "Open Close triggers limits",
+        }
+    }
+}
 
 const fn eval_limit(
     limit: f64,
@@ -49,17 +65,18 @@ const fn eval_limit(
     c: f64,
     l: f64,
     buy_sell: bool,
-    eval_mode: i32,
+    eval_mode: &EvalMode,
 ) -> Option<f64> {
-    if eval_mode == 1 {
-        if o > c {
-            let _h = o;
-            let _l = c;
-        } else {
-            let _h = c;
-            let _l = o;
+    let (h, l) = match eval_mode {
+        EvalMode::LHTriggerLimit => (h, l),
+        EvalMode::OCTriggerLimit => {
+            if o > c {
+                (o, c)
+            } else {
+                (c, o)
+            }
         }
-    }
+    };
     if buy_sell == true {
         if l <= limit {
             return Some(limit);
@@ -81,9 +98,6 @@ pub enum OrderCondition {
     StopTriggered,
 }
 
-const M_FEE: f64 = 0.0015;
-const T_FEE: f64 = 0.0015;
-
 pub const fn eval_order_basic(
     h: f64,
     o: f64,
@@ -92,7 +106,7 @@ pub const fn eval_order_basic(
     asset1: f64,
     asset2: f64,
     order: Order,
-    eval_mode: i32,
+    eval_mode: &EvalMode,
 ) -> Option<(OrderCondition, f64, f64, f64)> {
     let last_order_price;
     match order {
@@ -373,13 +387,13 @@ impl Order {
     pub fn get_side(&self) -> bool {
         match &self {
             Order::None => panic!["None order should never have this called on it"],
-            Order::Market { buy: b, quant: _ } => return b.clone(),
+            Order::Market { buy: b, quant: _ } => return *b,
             Order::Limit {
                 buy: b,
                 quant: _,
                 price: _,
                 limit_status: _,
-            } => return b.clone(),
+            } => return *b,
             Order::StopLimit {
                 buy: b,
                 quant: _,
@@ -387,13 +401,13 @@ impl Order {
                 limit_status: _,
                 stop_price: _,
                 stop_status: _,
-            } => return b.clone(),
+            } => return *b,
             Order::StopMarket {
                 buy: b,
                 quant: _,
                 price: _,
                 stop_status: _,
-            } => return b.clone(),
+            } => return *b,
         }
     }
     pub fn get_side_str(&self) -> String {
@@ -484,6 +498,7 @@ impl Order {
     }
 }
 
+/* TODO FUTURE IMPLEMENT
 #[derive(Debug, Clone, Copy)]
 pub enum AdvOrder {
     TrailingStop,
@@ -501,38 +516,19 @@ pub enum AdvOrder {
         limit2_price: f32,
     },
 }
-/* TODO FUTURE IMPLEMENT
 #[derive(Debug, Clone, Copy)]
 enum OrderStatus {
     BasicOrder { t: Order },
     AdvOrder { t: AdvOrder },
 }
 */
-#[instrument(level = "trace")]
-fn hist_eval_kline_multiorder(
-    kline: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
-    orders: Vec<(i32, Order)>,
-    asset1: f64,
-    asset2: f64,
-    eval_mode: i32,
-) -> Option<(chrono::NaiveDateTime, f64, f64, Order)> {
-    /*
-    let market_orders: Vec<(i32,Order)>;
-    let stop_market_orders: Vec<(i32,Order)>;
-    let stop_limit_market_orders: Vec<(i32,Order)>;
-    todo!()
-     * */
 
-    return None;
-}
-
-#[instrument(level = "trace")]
 fn hist_eval_kline(
     kline: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
     order: Order,
     asset1: f64,
     asset2: f64,
-    eval_mode: i32,
+    eval_mode: &EvalMode,
 ) -> Option<(chrono::NaiveDateTime, f64, f64, Order)> {
     for k in kline.iter() {
         let (t, o, h, l, c, _) = *k;
@@ -611,58 +607,74 @@ impl HistTrade {
             ..Default::default()
         }
     }
-    #[allow(unused)]
+    pub fn eval_single_order(
+        &mut self,
+        trade_slice: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
+        o: Order,
+        eval_mode: &EvalMode,
+    ) -> Option<Order> {
+        let result = hist_eval_kline(trade_slice, o, self.asset1, self.asset2, eval_mode);
+        match result {
+            Some((transaction_time, asset1, asset2, order)) => {
+                tracing::debug![
+                    "Hist_Trade_Forward. Transaction Time: {}\n Asset1: {}\n Asset2: {} \n Order: {:?}",
+                    transaction_time,
+                    asset1,
+                    asset2,
+                    order
+                ];
+                self.calculate_change();
+                let tr = TradeRecord {
+                    asset_pair: self.asset_pair.clone(),
+                    transaction_time,
+                    trades_made: self.trades_made,
+                    asset1_held: self.asset1_held,
+                    asset1: self.asset1,
+                    asset2: self.asset2,
+                    last_asset1: self.last_asset1,
+                    last_asset2: self.last_asset2,
+                    ch1: self.ch1,
+                    ch2: self.ch1,
+                };
+                self.trade_record.push(tr);
+                self.asset1 = asset1;
+                self.asset2 = asset2;
+                match order {
+                    Order::None => return None,
+                    _ => {
+                        return Some(order);
+                    }
+                }
+            }
+            None => return None,
+        }
+    }
     pub fn trade_forward(
         &mut self,
         trade_slice: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
-        eval_mode: i32,
+        eval_mode: &EvalMode,
         active_orders: Vec<(i32, Order)>,
     ) -> Vec<(i32, Order)> {
         match active_orders.len() {
             0 => return vec![],
             1 => {
                 let (id, o) = active_orders[0];
-                let result = hist_eval_kline(trade_slice, o, self.asset1, self.asset2, eval_mode);
+                let result = self.eval_single_order(trade_slice, o, eval_mode);
                 match result {
-                    Some((transaction_time, asset1, asset2, order)) => {
-                        tracing::debug![
-                            "Hist_Trade_Forward. Transaction Time: {}\n Asset1: {}\n Asset2: {} \n Order: {:?}",
-                            transaction_time,
-                            asset1,
-                            asset2,
-                            order
-                        ];
-                        self.calculate_change();
-                        let tr = TradeRecord {
-                            asset_pair: self.asset_pair.clone(),
-                            transaction_time,
-                            trades_made: self.trades_made,
-                            asset1_held: self.asset1_held,
-                            asset1: self.asset1,
-                            asset2: self.asset2,
-                            last_asset1: self.last_asset1,
-                            last_asset2: self.last_asset2,
-                            ch1: self.ch1,
-                            ch2: self.ch1,
-                        };
-                        self.trade_record.push(tr);
-                        self.asset1 = asset1;
-                        self.asset2 = asset2;
-                        match order {
-                            Order::None => return vec![],
-                            _ => {
-                                return vec![(id, order)];
-                            }
-                        }
-                    }
+                    Some(o) => return vec![(id, o)],
                     None => return vec![],
                 }
             }
             _ => {
-                tracing::error![
-                    "Multiple order hist evaluation is not yet supported, returning order list as is"
-                ];
-                active_orders
+                let mut remaining_active_orders = vec![];
+                for (id, order) in active_orders.iter() {
+                    let result = self.eval_single_order(trade_slice, *order, eval_mode);
+                    match result {
+                        Some(o) => remaining_active_orders.push((*id, o)),
+                        None => (),
+                    }
+                }
+                remaining_active_orders
             }
         }
     }

@@ -145,6 +145,12 @@ pub enum BinInstructs {
         o: Order,
     },
     CancelAndReplaceOrder {
+        id: i32,
+        symbol: String,
+        o: Order,
+    },
+    CancelOrder {
+        id: i32,
         symbol: String,
         o: Order,
     },
@@ -173,9 +179,16 @@ impl BinInstructs {
                 priv_key: _,
             } => "Add or replace API keys",
             BinInstructs::PlaceOrder { symbol: _, o: _ } => "BinInstruct: Place Order",
-            BinInstructs::CancelAndReplaceOrder { symbol: _, o: _ } => {
-                "BinInstruct: Cancel and Replace Order:"
-            }
+            BinInstructs::CancelAndReplaceOrder {
+                id: _,
+                symbol: _,
+                o: _,
+            } => "Cancel and replace order",
+            BinInstructs::CancelOrder {
+                id: _,
+                symbol: _,
+                o: _,
+            } => "Cancel and Orderreplace order",
             BinInstructs::CancelAllOrders { symbol: _ } => "BinInstruct: Cancel All Orders",
             BinInstructs::ChangeLiveAsset {
                 symbol: _,

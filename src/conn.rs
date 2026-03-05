@@ -34,7 +34,7 @@ use crate::data::{
     AssetData, Intv, Kline as KlineMine, Klines, get_asset_bases_binance, validate_asset_binance,
     validate_asset_dl,
 };
-use crate::gui::{KeysStatus, LiveInfo};
+use crate::gui::{KeysStatus, LiveInfo, Settings};
 use crate::trade::Order;
 use crate::{BinInstructs, BinResponse, GeneralError};
 
@@ -793,12 +793,26 @@ impl BinanceClient {
         Ok(resp.order_id)
     }
     #[instrument(level = "trace")]
-    async fn cancel_order(&self, sym: &str) -> Result<()> {
+    async fn cancel_order(&self, sym: &str, id: &i32) -> Result<()> {
         let resp = self
             .binance_client
             .request(usdm::CancelOrderRequest {
                 symbol: sym.into(),
-                order_id: Some(self.current_order_id),
+                order_id: Some(*id as u64),
+                ..Default::default()
+            })
+            .await
+            .context(ERR_CTX)?;
+        tracing::info!("{:?}", resp);
+        Ok(())
+    }
+    async fn cancel_all_orders(&self, symbol: &str, ids: Vec<u64>) -> Result<()> {
+        let s = symbol.to_string();
+        let resp = self
+            .binance_client
+            .request(usdm::CancelMultipleOrdersRequest {
+                symbol: s,
+                order_id_list: ids,
                 ..Default::default()
             })
             .await
@@ -1041,13 +1055,42 @@ impl BinanceClient {
 
         Ok(params)
     }
+    pub fn update_settings(&mut self, settings: &Settings) -> Result<()> {
+        //TODO
+        Ok(())
+    }
     #[instrument(level = "trace")]
     pub async fn parse_binance_instructs(&mut self, i: BinInstructs) -> BinResponse {
         match i {
-            BinInstructs::UpdateSettings(settings) => {
-                //TODO add upate settings here
-                let a = 0;
-                BinResponse::Success
+            BinInstructs::CancelOrder { id, symbol, o } => {
+                let res = self.cancel_order(&symbol, &id).await;
+                let resp: BinResponse = match res {
+                    Ok(_) => BinResponse::Success,
+                    Err(e) => {
+                        let string_error = format!["{}", e];
+                        tracing::error!(
+                            "{}",
+                            anyhow!["Unable to cancel_order:{}", e.context(ERR_CTX)]
+                        );
+                        BinResponse::Failure((string_error, GeneralError::Generic))
+                    }
+                };
+                resp
+            }
+            BinInstructs::UpdateSettings(ref settings) => {
+                let res = self.update_settings(&settings);
+                let resp: BinResponse = match res {
+                    Ok(_) => BinResponse::Success,
+                    Err(e) => {
+                        let string_error = format!["{}", e];
+                        tracing::error!(
+                            "{}",
+                            anyhow!["Unable to update_settings:{}", e.context(ERR_CTX)]
+                        );
+                        BinResponse::Failure((string_error, GeneralError::Generic))
+                    }
+                };
+                resp
             }
             BinInstructs::RemoveApiKeys => {
                 let res = self.remove_api_keys().await;
@@ -1220,11 +1263,12 @@ impl BinanceClient {
                 resp
             }
             BinInstructs::CancelAndReplaceOrder {
+                id,
                 symbol: ref s,
                 o: order,
             } => {
                 tracing::debug!["Connect ws start {:?}", &self];
-                let res = self.cancel_order(&s).await;
+                let res = self.cancel_order(&s, &id).await;
                 match res {
                     Ok(_) => {}
                     Err(e) => {
@@ -1256,8 +1300,13 @@ impl BinanceClient {
                 resp
             }
             BinInstructs::CancelAllOrders { symbol: ref s } => {
-                //TODO rewrite this to support multiple orders
-                let res = self.cancel_order(&s).await;
+                todo!()
+                /*
+                let live_inf = self.live_info.clone();
+                let live_info = live_inf.lock().expect("live_info poisoned mutex");
+                let o_ids:Vec<u64>=live_info.live_orders.iter().map(|(id,(order,active))|{*id as u64}).collect();
+
+                let res = self.cancel_all_orders(&s, o_ids).await;
                 let resp = match res {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
@@ -1274,6 +1323,7 @@ impl BinanceClient {
                     }
                 };
                 resp
+                */
             }
             BinInstructs::ChangeLiveAsset {
                 symbol: ref s,
