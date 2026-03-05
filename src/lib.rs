@@ -1,9 +1,9 @@
 #![allow(deprecated)]
+use crate::gui::Settings;
 use crate::trade::Order;
 use serde_json::Value;
 use std::collections::HashMap;
 use strum_macros::EnumIter;
-use crate::gui::Settings;
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub enum GeneralError {
@@ -70,7 +70,7 @@ impl SQLInstructs {
     pub fn to_str(&self) -> &str {
         match &self {
             SQLInstructs::None => "SQLInstructs: None",
-            SQLInstructs::UpdateSettings(_)=> "SQLInstructs: update settings",
+            SQLInstructs::UpdateSettings(_) => "SQLInstructs: update settings",
             SQLInstructs::LoadHistData { symbol: _ } => "SQLInstructs: Load Hist Data",
             SQLInstructs::LoadHistDataPart {
                 symbol: _,
@@ -132,8 +132,13 @@ pub enum BinInstructs {
     GetUserData,
     UpdateSettings(Settings),
     GetAllBalances,
-    GetBalance{symbol:String},
-    AddReplaceApiKeys{pub_key:String, priv_key:String},
+    GetBalance {
+        symbol: String,
+    },
+    AddReplaceApiKeys {
+        pub_key: String,
+        priv_key: String,
+    },
     RemoveApiKeys,
     PlaceOrder {
         symbol: String,
@@ -158,12 +163,15 @@ impl BinInstructs {
             BinInstructs::ConnectWS { params: _ } => "BinInstruct: Connect WS",
             BinInstructs::ConnectUserWS { params: _ } => "BinInstruct: Connect User WS",
             BinInstructs::Disconnect => "BinInstruct: Disconnect",
-            BinInstructs::UpdateSettings(_)=> "BinInstructs: update settings",
+            BinInstructs::UpdateSettings(_) => "BinInstructs: update settings",
             BinInstructs::GetUserData => "BinInstruct: GetUserData",
-            BinInstructs::GetAllBalances=> "Get all balances Binance",
-            BinInstructs::GetBalance{symbol:_}=> "Get balance for a Symbol",
-            BinInstructs::RemoveApiKeys =>"Remove API keys",
-            BinInstructs::AddReplaceApiKeys{pub_key:_, priv_key:_} =>"Add or replace API keys",
+            BinInstructs::GetAllBalances => "Get all balances Binance",
+            BinInstructs::GetBalance { symbol: _ } => "Get balance for a Symbol",
+            BinInstructs::RemoveApiKeys => "Remove API keys",
+            BinInstructs::AddReplaceApiKeys {
+                pub_key: _,
+                priv_key: _,
+            } => "Add or replace API keys",
             BinInstructs::PlaceOrder { symbol: _, o: _ } => "BinInstruct: Place Order",
             BinInstructs::CancelAndReplaceOrder { symbol: _, o: _ } => {
                 "BinInstruct: Cancel and Replace Order:"
@@ -218,7 +226,7 @@ impl ClientInstruct {
             ClientInstruct::Terminate => "Terminate",
 
             ClientInstruct::RestartRemote => "Restart Remote",
-            ClientInstruct::UpdateSettings(_)=> "Update Settings",
+            ClientInstruct::UpdateSettings(_) => "Update Settings",
             ClientInstruct::StartBinCli => "Start Bin Client",
             ClientInstruct::StopBinCli => "Stop Bin Client",
             ClientInstruct::SendBinInstructs(_) => "Send Bin Instructs",

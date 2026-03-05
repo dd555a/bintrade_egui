@@ -1712,7 +1712,7 @@ impl SQLConn {
         match i {
             SQLInstructs::UpdateSettings(settings) => {
                 //TODO add upate settings here
-                let a=0;
+                let a = 0;
                 SQLResponse::Success
             }
             SQLInstructs::LoadHistData { symbol: ref s } => {

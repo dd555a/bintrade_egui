@@ -145,7 +145,6 @@ impl KlinePlot {
         last_price_hist: Option<&mut f64>,
         hist_symbol_info: Option<&mut (String, String, String)>,
     ) -> Option<Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>> {
-
         let ad = live_ad.lock().expect("Live AD mutex locked");
         let ret = match return_wicks {
             Some(ret_wicks) => {
@@ -1208,9 +1207,8 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                 let settings_l = self.settings.clone();
                 let mut settings = settings_l.lock().expect("Data manager mutex posoned!");
 
-                let live_inf=self.live_info.clone();
-                let live_info=live_inf.lock().expect("Unalle to unlock live_info mutex");
-
+                let live_inf = self.live_info.clone();
+                let live_info = live_inf.lock().expect("Unalle to unlock live_info mutex");
 
                 Settings::show(&mut settings, &live_info, chan, ui);
             }
@@ -1463,7 +1461,7 @@ impl DesktopApp {
         live_price: Arc<Mutex<f64>>,
         collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         settings: Settings,
-        live_info:Arc<Mutex<LiveInfo>>,
+        live_info: Arc<Mutex<LiveInfo>>,
     ) -> Self {
         let live_plot = Rc::new(Mutex::new(LivePlot::new(
             asset_data.clone(),
@@ -1613,7 +1611,6 @@ impl eframe::App for DesktopApp {
     }
 }
 
-
 #[derive(Dbg, Clone)]
 struct ManualOrders {
     man_orders: Option<HistTrade>,
@@ -1713,6 +1710,9 @@ fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLin
 
 #[allow(unused)]
 impl ManualOrders {
+    fn hist_validate_order(o: &Order, asset1: &f64, asset2: &f64) -> Result<()> {
+        todo!()
+    }
     fn new(man_orders: HistTrade) -> Self {
         Self {
             man_orders: Some(man_orders),
@@ -1748,51 +1748,48 @@ impl ManualOrders {
             }
         };
         tracing::trace!["Manual orders last_price {}", &last_price];
-        if let Some(live_inf)=live_info{
-                man_orders.asset1_name = live_inf.current_pair_strings.0.clone();
-                man_orders.asset2_name = live_inf.current_pair_strings.1.clone();
-                man_orders.asset1 = live_inf.current_pair_free_balances.0;
-                man_orders.asset2 = live_inf.current_pair_free_balances.1;
+        if let Some(live_inf) = live_info {
+            man_orders.asset1_name = live_inf.current_pair_strings.0.clone();
+            man_orders.asset2_name = live_inf.current_pair_strings.1.clone();
+            man_orders.asset1 = live_inf.current_pair_free_balances.0;
+            man_orders.asset2 = live_inf.current_pair_free_balances.1;
         };
         match (hist_trade, trade_slice) {
             (Some(mut h_trade), Some(t_slice)) => {
                 man_orders.asset1 = h_trade.asset1;
                 man_orders.asset2 = h_trade.asset2;
                 if let Some(symbol_inf) = symbol_info {
-                    //NOTE symbol can also be gotten here
+                    man_orders.current_symbol = symbol_inf.0.clone();
                     man_orders.asset1_name = symbol_inf.1.clone();
                     man_orders.asset2_name = symbol_inf.2.clone();
                 };
-                if let Some((o, active)) = man_orders.orders.get(&man_orders.last_id) {
-                    if *active == true {
-                        let res1 = man_orders.check_order_price(o, &last_price);
-                        match res1 {
-                            Ok(_) => {
-                                let res = man_orders.check_order_hist(o, &mut h_trade);
-                                match res {
-                                    Ok(_) => {
-                                        h_trade.place_order(o);
-                                        Ok(())
-                                    }
-                                    Err(e) => Err(e),
-                                }
-                            }
-                            Err(e) => Err(e),
-                        };
-                    };
-                };
-                let res = h_trade.trade_forward(t_slice, 0);
-                match res {
-                    Ok(_) => (),
-                    Err(e) => {
-                        tracing::error!["Trade forward error: {}", e];
-                    }
-                };
+                //NOTE if the slice is long the evaluation might brick perormance
+                let active_orders: Vec<(i32, Order)> = man_orders
+                    .orders
+                    .iter()
+                    .filter(|(_, (_, active))| *active == true)
+                    .map(|(id, (order, active))| (*id, *order))
+                    .collect();
+                let inactive_orders: Vec<(i32, Order)> = man_orders
+                    .orders
+                    .iter()
+                    .filter(|(_, (_, active))| *active == false)
+                    .map(|(id, (order, active))| (*id, *order))
+                    .collect();
+                let remaining_active_orders = h_trade.trade_forward(t_slice, 0, active_orders);
+                let mut remaining_orders: HashMap<i32, (Order, bool)> = inactive_orders
+                    .iter()
+                    .map(|(id, order)| (*id, (*order, false)))
+                    .collect();
+                let _res: Vec<_> = remaining_active_orders
+                    .iter()
+                    .map(|(id, order)| {
+                        remaining_orders.insert(*id, (*order, true));
+                    })
+                    .collect();
+                man_orders.orders = remaining_orders;
             }
-            (None, None) => {
-                //FIXME place live orders here
-                //
-            }
+            (None, None) => {}
             _ => {
                 tracing::error!["This shouldn't happen manual_orders"]
             }
@@ -1825,7 +1822,7 @@ impl ManualOrders {
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
                         RichText::new(format!["{}:{}", man_orders.asset2_name, man_orders.asset2])
-                            .color(Color32::from_rgb(71,200,38)),
+                            .color(Color32::from_rgb(71, 200, 38)),
                     ),
                 );
                 ui.end_row();
@@ -1836,10 +1833,7 @@ impl ManualOrders {
                 ui.label(
                     RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
                 );
-                ui.checkbox(
-                    &mut man_orders.hotkeys,
-                    "Hotkeys",
-                );
+                ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
                 /*NOTE the bellow doesn't work, FIXME
                 ui.end_row();
                 man_orders.last_price_s = *last_price;
@@ -1868,7 +1862,7 @@ impl ManualOrders {
         });
         ui.end_row();
         ui.ctx().request_repaint();
-        if man_orders.hotkeys==true{
+        if man_orders.hotkeys == true {
             /*
             if ui.ctx().input(|i| i.key_pressed(egui::Key::A)) {
                 println!("\n A Pressed");
@@ -2154,37 +2148,51 @@ impl ManualOrders {
                         }
                         Order::None => {}
                     };
-                    if let Some(live_inf)=live_info{
+                    if let Some(live_inf) = live_info {
                         let o = man_orders.order;
-                        let msg =
-                            ClientInstruct::SendBinInstructs(BinInstructs::PlaceOrder {
-                                symbol: live_inf.live_asset_symbol_changed.1.clone(),
-                                o:o.clone(),
-                            });
+                        let msg = ClientInstruct::SendBinInstructs(BinInstructs::PlaceOrder {
+                            symbol: live_inf.live_asset_symbol_changed.1.clone(),
+                            o: o.clone(),
+                        });
                         let _res = cli_chan.send(msg);
-
-                    }else{
+                    } else {
                         let o = man_orders.order;
-                        man_orders.last_id += 1;
-                        let oid = man_orders.last_id;
-                        man_orders.orders.insert(oid, (o, false));
-
+                        let order_valid_hist = ManualOrders::hist_validate_order(
+                            &o,
+                            &man_orders.asset1,
+                            &man_orders.asset2,
+                        );
+                        match order_valid_hist {
+                            Ok(_) => {
+                                man_orders.last_id += 1;
+                                let oid = man_orders.last_id;
+                                man_orders.orders.insert(oid, (o, false));
+                            }
+                            Err(e) => {
+                                tracing::error!["Hist order invalid ERROR: {}", e];
+                            }
+                        };
                     };
                 };
-                if let Some(live_inf)=live_info{
-                    man_orders.orders=live_inf.live_orders.clone();
+                if let Some(live_inf) = live_info {
+                    man_orders.orders = live_inf.live_orders.clone();
 
                     match live_inf.keys_status {
                         KeysStatus::NotAdded => {
                             ui.label(
-                                RichText::new(format!["Add or unlock binance API keys",]).color(Color32::ORANGE),
+                                RichText::new(format!["Add or unlock binance API keys",])
+                                    .color(Color32::ORANGE),
                             );
                         }
                         KeysStatus::Invalid => {
-                            ui.label(RichText::new(format!["Api Keys Invalid",]).color(Color32::RED));
+                            ui.label(
+                                RichText::new(format!["Api Keys Invalid",]).color(Color32::RED),
+                            );
                         }
                         KeysStatus::Valid => {
-                            ui.label(RichText::new(format!["Api Keys Valid",]).color(Color32::GREEN));
+                            ui.label(
+                                RichText::new(format!["Api Keys Valid",]).color(Color32::GREEN),
+                            );
                         }
                     };
                 };
@@ -2489,7 +2497,6 @@ impl Default for HistPlot {
     }
 }
 
-
 #[derive(Dbg, Default, Encode, Decode, Clone, Eq, PartialEq, Copy)]
 pub enum KeysStatus {
     #[default]
@@ -2507,7 +2514,6 @@ impl KeysStatus {
         }
     }
 }
-
 
 #[derive(Dbg, Default, Encode, Decode, Clone, PartialEq)]
 pub struct Settings {
@@ -2557,9 +2563,14 @@ impl Settings {
         true
     }
     #[allow(unused)]
-    fn show(settings: &mut Settings, live_info:&LiveInfo, cli_chan: watch::Sender<ClientInstruct>, ui: &mut egui::Ui) {
-        settings.balances=live_info.acc_balances.clone();
-        settings.key_status=live_info.keys_status;
+    fn show(
+        settings: &mut Settings,
+        live_info: &LiveInfo,
+        cli_chan: watch::Sender<ClientInstruct>,
+        ui: &mut egui::Ui,
+    ) {
+        settings.balances = live_info.acc_balances.clone();
+        settings.key_status = live_info.keys_status;
 
         egui::Grid::new("Account")
             .striped(true)
@@ -2579,7 +2590,7 @@ impl Settings {
                         .hint_text("priv_key"),
                 );
                 ui.end_row();
-                if settings.enc_api_keys==true{
+                if settings.enc_api_keys == true {
                     ui.add_sized(
                         egui::vec2(400.0, 20.0),
                         egui::TextEdit::singleline(&mut settings.password_string)
@@ -2588,30 +2599,29 @@ impl Settings {
                 };
                 ui.end_row();
                 if ui.button("Add keys").clicked() {
-                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::AddReplaceApiKeys{
-                        pub_key:settings.api_key_enter_string.clone(),
-                        priv_key:settings.priv_api_key_enter_string.clone(), 
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::AddReplaceApiKeys {
+                        pub_key: settings.api_key_enter_string.clone(),
+                        priv_key: settings.priv_api_key_enter_string.clone(),
                     });
                     let _res = cli_chan.send(msg);
-                    settings.binance_pub_key=Some(settings.api_key_enter_string.clone());
-                    settings.binance_priv_key=Some(settings.priv_api_key_enter_string.clone());
-                    if settings.enc_api_keys==true{
-                        let _res=settings.encrypt_keys(settings.password_string.clone());
+                    settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
+                    settings.binance_priv_key = Some(settings.priv_api_key_enter_string.clone());
+                    if settings.enc_api_keys == true {
+                        let _res = settings.encrypt_keys(settings.password_string.clone());
                     };
                     //NOTE not sure if this is OK... better way to shred strings
                     settings.api_key_enter_string = String::default();
                     settings.priv_api_key_enter_string = String::default();
-                    settings.password_string= String::default();
+                    settings.password_string = String::default();
                 };
                 if ui.button("Remove keys").clicked() {
                     settings.api_key_enter_string = String::default();
                     settings.priv_api_key_enter_string = String::default();
-                    settings.binance_pub_key=None;
-                    settings.binance_priv_key=None;;
-                    settings.enc_binance_pub_key=None;;
-                    settings.enc_binance_priv_key=None;;
-                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::RemoveApiKeys{
-                    });
+                    settings.binance_pub_key = None;
+                    settings.binance_priv_key = None;
+                    settings.enc_binance_pub_key = None;
+                    settings.enc_binance_priv_key = None;
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::RemoveApiKeys {});
                     let _res = cli_chan.send(msg);
                 };
                 if ui.button("Unlock keys").clicked() {
@@ -2622,7 +2632,8 @@ impl Settings {
                 match settings.key_status {
                     KeysStatus::NotAdded => {
                         ui.label(
-                            RichText::new(format!["Add or unlock binance API keys",]).color(Color32::ORANGE),
+                            RichText::new(format!["Add or unlock binance API keys",])
+                                .color(Color32::ORANGE),
                         );
                     }
                     KeysStatus::Invalid => {
@@ -2647,31 +2658,31 @@ impl Settings {
                 ui.end_row();
                 if ui.button("Save settings").clicked() {
                     if settings.save_api_keys == true {
-                            let res=if settings.enc_api_keys==true{
-                                settings.binance_pub_key=None;
-                                settings.binance_priv_key=None;;
-                                settings.save_settings_file(Some(settings.password_string.clone()))
-                            }else{
-                                settings.enc_binance_pub_key=None;
-                                settings.enc_binance_priv_key=None;;
-                                settings.save_settings_file(None)
-                            };
-                            match res {
-                                Ok(_) => (),
-                                Err(e) => tracing::error!["Save setting ERROR: {}", e],
-                            };
-                    }else{
-                        settings.binance_pub_key=None;
-                        settings.binance_priv_key=None;;
-                        settings.enc_binance_pub_key=None;
-                        settings.enc_binance_priv_key=None;;
+                        let res = if settings.enc_api_keys == true {
+                            settings.binance_pub_key = None;
+                            settings.binance_priv_key = None;
+                            settings.save_settings_file(Some(settings.password_string.clone()))
+                        } else {
+                            settings.enc_binance_pub_key = None;
+                            settings.enc_binance_priv_key = None;
+                            settings.save_settings_file(None)
+                        };
+                        match res {
+                            Ok(_) => (),
+                            Err(e) => tracing::error!["Save setting ERROR: {}", e],
+                        };
+                    } else {
+                        settings.binance_pub_key = None;
+                        settings.binance_priv_key = None;
+                        settings.enc_binance_pub_key = None;
+                        settings.enc_binance_priv_key = None;
                         settings.save_settings_file(None);
                     };
-                    let mut sett=settings.clone();
-                    sett.binance_pub_key=None;
-                    sett.binance_priv_key=None;;
-                    sett.enc_binance_pub_key=None;
-                    sett.enc_binance_priv_key=None;;
+                    let mut sett = settings.clone();
+                    sett.binance_pub_key = None;
+                    sett.binance_priv_key = None;
+                    sett.enc_binance_pub_key = None;
+                    sett.enc_binance_priv_key = None;
                     let msg = ClientInstruct::UpdateSettings(sett);
                     let _res = cli_chan.send(msg);
                 };
@@ -2680,17 +2691,16 @@ impl Settings {
             .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
-                match &settings.key_status{
-                    KeysStatus::Valid=>{
+                match &settings.key_status {
+                    KeysStatus::Valid => {
                         if ui.button("Refresh balances").clicked() {
-                            let msg = ClientInstruct::SendBinInstructs(BinInstructs::GetAllBalances{
-                            });
+                            let msg =
+                                ClientInstruct::SendBinInstructs(BinInstructs::GetAllBalances {});
                             let _res = cli_chan.send(msg);
                         };
                     }
-                    _=>{}
+                    _ => {}
                 };
-
             });
         ui.vertical(|ui| {
             ui.label(RichText::new(format!["BINANCE BLANCES",]).color(Color32::YELLOW));
@@ -2717,7 +2727,7 @@ impl Settings {
                     });
                 })
                 .body(|mut body| {
-                    for (asset, (avail_balance,lock_balance)) in settings.balances.iter() {
+                    for (asset, (avail_balance, lock_balance)) in settings.balances.iter() {
                         let row_height = 18.0;
                         body.row(row_height, |mut row| {
                             row.col(|ui| {
@@ -2735,12 +2745,12 @@ impl Settings {
         });
     }
     pub fn encrypt_keys(&mut self, pass: String) -> Result<()> {
-        let res=Settings::verify_password_req(&pass);
-        match res{
-            true=>{}
-            false=>{
+        let res = Settings::verify_password_req(&pass);
+        match res {
+            true => {}
+            false => {
                 tracing::error!["Password invalid"];
-                return Ok(())
+                return Ok(());
             }
         };
         let mc = new_magic_crypt!(&pass, 256);

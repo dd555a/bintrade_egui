@@ -508,8 +508,25 @@ enum OrderStatus {
     AdvOrder { t: AdvOrder },
 }
 */
+#[instrument(level = "trace")]
+fn hist_eval_kline_multiorder(
+    kline: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
+    orders: Vec<(i32, Order)>,
+    asset1: f64,
+    asset2: f64,
+    eval_mode: i32,
+) -> Option<(chrono::NaiveDateTime, f64, f64, Order)> {
+    /*
+    let market_orders: Vec<(i32,Order)>;
+    let stop_market_orders: Vec<(i32,Order)>;
+    let stop_limit_market_orders: Vec<(i32,Order)>;
+    todo!()
+     * */
 
-#[instrument(level = "debug")]
+    return None;
+}
+
+#[instrument(level = "trace")]
 fn hist_eval_kline(
     kline: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
     order: Order,
@@ -560,7 +577,6 @@ pub struct HistTrade {
     pub current_data_end_index: usize,
 
     pub current_index: usize,
-    current_order: Option<Order>,
 }
 impl Default for HistTrade {
     fn default() -> Self {
@@ -585,7 +601,6 @@ impl Default for HistTrade {
             current_intv: Intv::Min15,
             current_data_end_index: 0,
             current_index: 0,
-            current_order: None,
         }
     }
 }
@@ -596,57 +611,59 @@ impl HistTrade {
             ..Default::default()
         }
     }
-    pub fn place_order(&mut self, order: &Order) {
-        self.current_order = Some(*order);
-    }
+    #[allow(unused)]
     pub fn trade_forward(
         &mut self,
         trade_slice: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
         eval_mode: i32,
-    ) -> Result<()> {
-        let o = match self.current_order {
-            Some(o) => o,
-            None => {
-                tracing::trace!["No order set"];
-                return Ok(());
-            }
-        };
-        tracing::debug!["HistTradingRunner {:?}", self.trade_time];
-        let result = hist_eval_kline(trade_slice, o, self.asset1, self.asset2, eval_mode);
-        match result {
-            Some((transaction_time, asset1, asset2, order)) => {
-                tracing::debug![
-                    "Hist_Trade_Forward. Transaction Time: {}\n Asset1: {}\n Asset2: {} \n Order: {:?}",
-                    transaction_time,
-                    asset1,
-                    asset2,
-                    order
-                ];
-                self.calculate_change();
-                let tr = TradeRecord {
-                    asset_pair: self.asset_pair.clone(),
-                    transaction_time,
-                    trades_made: self.trades_made,
-                    asset1_held: self.asset1_held,
-                    asset1: self.asset1,
-                    asset2: self.asset2,
-                    last_asset1: self.last_asset1,
-                    last_asset2: self.last_asset2,
-                    ch1: self.ch1,
-                    ch2: self.ch1,
-                };
-                self.trade_record.push(tr);
-                self.asset1 = asset1;
-                self.asset2 = asset2;
-                match order {
-                    Order::None => return Ok(()),
-                    _ => {
-                        self.current_order = Some(order);
-                        return Ok(());
+        active_orders: Vec<(i32, Order)>,
+    ) -> Vec<(i32, Order)> {
+        match active_orders.len() {
+            0 => return vec![],
+            1 => {
+                let (id, o) = active_orders[0];
+                let result = hist_eval_kline(trade_slice, o, self.asset1, self.asset2, eval_mode);
+                match result {
+                    Some((transaction_time, asset1, asset2, order)) => {
+                        tracing::debug![
+                            "Hist_Trade_Forward. Transaction Time: {}\n Asset1: {}\n Asset2: {} \n Order: {:?}",
+                            transaction_time,
+                            asset1,
+                            asset2,
+                            order
+                        ];
+                        self.calculate_change();
+                        let tr = TradeRecord {
+                            asset_pair: self.asset_pair.clone(),
+                            transaction_time,
+                            trades_made: self.trades_made,
+                            asset1_held: self.asset1_held,
+                            asset1: self.asset1,
+                            asset2: self.asset2,
+                            last_asset1: self.last_asset1,
+                            last_asset2: self.last_asset2,
+                            ch1: self.ch1,
+                            ch2: self.ch1,
+                        };
+                        self.trade_record.push(tr);
+                        self.asset1 = asset1;
+                        self.asset2 = asset2;
+                        match order {
+                            Order::None => return vec![],
+                            _ => {
+                                return vec![(id, order)];
+                            }
+                        }
                     }
+                    None => return vec![],
                 }
             }
-            None => return Ok(()),
+            _ => {
+                tracing::error![
+                    "Multiple order hist evaluation is not yet supported, returning order list as is"
+                ];
+                active_orders
+            }
         }
     }
     pub fn calculate_change(&mut self) {
