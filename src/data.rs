@@ -1710,6 +1710,11 @@ impl SQLConn {
     }
     pub async fn parse_sql_instructs(&mut self, i: SQLInstructs) -> SQLResponse {
         match i {
+            SQLInstructs::UpdateSettings(settings) => {
+                //TODO add upate settings here
+                let a=0;
+                SQLResponse::Success
+            }
             SQLInstructs::LoadHistData { symbol: ref s } => {
                 tracing::info!("Loading historical data for:{}", s);
                 let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)

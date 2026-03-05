@@ -30,12 +30,9 @@ use tokio::sync::watch::{Receiver, Sender};
 use tracing::instrument;
 use websockets::WebSocket;
 
-use crate::data::AssetData;
-use crate::data::Intv;
-use crate::data::Kline as KlineMine;
-use crate::data::Klines;
-use crate::data::{get_asset_bases_binance, validate_asset_binance, validate_asset_dl};
+use crate::data::{get_asset_bases_binance, validate_asset_binance, validate_asset_dl,Klines,Kline as KlineMine, Intv,AssetData};
 use crate::trade::Order;
+use crate::gui::{LiveInfo, KeysStatus};
 use crate::{BinInstructs, BinResponse, GeneralError};
 
 const ERR_CTX: &str = "Binance client | websocket:";
@@ -686,6 +683,7 @@ pub struct BinanceClient {
     account_info: Option<AccountInformation>,
     exchange_info: Vec<SymbolInfo>,
     live_ad: Arc<Mutex<AssetData>>,
+    live_info: Arc<Mutex<LiveInfo>>,
 
     current_symbol: String,
     base_balances: (f64, f64),
@@ -706,6 +704,7 @@ impl Default for BinanceClient {
             account_info: None,
             exchange_info: vec![],
             live_ad: Arc::new(Mutex::new(AssetData::default())),
+            live_info: Arc::new(Mutex::new(LiveInfo::default())),
             api_keys_valid: false,
 
             current_symbol: String::default(),
@@ -724,6 +723,7 @@ impl BinanceClient {
         collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         live_price_watch: Arc<Mutex<f64>>,
         live_ad: Arc<Mutex<AssetData>>,
+        live_info: Arc<Mutex<LiveInfo>>,
     ) -> Self {
         Self {
             binance_client: Binance::default(),
@@ -735,10 +735,41 @@ impl BinanceClient {
             account_info: None,
             exchange_info: vec![],
             live_ad,
+            live_info,
             ..Default::default()
         }
     }
-    #[instrument(level = "trace")]
+    async fn remove_api_keys(
+        &mut self,
+    ) -> Result<()> {
+        self.binance_client=Binance::default();
+        Ok(())
+    }
+    async fn add_replace_api_keys(
+        &mut self,
+        pub_key: &str,
+        priv_key: &str,
+    ) -> Result<()> {
+        self.binance_client=Binance::with_key_and_secret(&pub_key, &priv_key);
+        let res=self.get_all_balances().await;
+        //FIXME unlock the mutex twice here, fix later
+        let live_inf=self.live_info.clone();
+        let mut live_info=live_inf.lock().expect("live_info poisoned mutex");
+        match res{
+            Ok(_)=>{
+                tracing::info!["API keys changed, account balances updated"];
+                self.api_keys_valid=true;
+                live_info.keys_status=KeysStatus::Valid;
+
+            }
+            Err(e)=>{
+                tracing::error!["Unable to get binance account balances: {}",e];
+                self.api_keys_valid=false;
+                live_info.keys_status=KeysStatus::Invalid;
+            }
+        };
+        Ok(())
+    }
     async fn send_new_order(
         &self,
         sym: &str,
@@ -746,7 +777,7 @@ impl BinanceClient {
         sid: OrderSide,
         pric: f64,
         quant: f64,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         let resp = self
             .binance_client
             .request(usdm::NewOrderRequest {
@@ -763,7 +794,7 @@ impl BinanceClient {
             .await
             .context(ERR_CTX)?;
         tracing::info!("{:?}", resp);
-        Ok(())
+        Ok(resp.order_id)
     }
     #[instrument(level = "trace")]
     async fn cancel_order(&self, sym: &str) -> Result<()> {
@@ -922,6 +953,32 @@ impl BinanceClient {
         };
         Ok(())
     }
+    async fn get_all_balances(&mut self) -> Result<()> {
+        let res = self.binance_client.request(GetAccountRequest {}).await;
+        let mut balances: HashMap<String, (f64, f64)> = HashMap::new();
+        match res {
+            Ok(acc) => {
+                acc.balances.iter().map(|a| {
+                    let free = match a.free.to_f64() {
+                        Some(res) => res,
+                        None => 0.0,
+                    };
+                    let locked = match a.locked.to_f64() {
+                        Some(res) => res,
+                        None => 0.0,
+                    };
+                    balances.insert(a.asset.clone(), (free, locked))
+                });
+            }
+            Err(e) => {
+                tracing::error!["Get balances error: {}", e];
+            }
+        };
+        let live_inf=self.live_info.clone();
+        let mut live_info=live_inf.lock().expect("Unable to unlock live_info mutex: bin_client side");
+        live_info.acc_balances=balances;
+        Ok(())
+    }
     #[instrument(level = "trace")]
     async fn change_ws_params(&mut self, new_params: HashMap<String, Vec<String>>) -> Result<()> {
         //TODO check if possible to change params without disconnecting
@@ -988,10 +1045,90 @@ impl BinanceClient {
     }
     #[instrument(level = "trace")]
     pub async fn parse_binance_instructs(&mut self, i: BinInstructs) -> BinResponse {
-        //TODO query state here...
         match i {
+            BinInstructs::UpdateSettings(settings) => {
+                //TODO add upate settings here
+                let a=0;
+                BinResponse::Success
+            }
+            BinInstructs::RemoveApiKeys=> {
+                let res=self.remove_api_keys().await;
+                let resp: BinResponse = match res {
+                    Ok(_) => BinResponse::Success,
+                    Err(e) => {
+                        let string_error = format!["{}", e];
+                        tracing::error!(
+                            "{}",
+                            anyhow![
+                                "{:?} Unable to connect to ws  e:{}",
+                                i.clone(),
+                                e.context(ERR_CTX)
+                            ]
+                        );
+                        BinResponse::Failure((string_error, GeneralError::Generic))
+                    }
+                };
+                resp
+            },
+            BinInstructs::GetAllBalances=> {
+                let res=self.get_all_balances().await;
+                let resp: BinResponse = match res {
+                    Ok(_) => BinResponse::Success,
+                    Err(e) => {
+                        let string_error = format!["{}", e];
+                        tracing::error!(
+                            "{}",
+                            anyhow![
+                                "{:?} Unable to connect to ws  e:{}",
+                                i.clone(),
+                                e.context(ERR_CTX)
+                            ]
+                        );
+                        BinResponse::Failure((string_error, GeneralError::Generic))
+                    }
+                };
+                resp
+            },
+            BinInstructs::GetBalance{ref symbol}=> {
+                let res=self.get_balances(symbol).await;
+                let resp: BinResponse = match res {
+                    Ok(_) => BinResponse::Success,
+                    Err(e) => {
+                        let string_error = format!["{}", e];
+                        tracing::error!(
+                            "{}",
+                            anyhow![
+                                "{:?} Unable to connect to ws  e:{}",
+                                i.clone(),
+                                e.context(ERR_CTX)
+                            ]
+                        );
+                        BinResponse::Failure((string_error, GeneralError::Generic))
+                    }
+                };
+                resp
+            },
+            BinInstructs::AddReplaceApiKeys{ref pub_key, ref priv_key} =>{
+                let res=self.add_replace_api_keys(pub_key, priv_key).await;
+                let resp: BinResponse = match res {
+                    Ok(_) => BinResponse::Success,
+                    Err(e) => {
+                        let string_error = format!["{}", e];
+                        tracing::error!(
+                            "{}",
+                            anyhow![
+                                "{:?} Unable to connect to ws  e:{}",
+                                i.clone(),
+                                e.context(ERR_CTX)
+                            ]
+                        );
+                        BinResponse::Failure((string_error, GeneralError::Generic))
+                    }
+                };
+                resp
+            },
             BinInstructs::ConnectWS { params: ref p } => {
-                tracing::debug!["Connect ws start {:?}", &self];
+                tracing::trace!["Connect ws start {:?}", &self];
                 let res = self.connect_ws(p.clone()).await;
                 let resp: BinResponse = match res {
                     Ok(_) => BinResponse::Success,
@@ -1061,7 +1198,12 @@ impl BinanceClient {
                     .send_new_order(&s, order_type, order_side, price, quantity)
                     .await;
                 let resp = match res {
-                    Ok(_) => BinResponse::Success,
+                    Ok(order_id) =>{
+                        let live_inf=self.live_info.clone();
+                        let mut live_i=live_inf.lock().expect("Unable to unlock live_info mutex");
+                        live_i.live_orders.insert(order_id as i32,(order.clone(),true));
+                        BinResponse::Success
+                    } 
                     Err(e) => {
                         let string_error = format!["{}", e];
                         tracing::error!(

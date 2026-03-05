@@ -190,11 +190,6 @@ impl KlinePlot {
             };
         };
 
-        if let Some(live_inf)=live_info{
-            //FIXME here... DO IT
-
-        };
-
         let symbol = self.symbol.clone();
         if let Some(col_data) = collected_data {
             if let Some(data) = col_data.get(&symbol) {
@@ -1026,7 +1021,6 @@ enum PaneType {
     LiveTrade,
     HistTrade,
     ManageData,
-    Account,
     Settings,
 }
 impl fmt::Display for PaneType {
@@ -1035,7 +1029,6 @@ impl fmt::Display for PaneType {
             PaneType::LiveTrade => write!(f, "Live Trade"),
             PaneType::HistTrade => write!(f, "Hist Trade"),
             PaneType::ManageData => write!(f, "Manage Data"),
-            PaneType::Account => write!(f, "Account"),
             PaneType::Settings => write!(f, "Settings"),
             PaneType::None => write!(f, "None"),
         }
@@ -1209,21 +1202,17 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 DataManager::show(&mut data_manager, chan, ui);
             }
-            PaneType::Account => {
-                let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
-
-                let account_l = self.account.clone();
-                let mut account = account_l.lock().expect("Data manager mutex posoned!");
-
-                Account::show(&mut account, chan, ui);
-            }
             PaneType::Settings => {
                 let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
 
                 let settings_l = self.settings.clone();
                 let mut settings = settings_l.lock().expect("Data manager mutex posoned!");
 
-                Settings::show(&mut settings, chan, ui);
+                let live_inf=self.live_info.clone();
+                let live_info=live_inf.lock().expect("Unalle to unlock live_info mutex");
+
+
+                Settings::show(&mut settings, &live_info, chan, ui);
             }
         };
         return response;
@@ -1248,7 +1237,6 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                             self.hist_extras.remove(&pane.nr);
                         }
                         PaneType::ManageData => {}
-                        PaneType::Account => {}
                         PaneType::Settings => {}
                     }
                     let tab_title = self.tab_title_for_pane(pane);
@@ -1305,6 +1293,7 @@ pub struct LiveInfo {
     pub current_pair_free_balances: (f64, f64),
     pub current_pair_locked_balances: (f64, f64),
     pub live_orders: HashMap<i32, (Order, bool)>,
+    pub keys_status: KeysStatus,
 }
 
 #[derive(Dbg)]
@@ -1338,9 +1327,8 @@ pub struct DesktopApp {
     //Non-copy windows
     live_plot: Rc<Mutex<LivePlot>>,
     data_manager: Rc<Mutex<DataManager>>,
-    account: Rc<Mutex<Account>>,
     settings: Rc<Mutex<Settings>>,
-    live_info: Rc<Mutex<LiveInfo>>,
+    live_info: Arc<Mutex<LiveInfo>>,
 
     lp_chan_recv: watch::Receiver<f64>,
 
@@ -1450,9 +1438,8 @@ impl Default for DesktopApp {
             live_plot: Rc::new(Mutex::new(LivePlot::default())),
             data_manager: Rc::new(Mutex::new(DataManager::new(hist_asset_data))),
 
-            account: Rc::new(Mutex::new(Account::new())),
             settings: Rc::new(Mutex::new(Settings::new())),
-            live_info: Rc::new(Mutex::new(LiveInfo::default())),
+            live_info: Arc::new(Mutex::new(LiveInfo::default())),
 
             //Channels
             send_to_cli: None,
@@ -1476,6 +1463,7 @@ impl DesktopApp {
         live_price: Arc<Mutex<f64>>,
         collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         settings: Settings,
+        live_info:Arc<Mutex<LiveInfo>>,
     ) -> Self {
         let live_plot = Rc::new(Mutex::new(LivePlot::new(
             asset_data.clone(),
@@ -1494,6 +1482,7 @@ impl DesktopApp {
             hist_asset_data,
             data_manager,
             settings,
+            live_info,
             ..Default::default()
         }
     }
@@ -1582,13 +1571,6 @@ impl eframe::App for DesktopApp {
                                 new_child = tree.tiles.insert_pane(Pane::new(
                                     self.pane_number + 1,
                                     PaneType::ManageData,
-                                ));
-                                self.pane_number += 1;
-                            }
-                            PaneType::Account => {
-                                new_child = tree.tiles.insert_pane(Pane::new(
-                                    self.pane_number + 1,
-                                    PaneType::Account,
                                 ));
                                 self.pane_number += 1;
                             }
@@ -1766,7 +1748,12 @@ impl ManualOrders {
             }
         };
         tracing::trace!["Manual orders last_price {}", &last_price];
-
+        if let Some(live_inf)=live_info{
+                man_orders.asset1_name = live_inf.current_pair_strings.0.clone();
+                man_orders.asset2_name = live_inf.current_pair_strings.1.clone();
+                man_orders.asset1 = live_inf.current_pair_free_balances.0;
+                man_orders.asset2 = live_inf.current_pair_free_balances.1;
+        };
         match (hist_trade, trade_slice) {
             (Some(mut h_trade), Some(t_slice)) => {
                 man_orders.asset1 = h_trade.asset1;
@@ -2167,12 +2154,8 @@ impl ManualOrders {
                         }
                         Order::None => {}
                     };
-                    let o = man_orders.order;
-                    man_orders.last_id += 1;
-                    let oid = man_orders.last_id;
                     if let Some(live_inf)=live_info{
-                        //FIXME - get a response before adding the order... link hashmap from
-                        //binclient in here directly?
+                        let o = man_orders.order;
                         let msg =
                             ClientInstruct::SendBinInstructs(BinInstructs::PlaceOrder {
                                 symbol: live_inf.live_asset_symbol_changed.1.clone(),
@@ -2180,8 +2163,30 @@ impl ManualOrders {
                             });
                         let _res = cli_chan.send(msg);
 
+                    }else{
+                        let o = man_orders.order;
+                        man_orders.last_id += 1;
+                        let oid = man_orders.last_id;
+                        man_orders.orders.insert(oid, (o, false));
+
                     };
-                    man_orders.orders.insert(oid, (o, false));
+                };
+                if let Some(live_inf)=live_info{
+                    man_orders.orders=live_inf.live_orders.clone();
+
+                    match live_inf.keys_status {
+                        KeysStatus::NotAdded => {
+                            ui.label(
+                                RichText::new(format!["Add or unlock binance API keys",]).color(Color32::ORANGE),
+                            );
+                        }
+                        KeysStatus::Invalid => {
+                            ui.label(RichText::new(format!["Api Keys Invalid",]).color(Color32::RED));
+                        }
+                        KeysStatus::Valid => {
+                            ui.label(RichText::new(format!["Api Keys Valid",]).color(Color32::GREEN));
+                        }
+                    };
                 };
 
                 /*
@@ -2484,26 +2489,8 @@ impl Default for HistPlot {
     }
 }
 
-#[derive(Dbg, Default)]
-struct Account {
-    pub enc_pub_key: Vec<u8>,
-    pub enc_priv_key: Vec<u8>,
 
-    api_key_enter_string: String,
-    priv_api_key_enter_string: String,
-
-    key_status: KeysStatus,
-
-    balances: Vec<(String, f64)>,
-
-    binance_pub_key: Option<String>,
-    binance_priv_key: Option<String>,
-
-    enc_binance_pub_key: Option<String>,
-    enc_binance_priv_key: Option<String>,
-}
-
-#[derive(Dbg, Default)]
+#[derive(Dbg, Default, Encode, Decode, Clone, Eq, PartialEq, Copy)]
 pub enum KeysStatus {
     #[default]
     NotAdded,
@@ -2521,106 +2508,15 @@ impl KeysStatus {
     }
 }
 
-impl Account {
-    fn new() -> Self {
-        Account {
-            ..Default::default()
-        }
-    }
-    #[allow(unused)]
-    fn show(account: &mut Account, cli_chan: watch::Sender<ClientInstruct>, ui: &mut egui::Ui) {
-        egui::Grid::new("Account")
-            .striped(true)
-            .min_col_width(30.0)
-            .show(ui, |ui| {
-                ui.label(RichText::new(format!["BINANCE KEYS",]).color(Color32::YELLOW));
-                ui.end_row();
-                ui.add_sized(
-                    egui::vec2(400.0, 20.0),
-                    egui::TextEdit::singleline(&mut account.api_key_enter_string)
-                        .hint_text("pub_key"),
-                );
-                ui.end_row();
-                ui.add_sized(
-                    egui::vec2(400.0, 20.0),
-                    egui::TextEdit::singleline(&mut account.priv_api_key_enter_string)
-                        .hint_text("priv_key"),
-                );
-                ui.end_row();
-                if ui.button("Add keys").clicked() {
-                    //TODO - add a function that stores keys securely here
-                    account.api_key_enter_string = "".to_string();
-                    account.priv_api_key_enter_string = "".to_string();
-                };
-                ui.end_row();
-                if ui.button("Remove keys").clicked() {
-                    //TODO - add a function that stores keys securely here
-                    account.api_key_enter_string = "".to_string();
-                    account.priv_api_key_enter_string = "".to_string();
-                };
-                //TODO get return status from validate_keys functon here and display it as such.
-                //Save encrypted keys and settings in a savefile, that can be opened with password
-                ui.end_row();
-                match account.key_status {
-                    KeysStatus::NotAdded => {
-                        ui.label(
-                            RichText::new(format!["Add binance API keys",]).color(Color32::ORANGE),
-                        );
-                    }
-                    KeysStatus::Invalid => {
-                        ui.label(RichText::new(format!["Keys Invalid",]).color(Color32::RED));
-                    }
-                    KeysStatus::Valid => {
-                        ui.label(RichText::new(format!["Keys Valid",]).color(Color32::RED));
-                    }
-                };
-            });
-        ui.vertical(|ui| {
-            let available_height = ui.available_height();
-            let mut table = TableBuilder::new(ui)
-                .resizable(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::auto().resizable(false))
-                .column(Column::auto().resizable(false))
-                .column(Column::auto().resizable(false))
-                .min_scrolled_height(0.0)
-                .max_scroll_height(available_height);
-            table
-                .header(20.0, |mut header| {
-                    header.col(|ui| {
-                        ui.strong("Asset");
-                    });
-                    header.col(|ui| {
-                        ui.strong("BalanceExchange");
-                    });
-                })
-                .body(|mut body| {
-                    for (asset, balance) in account.balances.iter() {
-                        let row_height = 18.0;
-                        body.row(row_height, |mut row| {
-                            row.col(|ui| {
-                                ui.label(format!["{}", asset]);
-                            });
-                            row.col(|ui| {
-                                ui.label(format!["{}", balance]);
-                            });
-                        });
-                    }
-                });
-        });
-        egui::Grid::new("Account_balances")
-            .striped(true)
-            .min_col_width(30.0)
-            .show(ui, |ui| {
-                if ui.button("Refresh balances").clicked() {
-                    //TODO if api keys installed call get_assets kind of function
-                };
-            });
-    }
-}
 
-#[derive(Dbg, Default, Encode, Decode, Clone)]
+#[derive(Dbg, Default, Encode, Decode, Clone, PartialEq)]
 pub struct Settings {
+    pub enc_pub_key: Vec<u8>,
+    pub enc_priv_key: Vec<u8>,
+
+    pub api_key_enter_string: String,
+    pub priv_api_key_enter_string: String,
+
     pub default_asset: String,
     pub default_intv: Intv,
     pub enc_api_keys: bool,
@@ -2635,6 +2531,10 @@ pub struct Settings {
 
     pub password_string: String,
     pub backload_wicks: usize,
+
+    pub key_status: KeysStatus,
+
+    pub balances: HashMap<String, (f64, f64)>,
 }
 
 #[allow(unused)]
@@ -2657,56 +2557,192 @@ impl Settings {
         true
     }
     #[allow(unused)]
-    fn show(settings: &mut Settings, cli_chan: watch::Sender<ClientInstruct>, ui: &mut egui::Ui) {
-        egui::Grid::new("Account_settings")
+    fn show(settings: &mut Settings, live_info:&LiveInfo, cli_chan: watch::Sender<ClientInstruct>, ui: &mut egui::Ui) {
+        settings.balances=live_info.acc_balances.clone();
+        settings.key_status=live_info.keys_status;
+
+        egui::Grid::new("Account")
             .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
+                ui.label(RichText::new(format!["BINANCE KEYS",]).color(Color32::YELLOW));
+                ui.end_row();
+                ui.add_sized(
+                    egui::vec2(400.0, 20.0),
+                    egui::TextEdit::singleline(&mut settings.api_key_enter_string)
+                        .hint_text("pub_key"),
+                );
+                ui.end_row();
+                ui.add_sized(
+                    egui::vec2(400.0, 20.0),
+                    egui::TextEdit::singleline(&mut settings.priv_api_key_enter_string)
+                        .hint_text("priv_key"),
+                );
+                ui.end_row();
+                if settings.enc_api_keys==true{
+                    ui.add_sized(
+                        egui::vec2(400.0, 20.0),
+                        egui::TextEdit::singleline(&mut settings.password_string)
+                            .hint_text("Encrypt api keys with password: 16 characters or more"),
+                    );
+                };
+                ui.end_row();
+                if ui.button("Add keys").clicked() {
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::AddReplaceApiKeys{
+                        pub_key:settings.api_key_enter_string.clone(),
+                        priv_key:settings.priv_api_key_enter_string.clone(), 
+                    });
+                    let _res = cli_chan.send(msg);
+                    settings.binance_pub_key=Some(settings.api_key_enter_string.clone());
+                    settings.binance_priv_key=Some(settings.priv_api_key_enter_string.clone());
+                    if settings.enc_api_keys==true{
+                        let _res=settings.encrypt_keys(settings.password_string.clone());
+                    };
+                    //NOTE not sure if this is OK... better way to shred strings
+                    settings.api_key_enter_string = String::default();
+                    settings.priv_api_key_enter_string = String::default();
+                    settings.password_string= String::default();
+                };
+                if ui.button("Remove keys").clicked() {
+                    settings.api_key_enter_string = String::default();
+                    settings.priv_api_key_enter_string = String::default();
+                    settings.binance_pub_key=None;
+                    settings.binance_priv_key=None;;
+                    settings.enc_binance_pub_key=None;;
+                    settings.enc_binance_priv_key=None;;
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::RemoveApiKeys{
+                    });
+                    let _res = cli_chan.send(msg);
+                };
+                if ui.button("Unlock keys").clicked() {
+                    settings.api_key_enter_string = String::default();
+                    settings.priv_api_key_enter_string = String::default();
+                };
+                ui.end_row();
+                match settings.key_status {
+                    KeysStatus::NotAdded => {
+                        ui.label(
+                            RichText::new(format!["Add or unlock binance API keys",]).color(Color32::ORANGE),
+                        );
+                    }
+                    KeysStatus::Invalid => {
+                        ui.label(RichText::new(format!["Api Keys Invalid",]).color(Color32::RED));
+                    }
+                    KeysStatus::Valid => {
+                        ui.label(RichText::new(format!["Api Keys Valid",]).color(Color32::GREEN));
+                    }
+                };
+            });
+        egui::Grid::new("Application settings")
+            .striped(true)
+            .min_col_width(30.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new(format!["APPLICATION SETTINGS",]).color(Color32::YELLOW));
+                ui.end_row();
                 ui.checkbox(
                     &mut settings.save_api_keys,
                     "Store api keys in settings file",
                 );
+                ui.checkbox(&mut settings.enc_api_keys, "Encrypt api keys w password");
                 ui.end_row();
-                if settings.save_api_keys == true {
-                    ui.checkbox(&mut settings.enc_api_keys, "Encrypt api keys w password");
-                    if settings.enc_api_keys == true {
-                        ui.add_sized(
-                            egui::vec2(250.0, 20.0),
-                            egui::TextEdit::singleline(&mut settings.password_string)
-                                .hint_text("Add asset to download list for binance"),
-                        );
+                if ui.button("Save settings").clicked() {
+                    if settings.save_api_keys == true {
+                            let res=if settings.enc_api_keys==true{
+                                settings.binance_pub_key=None;
+                                settings.binance_priv_key=None;;
+                                settings.save_settings_file(Some(settings.password_string.clone()))
+                            }else{
+                                settings.enc_binance_pub_key=None;
+                                settings.enc_binance_priv_key=None;;
+                                settings.save_settings_file(None)
+                            };
+                            match res {
+                                Ok(_) => (),
+                                Err(e) => tracing::error!["Save setting ERROR: {}", e],
+                            };
+                    }else{
+                        settings.binance_pub_key=None;
+                        settings.binance_priv_key=None;;
+                        settings.enc_binance_pub_key=None;
+                        settings.enc_binance_priv_key=None;;
+                        settings.save_settings_file(None);
                     };
-                    ui.end_row();
-                    if ui.button("Save settings").clicked() {
-                        let password = settings.password_string.clone();
-                        let password_ok = Settings::verify_password_req(&password);
-                        match password_ok {
-                            true => {
-                                settings.password_string = "".to_string();
-                                let res = settings.save_settings_file(Some(password));
-                                match res {
-                                    Ok(_) => (),
-                                    Err(e) => {
-                                        tracing::error!["Save setting encrypted ERROR: {}", e]
-                                    }
-                                };
-                            }
-                            false => tracing::error!["Password less tha 15 characters"],
-                        };
-                    };
-                } else {
-                    ui.end_row();
-                    if ui.button("Save settings").clicked() {
-                        let res = settings.save_settings_file(None);
-                        match res {
-                            Ok(_) => (),
-                            Err(e) => tracing::error!["Save setting unencrypted ERROR: {}", e],
-                        };
-                    };
+                    let mut sett=settings.clone();
+                    sett.binance_pub_key=None;
+                    sett.binance_priv_key=None;;
+                    sett.enc_binance_pub_key=None;
+                    sett.enc_binance_priv_key=None;;
+                    let msg = ClientInstruct::UpdateSettings(sett);
+                    let _res = cli_chan.send(msg);
                 };
             });
+        egui::Grid::new("Account_balances")
+            .striped(true)
+            .min_col_width(30.0)
+            .show(ui, |ui| {
+                match &settings.key_status{
+                    KeysStatus::Valid=>{
+                        if ui.button("Refresh balances").clicked() {
+                            let msg = ClientInstruct::SendBinInstructs(BinInstructs::GetAllBalances{
+                            });
+                            let _res = cli_chan.send(msg);
+                        };
+                    }
+                    _=>{}
+                };
+
+            });
+        ui.vertical(|ui| {
+            ui.label(RichText::new(format!["BINANCE BLANCES",]).color(Color32::YELLOW));
+            let available_height = ui.available_height();
+            let mut table = TableBuilder::new(ui)
+                .resizable(true)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .column(Column::auto().resizable(false))
+                .min_scrolled_height(0.0)
+                .max_scroll_height(available_height);
+            table
+                .header(20.0, |mut header| {
+                    header.col(|ui| {
+                        ui.strong("Asset");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Free balance");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Locked balance");
+                    });
+                })
+                .body(|mut body| {
+                    for (asset, (avail_balance,lock_balance)) in settings.balances.iter() {
+                        let row_height = 18.0;
+                        body.row(row_height, |mut row| {
+                            row.col(|ui| {
+                                ui.label(format!["{}", asset]);
+                            });
+                            row.col(|ui| {
+                                ui.label(format!["{}", avail_balance]);
+                            });
+                            row.col(|ui| {
+                                ui.label(format!["{}", lock_balance]);
+                            });
+                        });
+                    }
+                });
+        });
     }
     pub fn encrypt_keys(&mut self, pass: String) -> Result<()> {
+        let res=Settings::verify_password_req(&pass);
+        match res{
+            true=>{}
+            false=>{
+                tracing::error!["Password invalid"];
+                return Ok(())
+            }
+        };
         let mc = new_magic_crypt!(&pass, 256);
         let pub_key: String = self
             .binance_pub_key

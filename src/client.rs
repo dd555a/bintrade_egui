@@ -23,7 +23,7 @@ use winit::platform::wayland::EventLoopBuilderExtWayland;
 
 use crate::conn::{BinanceClient, SymbolOutput};
 use crate::data::{AssetData, Intv, SQLConn};
-use crate::gui::{DesktopApp, Settings};
+use crate::gui::{DesktopApp, Settings, LiveInfo};
 
 use anyhow::{Context, Result};
 
@@ -172,6 +172,7 @@ pub struct ClientTask {
     hist_dat: Arc<Mutex<AssetData>>,
     last_price: Arc<Mutex<f64>>,
     live_collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
+    live_info: Arc<Mutex<LiveInfo>>,
 
     lp_chan_recv: Option<watch::Receiver<f64>>,
     lp_chan_send: Option<watch::Sender<f64>>,
@@ -204,6 +205,7 @@ impl ClientTask {
             frontend: f,
             live_dat: Arc::new(Mutex::new(AssetData::new(0))),
             hist_dat: Arc::new(Mutex::new(AssetData::new(1))),
+            live_info: Arc::new(Mutex::new(LiveInfo::default())),
 
             cli_awake: Arc::new(Notify::new()),
             cli_sleep: Arc::new(Notify::new()),
@@ -238,6 +240,7 @@ impl ClientTask {
         collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
 
         settings: Settings,
+        live_info:Arc<Mutex<LiveInfo>>,
     ) -> Handle<()> {
         let rchan: watch::Receiver<ClientResponse>;
         let rchan_e = task_chans.pop().expect("Task channels doesn't exist!");
@@ -270,6 +273,7 @@ impl ClientTask {
                 };
 
                 let sett = settings.clone();
+                let live_info = live_info.clone();
                 let r = eframe::run_native(
                     "Bintrade Gui",
                     native_options,
@@ -283,6 +287,7 @@ impl ClientTask {
                             live_price.clone(),
                             collect_data.clone(),
                             sett,
+                            live_info,
                         )))
                     }),
                 );
@@ -301,6 +306,22 @@ impl ClientTask {
             ClientInstruct::Stop => self.cli_sleep.notify_one(),
             ClientInstruct::Start => self.cli_awake.notify_one(),
             ClientInstruct::Terminate => self.cancel_all.cancel(),
+            ClientInstruct::UpdateSettings(settings)=> {
+                let chan = self
+                    .send_sett_bin
+                    .take()
+                    .expect("SendBinInstructs channel none!");
+                chan.send(BinInstructs::UpdateSettings(settings.clone()))
+                    .expect("SendBinInstructs channel unable to send!");
+                self.send_sett_bin = Some(chan);
+                let chan = self
+                    .send_sett_sql
+                    .take()
+                    .expect("SendSQLInstructs channel none!");
+                chan.send(SQLInstructs::UpdateSettings(settings.clone()))
+                    .expect("SendSQLInstructs channel unable to send!");
+                self.send_sett_sql = Some(chan);
+            },
 
             ClientInstruct::StartBinCli => self.bin_awake.notify_one(),
             ClientInstruct::StopBinCli => self.bin_sleep.notify_one(),
@@ -397,6 +418,7 @@ impl ClientTask {
                             let hist_asset_data = Arc::clone(&self.hist_dat);
                             let lp = Arc::clone(&self.last_price); //NOTE more like latest
                             let collect_data = Arc::clone(&self.live_collect);
+                            let live_info= Arc::clone(&self.live_info);
                             let gui_blocking_handle = ClientTask::start_gui(
                                 task_chans,
                                 asset_data,
@@ -404,6 +426,7 @@ impl ClientTask {
                                 lp,
                                 collect_data,
                                 settings.clone(),
+                                live_info,
                             );
                             handles.push(gui_blocking_handle);
                         }
@@ -418,6 +441,7 @@ impl ClientTask {
                     let chans = self.make_chans(&t);
                     let cancel_token = self.cancel_all.clone();
                     let lc = Arc::clone(&self.live_collect);
+                    let live_info= Arc::clone(&self.live_info);
                     let awake_notify = self.bin_awake.clone();
                     let sleep_notify = self.bin_sleep.clone();
                     let lp = self.last_price.clone();
@@ -439,6 +463,7 @@ impl ClientTask {
                             lc,
                             lp,
                             live_ad,
+                            live_info,
                         )
                         .await;
                     });
@@ -484,10 +509,11 @@ impl ClientTask {
         live_collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         live_price: Arc<Mutex<f64>>,
         live_ad: Arc<Mutex<AssetData>>,
+        live_info: Arc<Mutex<LiveInfo>>
     ) {
         let (send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
-        let mut cli = BinanceClient::new(api_key, api_secret, live_collect, live_price, live_ad);
+        let mut cli = BinanceClient::new(api_key, api_secret, live_collect, live_price, live_ad, live_info);
         tracing::info!("Binclient started");
         loop {
             let res = cli.get_ws_params(&default_symbol, &default_intv).await;
