@@ -1728,6 +1728,47 @@ fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLin
 }
 
 
+macro_rules! make_hotkey_alt{
+    ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
+        {
+            if *$($hk_active)* {
+                let shift_mod=Modifiers {
+                        alt: true,
+                        ..Default::default()
+                };
+                let sh=KeyboardShortcut{
+                    modifiers:shift_mod,
+                    logical_key:$($k)*::$($key)*, 
+
+                };
+                $($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh))
+            }else{
+                false
+            }
+        }
+    };
+}
+macro_rules! make_hotkey_ctrl{
+    ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
+        {
+            if *$($hk_active)* {
+                let shift_mod=Modifiers {
+                        ctrl: true,
+                        ..Default::default()
+                };
+                let sh=KeyboardShortcut{
+                    modifiers:shift_mod,
+                    logical_key:$($k)*::$($key)*, 
+
+                };
+                $($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh))
+            }else{
+                false
+            }
+        }
+    };
+}
+
 macro_rules! make_hotkey_shift{
     ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
         {
@@ -1754,16 +1795,166 @@ fn link_hotkeys(
     ui: &mut egui::Ui,
     hk_active:&bool,
 ){
-    let toggle_activate_order=make_hotkey_shift![Key,A,ui, hk_active];
-    let add_market=make_hotkey_shift![Key,Num0,ui, hk_active];
-    let add_limit=make_hotkey_shift![Key,Num1,ui, hk_active];
-    let add_stop_limit=make_hotkey_shift![Key,Num2,ui, hk_active];
-    let add_stop_market=make_hotkey_shift![Key,Num3,ui, hk_active];
-    let delete_last_order=make_hotkey_shift![Key,D,ui, hk_active];
     let trade_forward=make_hotkey_shift![Key,L,ui, hk_active];
-    let inc_up=make_hotkey_shift![Key,J,ui, hk_active];
-    let inc_down=make_hotkey_shift![Key,K,ui, hk_active];
 }
+
+const K0:f32=1.00;
+const K0_INC:f32=0.001;
+
+const K1:f32=1.01;
+const K1_INC:f32=0.001;
+
+#[allow(unused)]
+fn hotkey_order_single(
+    last_price: &f64,
+    ui: &mut egui::Ui,
+    hk_active:&bool,
+    order:&mut Order,
+    order_active:&mut bool,
+    asset1_held:&bool,
+    k0_n:&mut usize,
+    k1_n:&mut usize,
+){
+    *order_active=make_hotkey_shift![Key,A,ui, hk_active];
+    let quant=Quant::Q100;
+
+    let buy=if *asset1_held==false{
+        true
+    }else{
+        false
+    };
+    let delete_order=make_hotkey_shift![Key,D,ui, hk_active];
+    if delete_order{
+        *order_active=false;
+        *order=Order::None;
+    };
+
+    let add_market=make_hotkey_shift![Key,Num0,ui, hk_active];
+    if add_market{
+        *order_active=false;
+        *order=Order::Market{buy, quant};
+    };
+
+    let add_limit=make_hotkey_shift![Key,Num1,ui, hk_active];
+    if add_limit{
+        *order_active=false;
+        *order=Order::Limit{buy, quant, price:*last_price,limit_status:LimitStatus::default()};
+    };
+
+    let add_stop_limit=make_hotkey_shift![Key,Num2,ui, hk_active];
+    if add_stop_limit{
+        *order_active=false;
+        if buy{
+            *order=Order::StopLimit{buy, quant, price:*last_price,limit_status:LimitStatus::default(), stop_price:(*last_price as f32)*K0, stop_status:StopStatus::default()};
+        }else{
+            *order=Order::StopLimit{buy, quant, price:*last_price,limit_status:LimitStatus::default(), stop_price:(*last_price as f32)/K0, stop_status:StopStatus::default()};
+        };
+    };
+    let add_stop_market=make_hotkey_shift![Key,Num3,ui, hk_active];
+    if add_stop_market{
+        *order_active=false;
+        *order=Order::StopMarket{buy, quant, price:*last_price,stop_status:StopStatus::default()};
+    };
+
+    let inc_up_price=make_hotkey_shift![Key,J,ui, hk_active];
+    if inc_up_price{
+        *order_active=false;
+        *order=match order{
+            Order::None=>{
+                *order
+            },
+            Order::Market {..}=>{
+                *order
+            },
+            Order::Limit {buy:b, quant:q, price:p,limit_status:ll}=>{
+                *k0_n+=1;
+                Order::Limit{buy:*b, quant:*q, price:*p*(K0 as f64+K0_INC as f64* (*k0_n as f64 )), limit_status:*ll}
+            },
+            Order::StopLimit {buy:b, quant:q, price:p, limit_status:sl, stop_status:ll, stop_price:sp}=>{
+                *k0_n+=1;
+                Order::StopLimit{buy:*b, quant:*q, price:*p*(K0 as f64+K0_INC as f64* (*k0_n as f64 )), limit_status:*sl, stop_status:*ll, stop_price:*sp}
+            },
+            Order::StopMarket {buy:b, quant:q, price:p, stop_status:ll}=>{
+                *k0_n+=1;
+                Order::StopMarket{buy:*b, quant:*q, price:*p*(K0 as f64+K0_INC as f64* (*k0_n as f64 )), stop_status:*ll}
+            },
+
+        };
+    };
+    let inc_up_2=make_hotkey_alt![Key,J,ui, hk_active];
+    if inc_up_2{
+        *order_active=false;
+        *order=match order{
+            Order::None=>{
+                *order
+            },
+            Order::Market {..}=>{
+                *order
+            },
+            Order::Limit {buy:b, quant:q, price:p,limit_status:ll}=>{
+                *order
+            },
+            Order::StopLimit {buy:b, quant:q, price:p, limit_status:sl, stop_status:ll, stop_price:sp}=>{
+                *k1_n+=1;
+                Order::StopLimit{buy:*b, quant:*q, price:*p, limit_status:*sl, stop_status:*ll, stop_price:*sp*(K1 as f32+K1_INC * (*k1_n as f32))}
+            },
+            Order::StopMarket {buy:b, quant:q, price:p, stop_status:ll}=>{
+                *order
+            },
+
+        };
+    };
+
+    let inc_down_price=make_hotkey_shift![Key,J,ui, hk_active];
+    if inc_down_price{
+        *order_active=false;
+        *order=match order{
+            Order::None=>{
+                *order
+            },
+            Order::Market {..}=>{
+                *order
+            },
+            Order::Limit {buy:b, quant:q, price:p,limit_status:ll}=>{
+                *k0_n-=1;
+                Order::Limit{buy:*b, quant:*q, price:*p/(K0 as f64+K0 as f64* (*k0_n as f64 )), limit_status:*ll}
+            },
+            Order::StopLimit {buy:b, quant:q, price:p, limit_status:sl, stop_status:ll, stop_price:sp}=>{
+                *k0_n-=1;
+                Order::StopLimit{buy:*b, quant:*q, price:*p/(K0 as f64+K0 as f64* (*k0_n as f64 )), limit_status:*sl, stop_status:*ll, stop_price:*sp}
+            },
+            Order::StopMarket {buy:b, quant:q, price:p, stop_status:ll}=>{
+                *k0_n-=1;
+                Order::StopMarket{buy:*b, quant:*q, price:*p/(K0 as f64+K0 as f64* (*k0_n as f64 )), stop_status:*ll}
+            },
+
+        };
+    };
+    let inc_down_2=make_hotkey_alt![Key,J,ui, hk_active];
+    if inc_down_2{
+        *order_active=false;
+        *order=match order{
+            Order::None=>{
+                *order
+            },
+            Order::Market {..}=>{
+                *order
+            },
+            Order::Limit {buy:b, quant:q, price:p,limit_status:ll}=>{
+                *order
+            },
+            Order::StopLimit {buy:b, quant:q, price:p, limit_status:sl, stop_status:ll, stop_price:sp}=>{
+                *k1_n-=1;
+                Order::StopLimit{buy:*b, quant:*q, price:*p, limit_status:*sl, stop_status:*ll, stop_price:*sp/(K1 as f32+K1_INC* (*k1_n as f32))}
+            },
+            Order::StopMarket {buy:b, quant:q, price:p, stop_status:ll}=>{
+                *order
+            },
+        };
+    };
+}
+
+
 
 #[allow(unused)]
 impl ManualOrders {

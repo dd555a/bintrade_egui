@@ -315,15 +315,17 @@ pub const fn eval_basic_condition(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq,Default)]
 pub enum LimitStatus {
+    #[default]
     Untouched,
     PartFilled { percent_fill: f32 },
     FullyFilled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum StopStatus {
+    #[default]
     Untouched,
     Triggered,
 }
