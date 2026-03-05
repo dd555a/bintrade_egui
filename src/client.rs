@@ -716,11 +716,3 @@ pub fn cli_run() -> Result<()> {
     });
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn exmpl() {}
-}

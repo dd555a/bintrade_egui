@@ -1618,6 +1618,7 @@ struct ManualOrders {
     active_orders: Option<Vec<Order>>,
 
     hotkeys: bool,
+    single_order_mode: bool,
 
     current_symbol: String,
 
@@ -1626,10 +1627,14 @@ struct ManualOrders {
     quant_selector: Quant,
     last_quant: Quant,
 
+    single_order: Option<Order>,
+
     order: Order,
     new_order: Order,
+
     scalar_set: bool,
     scalar: f64,
+
     buy: bool,
     price_string: String,
     stop_price_string: String,
@@ -1663,6 +1668,9 @@ impl Default for ManualOrders {
             man_orders: None,
             active_orders: None,
             hotkeys: false,
+            single_order_mode: false,
+
+            single_order: None,
 
             current_symbol: String::default(),
 
@@ -1721,19 +1729,22 @@ fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLin
 
 
 macro_rules! make_hotkey_shift{
-    ( $($k:ident,$key:ident, $ui:ident),* ) => {
+    ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
         {
-            let shift_mod=Modifiers {
-                    shift: true,
-                    ..Default::default()
-            };
-            let sh=KeyboardShortcut{
-                modifiers:shift_mod,
-                logical_key:$($k)*::$($key)*, 
+            if *$($hk_active)* {
+                let shift_mod=Modifiers {
+                        shift: true,
+                        ..Default::default()
+                };
+                let sh=KeyboardShortcut{
+                    modifiers:shift_mod,
+                    logical_key:$($k)*::$($key)*, 
 
-            };
-            let hotkey=$($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh));
-            (hotkey)
+                };
+                $($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh))
+            }else{
+                false
+            }
         }
     };
 }
@@ -1741,16 +1752,17 @@ macro_rules! make_hotkey_shift{
 fn link_hotkeys(
     last_price: &f64,
     ui: &mut egui::Ui,
+    hk_active:&bool,
 ){
-    let toggle_activate=make_hotkey_shift![Key,A,ui];
-    let add_market=make_hotkey_shift![Key,Num0,ui];
-    let add_limit=make_hotkey_shift![Key,Num1,ui];
-    let add_stop_limit=make_hotkey_shift![Key,Num2,ui];
-    let add_stop_market=make_hotkey_shift![Key,Num3,ui];
-    let delete_last_order=make_hotkey_shift![Key,D,ui];
-    let trade_forward=make_hotkey_shift![Key,L,ui];
-    let inc_up=make_hotkey_shift![Key,J,ui];
-    let inc_down=make_hotkey_shift![Key,K,ui];
+    let toggle_activate_order=make_hotkey_shift![Key,A,ui, hk_active];
+    let add_market=make_hotkey_shift![Key,Num0,ui, hk_active];
+    let add_limit=make_hotkey_shift![Key,Num1,ui, hk_active];
+    let add_stop_limit=make_hotkey_shift![Key,Num2,ui, hk_active];
+    let add_stop_market=make_hotkey_shift![Key,Num3,ui, hk_active];
+    let delete_last_order=make_hotkey_shift![Key,D,ui, hk_active];
+    let trade_forward=make_hotkey_shift![Key,L,ui, hk_active];
+    let inc_up=make_hotkey_shift![Key,J,ui, hk_active];
+    let inc_down=make_hotkey_shift![Key,K,ui, hk_active];
 }
 
 #[allow(unused)]
@@ -1894,7 +1906,7 @@ impl ManualOrders {
             ..Default::default()
         }
     }
-    fn show(
+    fn show_multiorder(
         mut man_orders: &mut ManualOrders,
         last_price: &f64,
         mut hist_trade: Option<&mut HistTrade>,
@@ -1904,11 +1916,11 @@ impl ManualOrders {
         live_info: Option<&LiveInfo>,
         trade_slice: Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
         symbol_info: Option<&(String, String, String)>,
-    ) {
+    ){
         match hlines {
             Some(hline_ref) => link_hline_orders(&man_orders.orders, hline_ref),
             None => {
-                tracing::debug!["Hlines not available!"];
+                tracing::error!["Hlines not available!"];
             }
         };
         tracing::trace!["Manual orders last_price {}", &last_price];
@@ -1917,7 +1929,10 @@ impl ManualOrders {
             man_orders.asset2_name = live_inf.current_pair_strings.1.clone();
             man_orders.asset1 = live_inf.current_pair_free_balances.0;
             man_orders.asset2 = live_inf.current_pair_free_balances.1;
+            man_orders.asset1_locked = live_inf.current_pair_locked_balances.0;
+            man_orders.asset2_locked = live_inf.current_pair_locked_balances.1;
         };
+
         match (hist_trade, trade_slice) {
             (Some(mut h_trade), Some(t_slice)) => {
                 man_orders.asset1 = h_trade.asset1;
@@ -1996,7 +2011,21 @@ impl ManualOrders {
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
+                        RichText::new(format!["(locked):{}", man_orders.asset1_locked])
+                            .color(Color32::from_rgb(255, 207, 38)),
+                    ),
+                );
+                ui.add_sized(
+                    egui::vec2(50.0, 20.0),
+                    egui::Label::new(
                         RichText::new(format!["{}:{}", man_orders.asset2_name, man_orders.asset2])
+                            .color(Color32::from_rgb(71, 200, 38)),
+                    ),
+                );
+                ui.add_sized(
+                    egui::vec2(50.0, 20.0),
+                    egui::Label::new(
+                        RichText::new(format!["(locked):{}", man_orders.asset2_locked])
                             .color(Color32::from_rgb(71, 200, 38)),
                     ),
                 );
@@ -2005,10 +2034,11 @@ impl ManualOrders {
         ui.end_row();
         egui::Grid::new("Last price:").striped(true).show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
+                //ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
                 ui.label(
                     RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
                 );
-                ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
                 /*NOTE the bellow doesn't work, FIXME
                 ui.end_row();
                 man_orders.last_price_s = *last_price;
@@ -2477,6 +2507,37 @@ impl ManualOrders {
                     });
             });
         });
+
+    }
+    fn show_singleorder(
+        mut man_orders: &mut ManualOrders,
+        last_price: &f64,
+        mut hist_trade: Option<&mut HistTrade>,
+        cli_chan: watch::Sender<ClientInstruct>,
+        ui: &mut egui::Ui,
+        hlines: Option<&mut Vec<HLine>>,
+        live_info: Option<&LiveInfo>,
+        trade_slice: Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
+        symbol_info: Option<&(String, String, String)>,
+    ){
+        todo!()
+    }
+    fn show(
+        mut man_orders: &mut ManualOrders,
+        last_price: &f64,
+        mut hist_trade: Option<&mut HistTrade>,
+        cli_chan: watch::Sender<ClientInstruct>,
+        ui: &mut egui::Ui,
+        hlines: Option<&mut Vec<HLine>>,
+        live_info: Option<&LiveInfo>,
+        trade_slice: Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
+        symbol_info: Option<&(String, String, String)>,
+    ) {
+        if man_orders.single_order_mode==true{
+            ManualOrders::show_multiorder(man_orders, last_price, hist_trade, cli_chan, ui, hlines, live_info, trade_slice, symbol_info);
+        }else{
+            ManualOrders::show_singleorder(man_orders, last_price, hist_trade, cli_chan, ui, hlines, live_info, trade_slice, symbol_info);
+        };
     }
 }
 
@@ -3606,15 +3667,5 @@ impl HistPlot {
                 );
                 ui.end_row();
             });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sample() {
-        assert!(true);
     }
 }

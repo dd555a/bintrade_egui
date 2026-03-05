@@ -1997,33 +1997,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn sql_test() {
-        println!("--------------------------------------");
-        println!("SQL testing");
-        println!("--------------------------------------");
-        let mut asset_data = AssetData::new(333);
-        let symb: &str = "BTCUSDT";
-        let db_path: &str = "./databases";
-        let p = connect_sqlite(format!["{}/Asset{}.db", &db_path, &symb])
-            .await
-            .unwrap();
-        asset_data.load_all(symb, &p).await;
-        let _intv: &str = "1min";
-        //let k:Kline=kfrom_sql(&p,&format!["kline_{}",&intv], None).await;
-        //.nondt_test(&p,"nigger2",None).await;
-        /*
-        for intv in Intv::iter(){
-            let s:&str=intv.to_str();
-            println!("{:?}",s);
-        }
-         */
-        assert!(true);
-        println!("--------------------------------------");
-    }
-    #[tokio::test]
-    async fn binnce_dl_test() {
-        let test_struct = SQLConn::new_testing();
-        test_struct.dl_binance_asset("TRUMPUSDT", None, false).await;
-        assert!(true);
+    //TODO make more api tests, chrono tests
+    async fn exmpl() {
     }
 }

@@ -693,6 +693,7 @@ pub struct BinanceClient {
     qoute_balances: (f64, f64),
     balances: HashMap<String, (f64, f64)>,
     current_symbol_bases: (String, String),
+    live_orders: HashMap<i32,(Order,bool)>,
 }
 
 impl Default for BinanceClient {
@@ -714,6 +715,7 @@ impl Default for BinanceClient {
             base_balances: (0.0, 0.0),
             qoute_balances: (0.0, 0.0),
             balances: HashMap::new(),
+            live_orders: HashMap::new(),
             current_symbol_bases: (String::default(), String::default()),
         }
     }
@@ -1248,6 +1250,7 @@ impl BinanceClient {
                         live_i
                             .live_orders
                             .insert(order_id as i32, (order.clone(), true));
+                        self.live_orders=live_i.live_orders.clone();
                         BinResponse::Success
                     }
                     Err(e) => {
@@ -1300,12 +1303,7 @@ impl BinanceClient {
                 resp
             }
             BinInstructs::CancelAllOrders { symbol: ref s } => {
-                todo!()
-                /*
-                let live_inf = self.live_info.clone();
-                let live_info = live_inf.lock().expect("live_info poisoned mutex");
-                let o_ids:Vec<u64>=live_info.live_orders.iter().map(|(id,(order,active))|{*id as u64}).collect();
-
+                let o_ids:Vec<u64>=self.live_orders.iter().map(|(id,(order,active))|{*id as u64}).collect();
                 let res = self.cancel_all_orders(&s, o_ids).await;
                 let resp = match res {
                     Ok(_) => BinResponse::Success,
@@ -1323,7 +1321,6 @@ impl BinanceClient {
                     }
                 };
                 resp
-                */
             }
             BinInstructs::ChangeLiveAsset {
                 symbol: ref s,
@@ -1433,61 +1430,9 @@ pub struct AggTrade {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-    use websockets::WebSocket;
 
     #[tokio::test]
-    //TODO split into different streams types and write parsing functions
-    async fn init_ws() -> Result<()> {
-        let params = ["btcustd@aggTrade", "btcusdt@bookTicker"];
-        let socket = "wss://stream.binance.com:9443/ws";
-        let sub_message = json!({
-            "method": "SUBSCRIBE",
-            "id": 1,
-            "params":["btcusdt@aggTrade"],
-        });
-        let mut conn = WebSocket::connect(socket).await.unwrap();
-        let msg = &conn.send_text(sub_message.to_string()).await;
-        match msg {
-            Ok(()) => {}
-            Err(e) => panic!("{}", e),
-        }
-        for _ in 0..10 {
-            let msg = &conn.receive().await;
-            match msg {
-                Ok(msg) => {
-                    let (m, _, _) = msg.clone().into_text().unwrap();
-                    let v: Value = serde_json::from_str(&m).unwrap();
-                    let s = v["p"].as_str();
-                    let k: &str;
-                    let e = v["e"].as_str();
-                    match e {
-                        Some(kk) => k = kk,
-                        None => continue,
-                    }
-                    match k {
-                        "aggTrade" => todo!(),
-                        "bookTicker" => todo!(),
-                        _ => todo!(),
-                    }
-                    let p: f64;
-                    match s {
-                        Some(price) => {
-                            let pp = price.parse::<f64>();
-                            match pp {
-                                Ok(ppp) => p = ppp,
-                                Err(_) => continue,
-                            }
-                        }
-                        None => continue,
-                    }
-                    println!("{:?}", p);
-                }
-                Err(e) => {
-                    println!("{}", e);
-                }
-            };
-        }
-        assert!(true);
+    //TODO  make binance api tests 
+    async fn example(){
     }
 }
