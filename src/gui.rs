@@ -16,7 +16,8 @@ use tracing::instrument;
 use tokio::sync::watch;
 
 use eframe::egui;
-use egui::{Color32, ComboBox, RichText, epaint};
+use egui::Key as Key;
+use egui::{Color32, ComboBox, RichText, epaint, KeyboardShortcut, Modifiers};
 use egui_extras::{Column, TableBuilder};
 use egui_plot_bintrade::{
     AxisHints, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, HPlacement,
@@ -1718,6 +1719,40 @@ fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLin
         .collect::<Vec<_>>();
 }
 
+
+macro_rules! make_hotkey_shift{
+    ( $($k:ident,$key:ident, $ui:ident),* ) => {
+        {
+            let shift_mod=Modifiers {
+                    shift: true,
+                    ..Default::default()
+            };
+            let sh=KeyboardShortcut{
+                modifiers:shift_mod,
+                logical_key:$($k)*::$($key)*, 
+
+            };
+            let hotkey=$($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh));
+            (hotkey)
+        }
+    };
+}
+#[allow(unused)]
+fn link_hotkeys(
+    last_price: &f64,
+    ui: &mut egui::Ui,
+){
+    let toggle_activate=make_hotkey_shift![Key,A,ui];
+    let add_market=make_hotkey_shift![Key,Num0,ui];
+    let add_limit=make_hotkey_shift![Key,Num1,ui];
+    let add_stop_limit=make_hotkey_shift![Key,Num2,ui];
+    let add_stop_market=make_hotkey_shift![Key,Num3,ui];
+    let delete_last_order=make_hotkey_shift![Key,D,ui];
+    let trade_forward=make_hotkey_shift![Key,L,ui];
+    let inc_up=make_hotkey_shift![Key,J,ui];
+    let inc_down=make_hotkey_shift![Key,K,ui];
+}
+
 #[allow(unused)]
 impl ManualOrders {
     fn hist_del_order(
@@ -2213,7 +2248,10 @@ impl ManualOrders {
                     Order::None => {}
                 }
 
-                if ui.button("Add").clicked() {
+                //NOTE add hotkeys method if ui.button("Add").clicked() || ui.ctx().input(|i| i.key_pressed(egui::Key::A)) {
+                //
+
+                if ui.button("Add").clicked()  {
                     let res = man_orders.price_string.parse();
                     man_orders.price = match res {
                         Ok(pp) => pp,
