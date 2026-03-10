@@ -27,7 +27,7 @@ use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
 
 use bincode::{Decode, Encode, config};
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Datelike, Utc, Local};
 use derive_debug::Dbg;
 use magic_crypt::{MagicCryptTrait, new_magic_crypt};
 
@@ -833,7 +833,10 @@ fn x_format_1min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M1_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -851,7 +854,10 @@ fn x_format_3min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M3_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -869,7 +875,10 @@ fn x_format_5min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M5_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -887,7 +896,10 @@ fn x_format_15min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M15_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -905,7 +917,10 @@ fn x_format_30min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M30_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -923,7 +938,10 @@ fn x_format_1h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H1_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -940,7 +958,10 @@ fn x_format_2h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H2_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -958,7 +979,10 @@ fn x_format_4h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H4_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -977,7 +1001,10 @@ fn x_format_6h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H6_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -995,7 +1022,10 @@ fn x_format_8h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H8_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -1013,7 +1043,10 @@ fn x_format_12h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H12_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -1031,7 +1064,10 @@ fn x_format_1d(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * D1_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -1049,7 +1085,10 @@ fn x_format_3d(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * D3_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -1067,7 +1106,10 @@ fn x_format_1w(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * W1_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -1085,7 +1127,10 @@ fn x_format_1mo(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * MO1_DIV;
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
-        Some(dt) => dt,
+        Some(dt) => {
+            let d:DateTime::<Local>=dt.into();
+            d
+        }
         None => {
             tracing::error!["Unable to format datetime, setting 0 "];
             DateTime::default()
@@ -3147,7 +3192,7 @@ impl Default for HistPlot {
         let curr_date = DateTime::<Utc>::from_timestamp_millis(curr_timestamp)
             .expect("Unable to parse current time")
             .date_naive();
-        let current_year = chrono::Utc::now().year() as i32;
+        let current_year = chrono::Local::now().year() as i32;
         Self {
             kline_plot: KlinePlot::default(),
             hist_asset_data: Arc::new(Mutex::new(AssetData::new(666))),
