@@ -16,8 +16,8 @@ use tracing::instrument;
 use tokio::sync::watch;
 
 use eframe::egui;
-use egui::Key as Key;
-use egui::{Color32, ComboBox, RichText, epaint, KeyboardShortcut, Modifiers};
+use egui::Key;
+use egui::{Color32, ComboBox, KeyboardShortcut, Modifiers, RichText, epaint};
 use egui_extras::{Column, TableBuilder};
 use egui_plot_bintrade::{
     AxisHints, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, HPlacement,
@@ -27,7 +27,7 @@ use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
 
 use bincode::{Decode, Encode, config};
-use chrono::Datelike;
+use chrono::{DateTime, Datelike, Utc};
 use derive_debug::Dbg;
 use magic_crypt::{MagicCryptTrait, new_magic_crypt};
 
@@ -52,7 +52,7 @@ pub struct KlinePlot {
     l_tick_boxplot: Vec<BoxElem>,
     l_tick_barchart: Vec<Bar>,
 
-    tick_kline: Option<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>,
+    tick_kline: Option<(DateTime<Utc>, f64, f64, f64, f64, f64)>,
 
     intv: Intv,
     name: String,
@@ -144,7 +144,7 @@ impl KlinePlot {
         return_wicks: Option<usize>,
         last_price_hist: Option<&mut f64>,
         hist_symbol_info: Option<&mut (String, String, String)>,
-    ) -> Option<Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>> {
+    ) -> Option<Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
         let ret = match return_wicks {
             Some(ret_wicks) => {
@@ -289,7 +289,7 @@ impl KlinePlot {
     }
     fn add_live(
         &mut self,
-        kline_input: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
+        kline_input: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
         divider: &f64,
         width: &f64,
         tick: bool,
@@ -484,7 +484,7 @@ impl KlinePlot {
         symbol: &str,
         intv: Intv,
         max_load_points: usize,
-        timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
+        timestamps: Option<(DateTime<Utc>, DateTime<Utc>)>,
         hist: bool,
     ) -> Result<()> {
         tracing::trace!["GUI Live from AD called!"];
@@ -527,7 +527,7 @@ impl KlinePlot {
 }
 
 fn box_element(
-    slice: &(chrono::NaiveDateTime, f64, f64, f64, f64, f64),
+    slice: &(DateTime<Utc>, f64, f64, f64, f64, f64),
     divider: &f64,
     width: &f64,
 ) -> (BoxElem, Bar) {
@@ -822,7 +822,7 @@ fn get_chart_params(intv: &Intv) -> (f64, f64) {
     }
 }
 
-//FIXME 
+//FIXME
 #[allow(unused)]
 fn grid_spacer_1min(input: GridInput) -> [f64; 3] {
     [60.0, 60.0, 1.0]
@@ -831,7 +831,14 @@ fn grid_spacer_1min(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_1min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M1_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -842,7 +849,14 @@ fn grid_spacer_3min(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_3min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M3_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -853,7 +867,14 @@ fn grid_spacer_5min(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_5min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M5_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -864,7 +885,14 @@ fn grid_spacer_15min(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_15min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M15_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -875,7 +903,14 @@ fn grid_spacer_30min(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_30min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * M30_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -886,7 +921,14 @@ fn grid_spacer_1h(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_1h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H1_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -896,7 +938,14 @@ fn grid_spacer_2h(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_2h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H2_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -907,7 +956,14 @@ fn grid_spacer_4h(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_4h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H4_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 
@@ -919,7 +975,14 @@ fn grid_spacer_6h(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_6h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H6_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -930,7 +993,14 @@ fn grid_spacer_8h(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_8h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H8_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -941,7 +1011,14 @@ fn grid_spacer_12h(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_12h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * H12_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -952,7 +1029,14 @@ fn grid_spacer_1d(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_1d(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * D1_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -963,7 +1047,14 @@ fn grid_spacer_3d(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_3d(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * D3_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -974,7 +1065,14 @@ fn grid_spacer_1w(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_1w(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * W1_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 #[allow(unused)]
@@ -985,7 +1083,14 @@ fn grid_spacer_1mo(input: GridInput) -> [f64; 3] {
 #[allow(unused)]
 fn x_format_1mo(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let fixed_gridmark = (gridmark.value as i64) * MO1_DIV;
-    let date_time = chrono::NaiveDateTime::from_timestamp(fixed_gridmark, 0);
+    let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
+    let date_time = match res {
+        Some(dt) => dt,
+        None => {
+            tracing::error!["Unable to format datetime, setting 0 "];
+            DateTime::default()
+        }
+    };
     format!["{}", date_time]
 }
 
@@ -1103,13 +1208,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                 let mut live_plot = live_plot_l.lock().expect("Live plot mutex posoned!");
                 let mut live_info = live_info_l.lock().expect("Live plot mutex posoned!");
 
-                LivePlot::show(
-                    &mut live_plot,
-                    chan,
-                    &c_data,
-                    ui,
-                    &mut live_info,
-                );
+                LivePlot::show(&mut live_plot, chan, &c_data, ui, &mut live_info);
                 let mut man_orders = self
                     .man_orders
                     .get_mut(&pane.nr)
@@ -1268,7 +1367,7 @@ fn create_tree() -> egui_tiles::Tree<Pane> {
 pub enum PlotExtras {
     None,
     OrderHlines(Vec<HLine>),
-    TradeSlice(Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>),
+    TradeSlice(Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>),
 }
 
 #[derive(PartialEq, Debug, Clone, Default)]
@@ -1284,7 +1383,7 @@ pub struct LiveInfo {
 
 #[derive(Dbg)]
 pub struct DesktopApp {
-    trade_slice: Rc<Mutex<Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>>>,
+    trade_slice: Rc<Mutex<Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>>>,
 
     simplification_options: egui_tiles::SimplificationOptions,
     tab_bar_height: f32,
@@ -1591,8 +1690,8 @@ impl eframe::App for DesktopApp {
 pub struct ManualOrders {
     man_orders: Option<HistTrade>,
     active_orders: Option<Vec<Order>>,
-    order_set:bool,
-    last_slice_time: chrono::NaiveDateTime,
+    order_set: bool,
+    last_slice_time: DateTime<Utc>,
 
     hotkeys: bool,
     single_order_mode: bool,
@@ -1636,21 +1735,21 @@ pub struct ManualOrders {
     plot_extras: Option<PlotExtras>,
     eval_mode: EvalMode,
 
-    trade_slice_loaded:bool,
+    trade_slice_loaded: bool,
 }
 
 //TODO find a way to group GUI elements together. The horror...
 impl Default for ManualOrders {
     fn default() -> Self {
         Self {
-            last_slice_time: chrono::NaiveDateTime::default(),
+            last_slice_time: DateTime::<Utc>::default(),
             eval_mode: EvalMode::default(),
             man_orders: None,
             active_orders: None,
             hotkeys: false,
             order_set: false,
             single_order_mode: false,
-            trade_slice_loaded:false,
+            trade_slice_loaded: false,
 
             single_order: None,
 
@@ -1709,7 +1808,6 @@ fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLin
         .collect::<Vec<_>>();
 }
 
-
 macro_rules! make_hotkey_alt{
     ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
         {
@@ -1720,7 +1818,7 @@ macro_rules! make_hotkey_alt{
                 };
                 let sh=KeyboardShortcut{
                     modifiers:shift_mod,
-                    logical_key:$($k)*::$($key)*, 
+                    logical_key:$($k)*::$($key)*,
 
                 };
                 $($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh))
@@ -1741,7 +1839,7 @@ macro_rules! make_hotkey_shift{
                 };
                 let sh=KeyboardShortcut{
                     modifiers:shift_mod,
-                    logical_key:$($k)*::$($key)*, 
+                    logical_key:$($k)*::$($key)*,
 
                 };
                 $($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh))
@@ -1752,192 +1850,295 @@ macro_rules! make_hotkey_shift{
     };
 }
 #[allow(unused)]
-fn link_hotkeys(
-    last_price: &f64,
-    ui: &mut egui::Ui,
-    hk_active:&bool,
-){
-    let trade_forward=make_hotkey_shift![Key,L,ui, hk_active];
+fn link_hotkeys(last_price: &f64, ui: &mut egui::Ui, hk_active: &bool) {
+    let trade_forward = make_hotkey_shift![Key, L, ui, hk_active];
 }
 
 #[allow(unused)]
-const K0:f32=1.00;
+const K0: f32 = 1.00;
 #[allow(unused)]
-const K0_INC:f32=0.001;
+const K0_INC: f32 = 0.001;
 
 #[allow(unused)]
-const K1:f32=1.01;
+const K1: f32 = 1.01;
 #[allow(unused)]
-const K1_INC:f32=0.001;
+const K1_INC: f32 = 0.001;
 
 #[allow(unused)]
 fn hotkey_order_single(
     last_price: &f64,
     ui: &mut egui::Ui,
-    hk_active:&bool,
-    order:&mut Order,
-    order_active:&mut bool,
-    asset1_held:&bool,
-    order_active_after_change:&bool,
-    k0_n:&mut usize,
-    k1_n:&mut usize,
-){
-    *order_active=make_hotkey_shift![Key,A,ui, hk_active];
-    let quant=Quant::Q100;
+    hk_active: &bool,
+    order: &mut Order,
+    order_active: &mut bool,
+    asset1_held: &bool,
+    order_active_after_change: &bool,
+    k0_n: &mut usize,
+    k1_n: &mut usize,
+) {
+    *order_active = make_hotkey_shift![Key, A, ui, hk_active];
+    let quant = Quant::Q100;
 
-    let buy=if *asset1_held==false{
-        true
-    }else{
-        false
-    };
-    let delete_order=make_hotkey_shift![Key,D,ui, hk_active];
-    if delete_order{
-        *order_active=false;
-        *order=Order::None;
+    let buy = if *asset1_held == false { true } else { false };
+    let delete_order = make_hotkey_shift![Key, D, ui, hk_active];
+    if delete_order {
+        *order_active = false;
+        *order = Order::None;
     };
 
-    let add_market=make_hotkey_shift![Key,Num0,ui, hk_active];
-    if add_market{
-        *order_active=false;
-        *order=Order::Market{buy, quant};
+    let add_market = make_hotkey_shift![Key, Num0, ui, hk_active];
+    if add_market {
+        *order_active = false;
+        *order = Order::Market { buy, quant };
     };
 
-    let add_limit=make_hotkey_shift![Key,Num1,ui, hk_active];
-    if add_limit{
-        *order_active=false;
-        *order=Order::Limit{buy, quant, price:*last_price,limit_status:LimitStatus::default()};
-    };
-
-    let add_stop_limit=make_hotkey_shift![Key,Num2,ui, hk_active];
-    if add_stop_limit{
-        *order_active=false;
-        if buy{
-            *order=Order::StopLimit{buy, quant, price:*last_price,limit_status:LimitStatus::default(), stop_price:(*last_price as f32)*K0, stop_status:StopStatus::default()};
-        }else{
-            *order=Order::StopLimit{buy, quant, price:*last_price,limit_status:LimitStatus::default(), stop_price:(*last_price as f32)/K0, stop_status:StopStatus::default()};
+    let add_limit = make_hotkey_shift![Key, Num1, ui, hk_active];
+    if add_limit {
+        *order_active = false;
+        *order = Order::Limit {
+            buy,
+            quant,
+            price: *last_price,
+            limit_status: LimitStatus::default(),
         };
     };
-    let add_stop_market=make_hotkey_shift![Key,Num3,ui, hk_active];
-    if add_stop_market{
-        *order_active=false;
-        *order=Order::StopMarket{buy, quant, price:*last_price,stop_status:StopStatus::default()};
+
+    let add_stop_limit = make_hotkey_shift![Key, Num2, ui, hk_active];
+    if add_stop_limit {
+        *order_active = false;
+        if buy {
+            *order = Order::StopLimit {
+                buy,
+                quant,
+                price: *last_price,
+                limit_status: LimitStatus::default(),
+                stop_price: (*last_price as f32) * K0,
+                stop_status: StopStatus::default(),
+            };
+        } else {
+            *order = Order::StopLimit {
+                buy,
+                quant,
+                price: *last_price,
+                limit_status: LimitStatus::default(),
+                stop_price: (*last_price as f32) / K0,
+                stop_status: StopStatus::default(),
+            };
+        };
+    };
+    let add_stop_market = make_hotkey_shift![Key, Num3, ui, hk_active];
+    if add_stop_market {
+        *order_active = false;
+        *order = Order::StopMarket {
+            buy,
+            quant,
+            price: *last_price,
+            stop_status: StopStatus::default(),
+        };
     };
 
-    let inc_up_price=make_hotkey_shift![Key,J,ui, hk_active];
-    if inc_up_price{
-        *order_active = if *order_active_after_change{
+    let inc_up_price = make_hotkey_shift![Key, J, ui, hk_active];
+    if inc_up_price {
+        *order_active = if *order_active_after_change {
             *order_active
-        }else{
+        } else {
             false
         };
-        *order=match order{
-            Order::None=>{
-                *order
-            },
-            Order::Market {..}=>{
-                *order
-            },
-            Order::Limit {buy:b, quant:q, price:p,limit_status:ll}=>{
-                *k0_n+=1;
-                Order::Limit{buy:*b, quant:*q, price:*p*(K0 as f64+K0_INC as f64* (*k0_n as f64 )), limit_status:*ll}
-            },
-            Order::StopLimit {buy:b, quant:q, price:p, limit_status:sl, stop_status:ll, stop_price:sp}=>{
-                *k0_n+=1;
-                Order::StopLimit{buy:*b, quant:*q, price:*p*(K0 as f64+K0_INC as f64* (*k0_n as f64 )), limit_status:*sl, stop_status:*ll, stop_price:*sp}
-            },
-            Order::StopMarket {buy:b, quant:q, price:p, stop_status:ll}=>{
-                *k0_n+=1;
-                Order::StopMarket{buy:*b, quant:*q, price:*p*(K0 as f64+K0_INC as f64* (*k0_n as f64 )), stop_status:*ll}
-            },
-
+        *order = match order {
+            Order::None => *order,
+            Order::Market { .. } => *order,
+            Order::Limit {
+                buy: b,
+                quant: q,
+                price: p,
+                limit_status: ll,
+            } => {
+                *k0_n += 1;
+                Order::Limit {
+                    buy: *b,
+                    quant: *q,
+                    price: *p * (K0 as f64 + K0_INC as f64 * (*k0_n as f64)),
+                    limit_status: *ll,
+                }
+            }
+            Order::StopLimit {
+                buy: b,
+                quant: q,
+                price: p,
+                limit_status: sl,
+                stop_status: ll,
+                stop_price: sp,
+            } => {
+                *k0_n += 1;
+                Order::StopLimit {
+                    buy: *b,
+                    quant: *q,
+                    price: *p * (K0 as f64 + K0_INC as f64 * (*k0_n as f64)),
+                    limit_status: *sl,
+                    stop_status: *ll,
+                    stop_price: *sp,
+                }
+            }
+            Order::StopMarket {
+                buy: b,
+                quant: q,
+                price: p,
+                stop_status: ll,
+            } => {
+                *k0_n += 1;
+                Order::StopMarket {
+                    buy: *b,
+                    quant: *q,
+                    price: *p * (K0 as f64 + K0_INC as f64 * (*k0_n as f64)),
+                    stop_status: *ll,
+                }
+            }
         };
     };
-    let inc_up_2=make_hotkey_alt![Key,J,ui, hk_active];
-    if inc_up_2{
-        *order_active = if *order_active_after_change{
+    let inc_up_2 = make_hotkey_alt![Key, J, ui, hk_active];
+    if inc_up_2 {
+        *order_active = if *order_active_after_change {
             *order_active
-        }else{
+        } else {
             false
         };
-        *order=match order{
-            Order::None=>{
-                *order
-            },
-            Order::Market {..}=>{
-                *order
-            },
-            Order::Limit {buy:b, quant:q, price:p,limit_status:ll}=>{
-                *order
-            },
-            Order::StopLimit {buy:b, quant:q, price:p, limit_status:sl, stop_status:ll, stop_price:sp}=>{
-                *k1_n+=1;
-                Order::StopLimit{buy:*b, quant:*q, price:*p, limit_status:*sl, stop_status:*ll, stop_price:*sp*(K1 as f32+K1_INC * (*k1_n as f32))}
-            },
-            Order::StopMarket {buy:b, quant:q, price:p, stop_status:ll}=>{
-                *order
-            },
-
+        *order = match order {
+            Order::None => *order,
+            Order::Market { .. } => *order,
+            Order::Limit {
+                buy: b,
+                quant: q,
+                price: p,
+                limit_status: ll,
+            } => *order,
+            Order::StopLimit {
+                buy: b,
+                quant: q,
+                price: p,
+                limit_status: sl,
+                stop_status: ll,
+                stop_price: sp,
+            } => {
+                *k1_n += 1;
+                Order::StopLimit {
+                    buy: *b,
+                    quant: *q,
+                    price: *p,
+                    limit_status: *sl,
+                    stop_status: *ll,
+                    stop_price: *sp * (K1 as f32 + K1_INC * (*k1_n as f32)),
+                }
+            }
+            Order::StopMarket {
+                buy: b,
+                quant: q,
+                price: p,
+                stop_status: ll,
+            } => *order,
         };
     };
 
-    let inc_down_price=make_hotkey_shift![Key,J,ui, hk_active];
-    if inc_down_price{
-        *order_active = if *order_active_after_change{
+    let inc_down_price = make_hotkey_shift![Key, J, ui, hk_active];
+    if inc_down_price {
+        *order_active = if *order_active_after_change {
             *order_active
-        }else{
+        } else {
             false
         };
-        *order=match order{
-            Order::None=>{
-                *order
-            },
-            Order::Market {..}=>{
-                *order
-            },
-            Order::Limit {buy:b, quant:q, price:p,limit_status:ll}=>{
-                *k0_n-=1;
-                Order::Limit{buy:*b, quant:*q, price:*p/(K0 as f64+K0 as f64* (*k0_n as f64 )), limit_status:*ll}
-            },
-            Order::StopLimit {buy:b, quant:q, price:p, limit_status:sl, stop_status:ll, stop_price:sp}=>{
-                *k0_n-=1;
-                Order::StopLimit{buy:*b, quant:*q, price:*p/(K0 as f64+K0 as f64* (*k0_n as f64 )), limit_status:*sl, stop_status:*ll, stop_price:*sp}
-            },
-            Order::StopMarket {buy:b, quant:q, price:p, stop_status:ll}=>{
-                *k0_n-=1;
-                Order::StopMarket{buy:*b, quant:*q, price:*p/(K0 as f64+K0 as f64* (*k0_n as f64 )), stop_status:*ll}
-            },
-
+        *order = match order {
+            Order::None => *order,
+            Order::Market { .. } => *order,
+            Order::Limit {
+                buy: b,
+                quant: q,
+                price: p,
+                limit_status: ll,
+            } => {
+                *k0_n -= 1;
+                Order::Limit {
+                    buy: *b,
+                    quant: *q,
+                    price: *p / (K0 as f64 + K0 as f64 * (*k0_n as f64)),
+                    limit_status: *ll,
+                }
+            }
+            Order::StopLimit {
+                buy: b,
+                quant: q,
+                price: p,
+                limit_status: sl,
+                stop_status: ll,
+                stop_price: sp,
+            } => {
+                *k0_n -= 1;
+                Order::StopLimit {
+                    buy: *b,
+                    quant: *q,
+                    price: *p / (K0 as f64 + K0 as f64 * (*k0_n as f64)),
+                    limit_status: *sl,
+                    stop_status: *ll,
+                    stop_price: *sp,
+                }
+            }
+            Order::StopMarket {
+                buy: b,
+                quant: q,
+                price: p,
+                stop_status: ll,
+            } => {
+                *k0_n -= 1;
+                Order::StopMarket {
+                    buy: *b,
+                    quant: *q,
+                    price: *p / (K0 as f64 + K0 as f64 * (*k0_n as f64)),
+                    stop_status: *ll,
+                }
+            }
         };
     };
-    let inc_down_2=make_hotkey_alt![Key,J,ui, hk_active];
-    if inc_down_2{
-        *order_active = if *order_active_after_change{
+    let inc_down_2 = make_hotkey_alt![Key, J, ui, hk_active];
+    if inc_down_2 {
+        *order_active = if *order_active_after_change {
             *order_active
-        }else{
+        } else {
             false
         };
-        *order=match order{
-            Order::None=>{
-                *order
-            },
-            Order::Market {..}=>{
-                *order
-            },
-            Order::Limit {buy:b, quant:q, price:p,limit_status:ll}=>{
-                *order
-            },
-            Order::StopLimit {buy:b, quant:q, price:p, limit_status:sl, stop_status:ll, stop_price:sp}=>{
-                *k1_n-=1;
-                Order::StopLimit{buy:*b, quant:*q, price:*p, limit_status:*sl, stop_status:*ll, stop_price:*sp/(K1 as f32+K1_INC* (*k1_n as f32))}
-            },
-            Order::StopMarket {buy:b, quant:q, price:p, stop_status:ll}=>{
-                *order
-            },
+        *order = match order {
+            Order::None => *order,
+            Order::Market { .. } => *order,
+            Order::Limit {
+                buy: b,
+                quant: q,
+                price: p,
+                limit_status: ll,
+            } => *order,
+            Order::StopLimit {
+                buy: b,
+                quant: q,
+                price: p,
+                limit_status: sl,
+                stop_status: ll,
+                stop_price: sp,
+            } => {
+                *k1_n -= 1;
+                Order::StopLimit {
+                    buy: *b,
+                    quant: *q,
+                    price: *p,
+                    limit_status: *sl,
+                    stop_status: *ll,
+                    stop_price: *sp / (K1 as f32 + K1_INC * (*k1_n as f32)),
+                }
+            }
+            Order::StopMarket {
+                buy: b,
+                quant: q,
+                price: p,
+                stop_status: ll,
+            } => *order,
         };
     };
 }
-
-
 
 impl ManualOrders {
     fn hist_del_order(
@@ -1959,33 +2160,21 @@ impl ManualOrders {
                     (*asset1_locked * quant.get_f64(), *asset2_locked)
                 }
             }
-            Order::Limit {
-                buy,
-                quant,
-                ..
-            } => {
+            Order::Limit { buy, quant, .. } => {
                 if *buy == true {
                     (*asset1_locked, *asset2_locked * quant.get_f64())
                 } else {
                     (*asset1_locked * quant.get_f64(), *asset2_locked)
                 }
             }
-            Order::StopLimit {
-                buy,
-                quant,
-                ..
-            } => {
+            Order::StopLimit { buy, quant, .. } => {
                 if *buy == true {
                     (*asset1_locked, *asset2_locked * quant.get_f64())
                 } else {
                     (*asset1_locked * quant.get_f64(), *asset2_locked)
                 }
             }
-            Order::StopMarket {
-                buy,
-                quant,
-                ..
-            } => {
+            Order::StopMarket { buy, quant, .. } => {
                 if *buy == true {
                     (*asset1_locked, *asset2_locked * quant.get_f64())
                 } else {
@@ -2002,23 +2191,23 @@ impl ManualOrders {
         (a1, a2, a1_l, a2_l)
     }
     fn hist_validate_order(o: &Order, asset1: &f64, asset2: &f64) -> Option<(f64, f64, f64, f64)> {
-        let price=o.get_price();
-        if *price<=0.0{
+        let price = o.get_price();
+        if *price <= 0.0 {
             tracing::error!["Order price less than or equal to 0"];
             return None;
         };
-        let side=o.get_side();
-        match side{
-            true=>{
-                if *asset2 ==0.0{
+        let side = o.get_side();
+        match side {
+            true => {
+                if *asset2 == 0.0 {
                     tracing::error!["Order error: insufficient free balance"];
-                    return None
+                    return None;
                 };
             }
-            false=>{
-                if *asset1 ==0.0{
+            false => {
+                if *asset1 == 0.0 {
                     tracing::error!["Order error: insufficient free balance"];
-                    return None
+                    return None;
                 };
             }
         };
@@ -2034,33 +2223,21 @@ impl ManualOrders {
                     (*asset1 * quant.get_f64(), *asset2, *buy)
                 }
             }
-            Order::Limit {
-                buy,
-                quant,
-                ..
-            } => {
+            Order::Limit { buy, quant, .. } => {
                 if *buy == true {
                     (*asset1, *asset2 * quant.get_f64(), *buy)
                 } else {
                     (*asset1 * quant.get_f64(), *asset2, *buy)
                 }
             }
-            Order::StopLimit {
-                buy,
-                quant,
-                ..
-            } => {
+            Order::StopLimit { buy, quant, .. } => {
                 if *buy == true {
                     (*asset1, *asset2 * quant.get_f64(), *buy)
                 } else {
                     (*asset1 * quant.get_f64(), *asset2, *buy)
                 }
             }
-            Order::StopMarket {
-                buy,
-                quant,
-                ..
-            } => {
+            Order::StopMarket { buy, quant, .. } => {
                 if *buy == true {
                     (*asset1, *asset2 * quant.get_f64(), *buy)
                 } else {
@@ -2069,9 +2246,13 @@ impl ManualOrders {
             }
         };
         let (a1, a2) = (asset1 - locked_a1, asset2 - locked_a2);
-        tracing::trace!["hit_order_valiate Asset1:{} Asset2:{}",asset1,asset2];
-        tracing::trace!["hit_order_valiate locked_asset1:{} locked_asset2:{}",locked_a1,locked_a2];
-        tracing::trace!["hit_order_valiate A1:{} A2:{}",a1,a2];
+        tracing::trace!["hit_order_valiate Asset1:{} Asset2:{}", asset1, asset2];
+        tracing::trace![
+            "hit_order_valiate locked_asset1:{} locked_asset2:{}",
+            locked_a1,
+            locked_a2
+        ];
+        tracing::trace!["hit_order_valiate A1:{} A2:{}", a1, a2];
         if buy == true {
             if a1 < 0.0 {
                 None
@@ -2094,9 +2275,9 @@ impl ManualOrders {
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
         live_info: Option<&LiveInfo>,
-        trade_slice: Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
+        trade_slice: Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]>,
         symbol_info: Option<&(String, String, String)>,
-    ){
+    ) {
         match hlines {
             Some(hline_ref) => link_hline_orders(&man_orders.orders, hline_ref),
             None => {
@@ -2115,10 +2296,10 @@ impl ManualOrders {
 
         match (hist_trade, trade_slice) {
             (Some(h_trade), Some(t_slice)) => {
-                if man_orders.order_set==true{
+                if man_orders.order_set == true {
                     //h_trade.asset1=man_orders.asset1 ;
                     //h_trade.asset2=man_orders.asset2 ;
-                }else{
+                } else {
                     man_orders.asset1 = h_trade.asset1;
                     man_orders.asset2 = h_trade.asset2;
                 };
@@ -2127,11 +2308,11 @@ impl ManualOrders {
                     man_orders.asset1_name = symbol_inf.1.clone();
                     man_orders.asset2_name = symbol_inf.2.clone();
                 };
-                if !t_slice.is_empty(){
+                if !t_slice.is_empty() {
                     //NOTE if the slice is long the evaluation might brick perormance
                     //spawn a different thread and return result, checking on it each iteration
-                    let last_time=t_slice[t_slice.len()-1].0;
-                    if man_orders.last_slice_time != last_time{
+                    let last_time = t_slice[t_slice.len() - 1].0;
+                    if man_orders.last_slice_time != last_time {
                         tracing::trace!["last_time:{}", last_time];
                         tracing::trace!["last_slice_time:{}", man_orders.last_slice_time];
                         tracing::trace!["last_slice_len:{}", t_slice.len()];
@@ -2151,7 +2332,10 @@ impl ManualOrders {
                         tracing::trace!["inactive_orders:{}", inactive_orders.len()];
                         let remaining_active_orders =
                             h_trade.trade_forward(t_slice, &man_orders.eval_mode, active_orders);
-                        tracing::trace!["remaining_active_orders:{}", remaining_active_orders.len()];
+                        tracing::trace![
+                            "remaining_active_orders:{}",
+                            remaining_active_orders.len()
+                        ];
                         let mut remaining_orders: HashMap<i32, (Order, bool)> = inactive_orders
                             .iter()
                             .map(|(id, order)| (*id, (*order, false)))
@@ -2163,21 +2347,30 @@ impl ManualOrders {
                             })
                             .collect();
                         man_orders.orders = remaining_orders;
-                        let a1=h_trade.asset1;
-                        let a2=h_trade.asset2;
-                        let a1_locked=remaining_active_orders.iter().filter(|(_,o)| o.get_side()==false).map(|(_,order)| order.get_qnt()*a1).sum::<f64>().abs();
-                        let a2_locked=remaining_active_orders.iter().filter(|(_,o)| o.get_side()==true).map(|(_,order)| order.get_qnt()*a2).sum::<f64>().abs();
-                        let a1m=a1-a1_locked;
-                        let a2m=a2-a2_locked;
-                        tracing::trace!["a1_locked: {}, a2_locked: {}",a1_locked, a2_locked];
+                        let a1 = h_trade.asset1;
+                        let a2 = h_trade.asset2;
+                        let a1_locked = remaining_active_orders
+                            .iter()
+                            .filter(|(_, o)| o.get_side() == false)
+                            .map(|(_, order)| order.get_qnt() * a1)
+                            .sum::<f64>()
+                            .abs();
+                        let a2_locked = remaining_active_orders
+                            .iter()
+                            .filter(|(_, o)| o.get_side() == true)
+                            .map(|(_, order)| order.get_qnt() * a2)
+                            .sum::<f64>()
+                            .abs();
+                        let a1m = a1 - a1_locked;
+                        let a2m = a2 - a2_locked;
+                        tracing::trace!["a1_locked: {}, a2_locked: {}", a1_locked, a2_locked];
                         man_orders.asset1 = a1m;
                         man_orders.asset2 = a2m;
                         man_orders.asset1_locked = a1_locked;
-                        man_orders.asset2_locked = a2_locked; 
-                        man_orders.last_slice_time =t_slice[t_slice.len()-1].0;
+                        man_orders.asset2_locked = a2_locked;
+                        man_orders.last_slice_time = t_slice[t_slice.len() - 1].0;
                     };
                 };
-
 
                 egui::ComboBox::from_label(" ")
                     .selected_text(format!("{}", man_orders.eval_mode.to_str()))
@@ -2212,11 +2405,14 @@ impl ManualOrders {
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
-                        RichText::new(format!["{}:{:.2}", man_orders.asset1_name, man_orders.asset1])
-                            .color(Color32::from_rgb(255, 207, 38)),
+                        RichText::new(format![
+                            "{}:{:.2}",
+                            man_orders.asset1_name, man_orders.asset1
+                        ])
+                        .color(Color32::from_rgb(255, 207, 38)),
                     ),
                 );
-                if man_orders.asset1_locked !=0.0{
+                if man_orders.asset1_locked != 0.0 {
                     ui.add_sized(
                         egui::vec2(50.0, 20.0),
                         egui::Label::new(
@@ -2228,11 +2424,14 @@ impl ManualOrders {
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
-                        RichText::new(format!["{}:{:.2}", man_orders.asset2_name, man_orders.asset2])
-                            .color(Color32::from_rgb(71, 200, 38)),
+                        RichText::new(format![
+                            "{}:{:.2}",
+                            man_orders.asset2_name, man_orders.asset2
+                        ])
+                        .color(Color32::from_rgb(71, 200, 38)),
                     ),
                 );
-                if man_orders.asset2_locked !=0.0{
+                if man_orders.asset2_locked != 0.0 {
                     ui.add_sized(
                         egui::vec2(50.0, 20.0),
                         egui::Label::new(
@@ -2489,12 +2688,12 @@ impl ManualOrders {
                     Order::None => {}
                 }
 
-                if ui.button("Add").clicked()  {
+                if ui.button("Add").clicked() {
                     let res = man_orders.price_string.parse();
                     man_orders.price = match res {
                         Ok(pp) => pp,
                         Err(e) => {
-                            tracing::error!["Unable to parse price string! {}",e];
+                            tracing::error!["Unable to parse price string! {}", e];
                             man_orders.price_string = "0.0".to_string();
                             0.0
                         }
@@ -2583,8 +2782,7 @@ impl ManualOrders {
                                 man_orders.asset1 = a1;
                                 man_orders.asset2 = a2;
 
-
-                                man_orders.order_set=true;
+                                man_orders.order_set = true;
 
                                 man_orders.asset1_locked = a1_locked;
                                 man_orders.asset2_locked = a2_locked;
@@ -2592,7 +2790,6 @@ impl ManualOrders {
                                 man_orders.last_id += 1;
                                 let oid = man_orders.last_id;
                                 man_orders.orders.insert(oid, (o, true));
-                                
                             }
                             None => {
                                 tracing::error!["Hist order invalid ERROR"];
@@ -2676,7 +2873,7 @@ impl ManualOrders {
                                     ui.label(format!["{}", id]);
                                 });
                                 row.col(|ui| {
-                                    ui.label(format!["{} %", order.get_qnt()*100.0]);
+                                    ui.label(format!["{} %", order.get_qnt() * 100.0]);
                                 });
                                 row.col(|ui| {
                                     ui.label(format!["{}", order.get_price()]);
@@ -2706,7 +2903,7 @@ impl ManualOrders {
                                                 &man_orders.asset1,
                                                 &man_orders.asset2,
                                             );
-                                            man_orders.order_set=false;
+                                            man_orders.order_set = false;
                                             man_orders.asset1_locked = a1_l;
                                             man_orders.asset2_locked = a2_l;
                                             man_orders.asset1 = a1;
@@ -2720,7 +2917,6 @@ impl ManualOrders {
                     });
             });
         });
-
     }
     #[allow(unused)]
     fn show_singleorder(
@@ -2731,9 +2927,9 @@ impl ManualOrders {
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
         live_info: Option<&LiveInfo>,
-        trade_slice: Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
+        trade_slice: Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]>,
         symbol_info: Option<&(String, String, String)>,
-    ){
+    ) {
         todo!()
     }
     fn show(
@@ -2744,13 +2940,33 @@ impl ManualOrders {
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
         live_info: Option<&LiveInfo>,
-        trade_slice: Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]>,
+        trade_slice: Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]>,
         symbol_info: Option<&(String, String, String)>,
     ) {
-        if man_orders.single_order_mode==true{
-            ManualOrders::show_singleorder(man_orders, last_price, hist_trade, cli_chan, ui, hlines, live_info, trade_slice, symbol_info);
-        }else{
-            ManualOrders::show_multiorder(man_orders, last_price, hist_trade, cli_chan, ui, hlines, live_info, trade_slice, symbol_info);
+        if man_orders.single_order_mode == true {
+            ManualOrders::show_singleorder(
+                man_orders,
+                last_price,
+                hist_trade,
+                cli_chan,
+                ui,
+                hlines,
+                live_info,
+                trade_slice,
+                symbol_info,
+            );
+        } else {
+            ManualOrders::show_multiorder(
+                man_orders,
+                last_price,
+                hist_trade,
+                cli_chan,
+                ui,
+                hlines,
+                live_info,
+                trade_slice,
+                symbol_info,
+            );
         };
     }
 }
@@ -2928,9 +3144,9 @@ impl Default for HistPlot {
             .duration_since(UNIX_EPOCH)
             .expect("Unable to get unix timestamp!")
             .as_millis() as i64;
-        let curr_date = chrono::NaiveDateTime::from_timestamp_millis(curr_timestamp)
+        let curr_date = DateTime::<Utc>::from_timestamp_millis(curr_timestamp)
             .expect("Unable to parse current time")
-            .date();
+            .date_naive();
         let current_year = chrono::Utc::now().year() as i32;
         Self {
             kline_plot: KlinePlot::default(),
@@ -2945,7 +3161,8 @@ impl Default for HistPlot {
             intv: Intv::Min1,
             last_intv: Intv::Min1,
 
-            picked_date: chrono::NaiveDate::from_ymd(current_year - 1, 1, 1),
+            picked_date: chrono::NaiveDate::from_ymd_opt(current_year - 1, 1, 1)
+                .expect("Unable to get current year"),
             picked_date_end: curr_date,
 
             hist_extras: None,
@@ -2963,8 +3180,16 @@ impl Default for HistPlot {
             trade_h_s: "00".to_string(),
             trade_min_s: "00".to_string(),
 
-            trade_time: curr_date.and_hms(0, 0, 0).timestamp_millis(),
-            last_trade_time: curr_date.and_hms(0, 0, 0).timestamp_millis(),
+            trade_time: curr_date
+                .and_hms_opt(0, 0, 0)
+                .expect("WTF")
+                .and_utc()
+                .timestamp_millis(),
+            last_trade_time: curr_date
+                .and_hms_opt(0, 0, 0)
+                .expect("WTF")
+                .and_utc()
+                .timestamp_millis(),
 
             att_klines: None,
             all_loaded: false,
@@ -3141,7 +3366,7 @@ impl Settings {
                         settings.binance_priv_key = None;
                         settings.enc_binance_pub_key = None;
                         settings.enc_binance_priv_key = None;
-                        let _=settings.save_settings_file(None);
+                        let _ = settings.save_settings_file(None);
                     };
                     let mut sett = settings.clone();
                     sett.binance_pub_key = None;
@@ -3252,7 +3477,7 @@ impl Settings {
     pub fn save_settings_file(&mut self, password: Option<String>) -> Result<()> {
         match password {
             Some(pass) => {
-                let _=self.encrypt_keys(pass);
+                let _ = self.encrypt_keys(pass);
             }
             None => {
                 if self.save_api_keys == false {
@@ -3467,9 +3692,7 @@ impl DataManager {
                                 });
                                 row.col(|ui| {
                                     if let Some(start_time) =
-                                        chrono::NaiveDateTime::from_timestamp_millis(
-                                            asset.dat_start_t,
-                                        )
+                                        DateTime::<Utc>::from_timestamp_millis(asset.dat_start_t)
                                     {
                                         ui.label(format!["{}", start_time]);
                                     } else {
@@ -3478,9 +3701,7 @@ impl DataManager {
                                 });
                                 row.col(|ui| {
                                     if let Some(end_time) =
-                                        chrono::NaiveDateTime::from_timestamp_millis(
-                                            asset.dat_end_t,
-                                        )
+                                        DateTime::<Utc>::from_timestamp_millis(asset.dat_end_t)
                                     {
                                         ui.label(format!["{}", end_time]);
                                     } else {
@@ -3550,10 +3771,7 @@ impl HlineType {
             Order::Market { .. } => {
                 vec![]
             }
-            Order::Limit {
-                price,
-                ..
-            } => {
+            Order::Limit { price, .. } => {
                 if side == true {
                     vec![
                         HlineType::BuyOrder((line_state, PRICE_STYLE))
@@ -3567,9 +3785,7 @@ impl HlineType {
                 }
             }
             Order::StopLimit {
-                price,
-                stop_price,
-                ..
+                price, stop_price, ..
             } => {
                 if side == true {
                     vec![
@@ -3587,10 +3803,7 @@ impl HlineType {
                     ]
                 }
             }
-            Order::StopMarket {
-                price,
-                ..
-            } => {
+            Order::StopMarket { price, .. } => {
                 if side == true {
                     vec![
                         HlineType::BuyOrder((line_state, STOP_STYLE))
@@ -3672,7 +3885,7 @@ impl HistPlot {
         cli_chan: watch::Sender<ClientInstruct>,
         hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
-        trade_slice: Option<&mut Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>>,
+        trade_slice: Option<&mut Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>>,
         hist_extras: &mut HistExtras,
     ) {
         if hist_plot.trade_slice_loaded == true {
@@ -3689,15 +3902,14 @@ impl HistPlot {
                 (Some(ret_slice), Some(t_slice)) => {
                     hist_extras.last_price = ret_slice[ret_slice.len() - 1].4;
                     tracing::trace!["hist_extras.last_price {}", hist_extras.last_price];
-                    if ret_slice.len() > hist_plot.trade_wicks as usize{
-                        *t_slice = ret_slice[ret_slice.len()-(hist_plot.trade_wicks as usize)..].to_vec();
-                    }else{
+                    if ret_slice.len() > hist_plot.trade_wicks as usize {
+                        *t_slice = ret_slice[ret_slice.len() - (hist_plot.trade_wicks as usize)..]
+                            .to_vec();
+                    } else {
                         *t_slice = ret_slice;
                     };
                 }
-                _ => {
-
-                }
+                _ => {}
             };
         } else {
             let _res = hist_plot.kline_plot.show_live(
@@ -3783,7 +3995,9 @@ impl HistPlot {
                     };
                     let trade_date = hist_plot.picked_date_end.clone();
                     let trade_time = trade_date
-                        .and_hms(trade_h.into(), trade_min.into(), 0)
+                        .and_hms_opt(trade_h.into(), trade_min.into(), 0)
+                        .expect("Failed to parse trade time")
+                        .and_utc()
                         .timestamp_millis();
                     tracing::trace!["GO to>> END: {}", trade_time];
                     let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {

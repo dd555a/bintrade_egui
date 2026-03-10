@@ -1,4 +1,5 @@
 use crate::data::Intv;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 const M_FEE: f64 = 0.0015;
@@ -315,11 +316,13 @@ pub const fn eval_basic_condition(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq,Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum LimitStatus {
     #[default]
     Untouched,
-    PartFilled { percent_fill: f32 },
+    PartFilled {
+        percent_fill: f32,
+    },
     FullyFilled,
 }
 
@@ -526,12 +529,12 @@ enum OrderStatus {
 */
 
 fn hist_eval_kline(
-    kline: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
+    kline: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
     order: Order,
     asset1: f64,
     asset2: f64,
     eval_mode: &EvalMode,
-) -> Option<(chrono::NaiveDateTime, f64, f64, Option<Order>)> {
+) -> Option<(DateTime<Utc>, f64, f64, Option<Order>)> {
     for k in kline.iter() {
         let (t, o, h, l, c, _) = *k;
         let result = eval_order_basic(h, o, c, l, asset1, asset2, order, eval_mode);
@@ -540,7 +543,7 @@ fn hist_eval_kline(
                 let (order_cond, order) = eval_basic_condition(order_cond, order);
                 match order_cond {
                     OrderCondition::Untouched => continue,
-                    OrderCondition::Filled=> return Some((t, asset1, asset2 ,None)),
+                    OrderCondition::Filled => return Some((t, asset1, asset2, None)),
                     _ => return Some((t, asset1, asset2, Some(order))),
                 }
             }
@@ -612,7 +615,7 @@ impl HistTrade {
     }
     pub fn eval_single_order(
         &mut self,
-        trade_slice: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
+        trade_slice: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
         o: Order,
         eval_mode: &EvalMode,
     ) -> Option<Order> {
@@ -649,7 +652,7 @@ impl HistTrade {
     }
     pub fn trade_forward(
         &mut self,
-        trade_slice: &[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)],
+        trade_slice: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
         eval_mode: &EvalMode,
         active_orders: Vec<(i32, Order)>,
     ) -> Vec<(i32, Order)> {
@@ -708,7 +711,7 @@ impl HistTrade {
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct TradeRecord {
     asset_pair: String,
-    transaction_time: chrono::NaiveDateTime,
+    transaction_time: DateTime<Utc>,
     trades_made: i32,
     asset1_held: bool,
     asset1: f64,
@@ -723,7 +726,7 @@ impl TradeRecord {
     pub fn new(pair: &str) -> Self {
         TradeRecord {
             asset_pair: pair.to_string(),
-            transaction_time: chrono::NaiveDateTime::default(),
+            transaction_time: DateTime::<Utc>::default(),
             trades_made: 0,
             asset1_held: false,
             asset1: 0.0,

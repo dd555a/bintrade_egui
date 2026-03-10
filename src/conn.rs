@@ -38,6 +38,8 @@ use crate::gui::{KeysStatus, LiveInfo, Settings};
 use crate::trade::Order;
 use crate::{BinInstructs, BinResponse, GeneralError};
 
+use chrono::{DateTime, Utc};
+
 const ERR_CTX: &str = "Binance client | websocket:";
 
 #[allow(non_snake_case)]
@@ -135,11 +137,11 @@ struct GetKline {
 }
 impl GetKline {
     fn to_kline(input: &[GetKline]) -> KlineMine {
-        let res: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)> = input
+        let res: Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)> = input
             .iter()
             .map(|n| {
                 (
-                    chrono::NaiveDateTime::from_timestamp_millis(n.open_time)
+                    DateTime::<Utc>::from_timestamp_millis(n.open_time)
                         .expect("GETKLINE NOPE NOPE NOPE"),
                     n.o.as_str().parse().expect("Unable to parse value"),
                     n.h.as_str().parse().expect("Unable to parse value"),
@@ -229,14 +231,11 @@ pub struct KlineTick {
     B: i64, //ignore
 }
 impl KlineTick {
-    pub fn to_kline_vec(
-        input: &[KlineTick],
-    ) -> Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)> {
+    pub fn to_kline_vec(input: &[KlineTick]) -> Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)> {
         input
             .iter()
             .map(|i| {
-                let open_time =
-                    chrono::NaiveDateTime::from_timestamp_millis(i.t).expect("Fukcckckck");
+                let open_time = DateTime::<Utc>::from_timestamp_millis(i.t).expect("Fukcckckck");
                 (open_time, i.o, i.h, i.l, i.c, i.v)
             })
             .collect()
@@ -692,7 +691,7 @@ pub struct BinanceClient {
     qoute_balances: (f64, f64),
     balances: HashMap<String, (f64, f64)>,
     current_symbol_bases: (String, String),
-    live_orders: HashMap<i32,(Order,bool)>,
+    live_orders: HashMap<i32, (Order, bool)>,
 }
 
 impl Default for BinanceClient {
@@ -1249,7 +1248,7 @@ impl BinanceClient {
                         live_i
                             .live_orders
                             .insert(order_id as i32, (order.clone(), true));
-                        self.live_orders=live_i.live_orders.clone();
+                        self.live_orders = live_i.live_orders.clone();
                         BinResponse::Success
                     }
                     Err(e) => {
@@ -1302,7 +1301,11 @@ impl BinanceClient {
                 resp
             }
             BinInstructs::CancelAllOrders { symbol: ref s } => {
-                let o_ids:Vec<u64>=self.live_orders.iter().map(|(id,(order,active))|{*id as u64}).collect();
+                let o_ids: Vec<u64> = self
+                    .live_orders
+                    .iter()
+                    .map(|(id, (order, active))| *id as u64)
+                    .collect();
                 let res = self.cancel_all_orders(&s, o_ids).await;
                 let resp = match res {
                     Ok(_) => BinResponse::Success,
@@ -1431,7 +1434,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    //TODO  make binance api tests 
-    async fn example(){
-    }
+    //TODO  make binance api tests
+    async fn example() {}
 }

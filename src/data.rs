@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, NaiveDateTime};
+use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
 
@@ -43,7 +43,7 @@ async fn get_yfinance_data(symbol: String, intv: Intv) -> Result<Kline> {
     let interval: Interval = yfintv_conv(intv);
     let hist_download = HistoryBuilder::new(&client, symbol).interval(interval);
     let kl = hist_download.fetch().await?;
-    let mut kline: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)> = vec![];
+    let mut kline: Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)> = vec![];
     kl.iter().map(|k| {
         let s = yfcandle_conv(&k);
         match s {
@@ -58,8 +58,8 @@ async fn get_yfinance_data(symbol: String, intv: Intv) -> Result<Kline> {
 }
 
 #[cfg(feature = "yfinance")]
-fn yfcandle_conv(input: &Candle) -> Result<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)> {
-    let time: chrono::NaiveDateTime = DateTime::from_timestamp(input.ts, 0)
+fn yfcandle_conv(input: &Candle) -> Result<(DateTime<Utc>, f64, f64, f64, f64, f64)> {
+    let time: DateTime<Utc> = DateTime::from_timestamp(input.ts, 0)
         .ok_or(anyhow!["Unable to parse time from timestamp"])?
         .naive_utc();
     let open = input.open;
@@ -118,7 +118,7 @@ async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Re
             )
         }
     };
-    let k: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)> =
+    let k: Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)> =
         sqlx::query_as(q).fetch_all(pool).await?;
     let kline = Kline::new_sql(k);
     Ok(kline)
@@ -172,14 +172,14 @@ async fn append_kline(
     table: &str,
     input: &[(
         i64,
-        chrono::NaiveDateTime,
+        DateTime<Utc>,
         f64,
         f64,
         f64,
         f64,
         f64,
         i64,
-        chrono::NaiveDateTime,
+        DateTime<Utc>,
         f64,
         u64,
         f64,
@@ -346,9 +346,7 @@ impl Intv {
             Intv::Day1 => chrono::TimeDelta::days(1),
             Intv::Day3 => chrono::TimeDelta::days(3),
             Intv::Week1 => chrono::TimeDelta::weeks(1),
-            Intv::Month1 => {
-                self.month_to_timedelta(DateTime::naive_local(&chrono::offset::Utc::now()))
-            }
+            Intv::Month1 => self.month_to_timedelta(),
         }
     }
     pub fn to_view_window(&self) -> usize {
@@ -370,17 +368,24 @@ impl Intv {
             Intv::Month1 => 300,
         }
     }
-    pub fn month_to_timedelta(&self, from_reference: NaiveDateTime) -> chrono::TimeDelta {
-        //NOTE returns timedelta based on the current month...
+    pub fn month_to_timedelta(&self) -> chrono::TimeDelta {
+        let curr_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Unable to get unix timestamp!")
+            .as_millis() as i64;
+        let curr_date = DateTime::<Utc>::from_timestamp_millis(curr_timestamp)
+            .expect("Unable to parse current time")
+            .date_naive();
+        let current_year = chrono::Utc::now().year() as i32;
         fn is_leap_year(year: i32) -> bool {
             return (year % 4 == 0) && (year % 100 != 0 || year % 400 == 0);
         }
-        let m = from_reference.month();
+        let m = curr_date.month();
         let days = match m {
             1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
             4 | 6 | 9 | 11 => 30,
             2 => {
-                if is_leap_year(from_reference.year()) == true {
+                if is_leap_year(current_year) == true {
                     29
                 } else {
                     28
@@ -438,14 +443,14 @@ pub struct FatKline {
     //(time o h l c volume,)
     pub kline: Vec<(
         i64,
-        chrono::NaiveDateTime,
+        DateTime<Utc>,
         f64,
         f64,
         f64,
         f64,
         f64,
         i64,
-        chrono::NaiveDateTime,
+        DateTime<Utc>,
         f64,
         u64,
         f64,
@@ -472,14 +477,14 @@ impl FatKline {
     fn new(
         kline: Vec<(
             i64,
-            chrono::NaiveDateTime,
+            DateTime<Utc>,
             f64,
             f64,
             f64,
             f64,
             f64,
             i64,
-            chrono::NaiveDateTime,
+            DateTime<Utc>,
             f64,
             u64,
             f64,
@@ -493,24 +498,21 @@ impl FatKline {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Kline {
     //NOTE (time o h l c volume)
-    pub kline: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>,
+    pub kline: Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>,
 }
 impl Kline {
-    pub fn new_sql(k: Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>) -> Self {
+    pub fn new_sql(k: Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>) -> Self {
         Self { kline: k }
     }
-    pub fn split(
-        &self,
-        no_splits: usize,
-    ) -> Vec<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
+    pub fn split(&self, no_splits: usize) -> Vec<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]> {
         self.kline.chunks(no_splits).collect()
     }
 }
 
 #[derive(Debug, Default)]
 pub struct Klines {
-    start_time: chrono::NaiveDateTime,
-    end_time: chrono::NaiveDateTime,
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
 
     pub asset_pair: String,
     pub s1_string: String,
@@ -521,11 +523,7 @@ pub struct Klines {
 }
 impl Klines {
     pub fn new_empty() -> Self {
-        let start_time = chrono::NaiveDateTime::from_timestamp(0, 0);
-        let end_time = chrono::NaiveDateTime::from_timestamp(0, 0);
         Self {
-            end_time,
-            start_time,
             ..Default::default()
         }
     }
@@ -613,7 +611,7 @@ impl AssetData {
         &self,
         symbol: &str,
         intv: &Intv,
-    ) -> Result<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
+    ) -> Result<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]> {
         let klines = self
             .kline_data
             .get(symbol)
@@ -642,7 +640,7 @@ impl AssetData {
         intv: &Intv,
         start_time: &i64,
         next_wicks: u16,
-    ) -> Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
+    ) -> Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]> {
         let klines = self.kline_data.get(symbol);
         let kk = match klines {
             Some(k) => k,
@@ -700,9 +698,9 @@ impl AssetData {
         &self,
         symbol: &str,
         intv: &Intv,
-        start_time: &chrono::NaiveDateTime,
-        end_time: &chrono::NaiveDateTime,
-    ) -> Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
+        start_time: &DateTime<Utc>,
+        end_time: &DateTime<Utc>,
+    ) -> Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]> {
         let klines = self.kline_data.get(symbol);
         let kk = match klines {
             Some(kk) => kk,
@@ -736,7 +734,7 @@ impl AssetData {
         intv: &Intv,
         start_index: usize,
         end_index: usize,
-    ) -> Option<&[(chrono::NaiveDateTime, f64, f64, f64, f64, f64)]> {
+    ) -> Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]> {
         //TODO fix boilerplate maybe
         let klines = self.kline_data.get(symbol);
         let kk = match klines {
@@ -778,14 +776,14 @@ pub fn get_data_binance(
         input: &KlineSummary,
     ) -> Result<(
         i64,
-        chrono::NaiveDateTime,
+        DateTime<Utc>,
         f64,
         f64,
         f64,
         f64,
         f64,
         i64,
-        chrono::NaiveDateTime,
+        DateTime<Utc>,
         f64,
         u64,
         f64,
@@ -793,14 +791,14 @@ pub fn get_data_binance(
     )> {
         tracing::trace!["Kline conv in = {:?}", &input];
         let based_time = input.open_time;
-        let time = chrono::NaiveDateTime::from_timestamp_millis(input.open_time).unwrap();
+        let time = DateTime::<Utc>::from_timestamp_millis(input.open_time).unwrap();
         let open = input.open.parse()?;
         let high = input.high.parse()?;
         let low = input.low.parse()?;
         let close = input.close.parse()?;
         let volume = input.volume.parse()?;
         let based_ctime = input.close_time;
-        let ctime = chrono::NaiveDateTime::from_timestamp_millis(input.close_time)
+        let ctime = DateTime::<Utc>::from_timestamp_millis(input.close_time)
             .ok_or(anyhow!["Unable to parse ctime"])?;
         let qav = input.quote_asset_volume.parse()?;
         let no = input.number_of_trades as u64;
@@ -839,14 +837,14 @@ pub fn get_data_binance(
     //
     let mut kline: Vec<(
         i64,
-        chrono::NaiveDateTime,
+        DateTime<Utc>,
         f64,
         f64,
         f64,
         f64,
         f64,
         i64,
-        chrono::NaiveDateTime,
+        DateTime<Utc>,
         f64,
         u64,
         f64,
@@ -870,7 +868,7 @@ pub fn get_data_binance(
         tracing::trace!["Kline chunk: {:?}", k];
         tracing::trace![
             "Kline timestamp: {}",
-            chrono::NaiveDateTime::from_timestamp_millis(timestamp + intv.to_ms() * n * 500)
+            DateTime::<Utc>::from_timestamp_millis(timestamp + intv.to_ms() * n * 500)
                 .ok_or(anyhow!["FFFUCK"])
                 .expect("FFFUCUCUKJCK")
         ];
@@ -880,14 +878,14 @@ pub fn get_data_binance(
         let kl: Result<
             Vec<(
                 i64,
-                chrono::NaiveDateTime,
+                DateTime<Utc>,
                 f64,
                 f64,
                 f64,
                 f64,
                 f64,
                 i64,
-                chrono::NaiveDateTime,
+                DateTime<Utc>,
                 f64,
                 u64,
                 f64,
@@ -896,9 +894,9 @@ pub fn get_data_binance(
         > = klines.iter().map(|k| kline_conv(&k)).collect();
         let mut kline_chunk = kl?;
         kline.append(&mut kline_chunk);
-        let current_timestamp_naive = chrono::NaiveDateTime::from_timestamp_millis(curr_timestamp)
+        let current_timestamp_naive = DateTime::<Utc>::from_timestamp_millis(curr_timestamp)
             .ok_or(anyhow!["current timestamp couldn't be formatted"])?;
-        let timestamp_naive = chrono::NaiveDateTime::from_timestamp_millis(timestamp)
+        let timestamp_naive = DateTime::<Utc>::from_timestamp_millis(timestamp)
             .ok_or(anyhow!["timestamp couldn't be formatted"])?;
         let bar: Bar = progress_bar.bar(
             no_it as usize,
@@ -1325,7 +1323,7 @@ impl SQLConn {
     pub async fn dl_binance_asset(
         &self,
         symbol: &str,
-        prune: Option<chrono::NaiveDateTime>,
+        prune: Option<DateTime<Utc>>,
         calc_stats: bool,
     ) -> Result<()> {
         todo!()
@@ -1998,6 +1996,5 @@ mod tests {
 
     #[tokio::test]
     //TODO make more api tests, chrono tests
-    async fn exmpl() {
-    }
+    async fn exmpl() {}
 }

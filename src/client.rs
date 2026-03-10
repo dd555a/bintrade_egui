@@ -611,8 +611,7 @@ impl ClientTask {
                 );
                 return cv;
             }
-            Tasks::Task1BinWS {..
-            } => {
+            Tasks::Task1BinWS { .. } => {
                 use BinInstructs::None as BinNone;
                 use BinResponse::None as BinRNone;
                 send_channel_to_self_push_recv_out!(
