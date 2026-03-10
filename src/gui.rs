@@ -1616,6 +1616,8 @@ impl eframe::App for DesktopApp {
 struct ManualOrders {
     man_orders: Option<HistTrade>,
     active_orders: Option<Vec<Order>>,
+    order_set:bool,
+    last_slice_time: chrono::NaiveDateTime,
 
     hotkeys: bool,
     single_order_mode: bool,
@@ -1658,17 +1660,22 @@ struct ManualOrders {
 
     plot_extras: Option<PlotExtras>,
     eval_mode: EvalMode,
+
+    trade_slice_loaded:bool,
 }
 
 //TODO find a way to group GUI elements together. The horror...
 impl Default for ManualOrders {
     fn default() -> Self {
         Self {
+            last_slice_time: chrono::NaiveDateTime::default(),
             eval_mode: EvalMode::default(),
             man_orders: None,
             active_orders: None,
             hotkeys: false,
+            order_set: false,
             single_order_mode: false,
+            trade_slice_loaded:false,
 
             single_order: None,
 
@@ -1812,6 +1819,7 @@ fn hotkey_order_single(
     order:&mut Order,
     order_active:&mut bool,
     asset1_held:&bool,
+    order_active_after_change:&bool,
     k0_n:&mut usize,
     k1_n:&mut usize,
 ){
@@ -1858,7 +1866,11 @@ fn hotkey_order_single(
 
     let inc_up_price=make_hotkey_shift![Key,J,ui, hk_active];
     if inc_up_price{
-        *order_active=false;
+        *order_active = if *order_active_after_change{
+            *order_active
+        }else{
+            false
+        };
         *order=match order{
             Order::None=>{
                 *order
@@ -1883,7 +1895,11 @@ fn hotkey_order_single(
     };
     let inc_up_2=make_hotkey_alt![Key,J,ui, hk_active];
     if inc_up_2{
-        *order_active=false;
+        *order_active = if *order_active_after_change{
+            *order_active
+        }else{
+            false
+        };
         *order=match order{
             Order::None=>{
                 *order
@@ -1907,7 +1923,11 @@ fn hotkey_order_single(
 
     let inc_down_price=make_hotkey_shift![Key,J,ui, hk_active];
     if inc_down_price{
-        *order_active=false;
+        *order_active = if *order_active_after_change{
+            *order_active
+        }else{
+            false
+        };
         *order=match order{
             Order::None=>{
                 *order
@@ -1932,7 +1952,11 @@ fn hotkey_order_single(
     };
     let inc_down_2=make_hotkey_alt![Key,J,ui, hk_active];
     if inc_down_2{
-        *order_active=false;
+        *order_active = if *order_active_after_change{
+            *order_active
+        }else{
+            false
+        };
         *order=match order{
             Order::None=>{
                 *order
@@ -2025,6 +2049,26 @@ impl ManualOrders {
         (a1, a2, a1_l, a2_l)
     }
     fn hist_validate_order(o: &Order, asset1: &f64, asset2: &f64) -> Option<(f64, f64, f64, f64)> {
+        let price=o.get_price();
+        if *price<=0.0{
+            tracing::error!["Order price less than or equal to 0"];
+            return None;
+        };
+        let side=o.get_side();
+        match side{
+            true=>{
+                if *asset2 ==0.0{
+                    tracing::error!["Order error: insufficient free balance"];
+                    return None
+                };
+            }
+            false=>{
+                if *asset1 ==0.0{
+                    tracing::error!["Order error: insufficient free balance"];
+                    return None
+                };
+            }
+        };
         let (locked_a1, locked_a2, buy) = match o {
             Order::None => {
                 tracing::error!["Order::None should not be passed here"];
@@ -2077,14 +2121,17 @@ impl ManualOrders {
             }
         };
         let (a1, a2) = (asset1 - locked_a1, asset2 - locked_a2);
+        tracing::debug!["hit_order_valiate Asset1:{} Asset2:{}",asset1,asset2];
+        tracing::debug!["hit_order_valiate locked_asset1:{} locked_asset2:{}",locked_a1,locked_a2];
+        tracing::debug!["hit_order_valiate A1:{} A2:{}",a1,a2];
         if buy == true {
-            if a1 == 0.0 {
+            if a1 < 0.0 {
                 None
             } else {
                 Some((a1, a2, locked_a1, locked_a2))
             }
         } else {
-            if a2 == 0.0 {
+            if a2 < 0.0 {
                 None
             } else {
                 Some((a1, a2, locked_a1, locked_a2))
@@ -2126,43 +2173,71 @@ impl ManualOrders {
 
         match (hist_trade, trade_slice) {
             (Some(mut h_trade), Some(t_slice)) => {
-                man_orders.asset1 = h_trade.asset1;
-                man_orders.asset2 = h_trade.asset2;
+                if man_orders.order_set==true{
+                    //h_trade.asset1=man_orders.asset1 ;
+                    //h_trade.asset2=man_orders.asset2 ;
+                }else{
+                    man_orders.asset1 = h_trade.asset1;
+                    man_orders.asset2 = h_trade.asset2;
+                };
                 if let Some(symbol_inf) = symbol_info {
                     man_orders.current_symbol = symbol_inf.0.clone();
                     man_orders.asset1_name = symbol_inf.1.clone();
                     man_orders.asset2_name = symbol_inf.2.clone();
                 };
+                if !t_slice.is_empty(){
+                    //NOTE if the slice is long the evaluation might brick perormance
+                    //spawn a different thread and return result, checking on it each iteration
+                    let last_time=t_slice[t_slice.len()-1].0;
+                    if man_orders.last_slice_time != last_time{
+                        tracing::debug!["last_time:{}", last_time];
+                        tracing::debug!["last_slice_time:{}", man_orders.last_slice_time];
+                        tracing::debug!["last_slice_len:{}", t_slice.len()];
+                        let active_orders: Vec<(i32, Order)> = man_orders
+                            .orders
+                            .iter()
+                            .filter(|(_, (_, active))| *active == true)
+                            .map(|(id, (order, active))| (*id, *order))
+                            .collect();
+                        tracing::debug!["active_orders:{}", active_orders.len()];
+                        let inactive_orders: Vec<(i32, Order)> = man_orders
+                            .orders
+                            .iter()
+                            .filter(|(_, (_, active))| *active == false)
+                            .map(|(id, (order, active))| (*id, *order))
+                            .collect();
+                        tracing::debug!["inactive_orders:{}", inactive_orders.len()];
+                        let remaining_active_orders =
+                            h_trade.trade_forward(t_slice, &man_orders.eval_mode, active_orders);
+                        tracing::debug!["remaining_active_orders:{}", remaining_active_orders.len()];
+                        let mut remaining_orders: HashMap<i32, (Order, bool)> = inactive_orders
+                            .iter()
+                            .map(|(id, order)| (*id, (*order, false)))
+                            .collect();
+                        let _res: Vec<_> = remaining_active_orders
+                            .iter()
+                            .map(|(id, order)| {
+                                remaining_orders.insert(*id, (*order, true));
+                            })
+                            .collect();
+                        man_orders.orders = remaining_orders;
+                        let a1=h_trade.asset1;
+                        let a2=h_trade.asset2;
+                        let a1_locked=remaining_active_orders.iter().filter(|(_,o)| o.get_side()==false).map(|(_,order)| order.get_qnt()*a1).sum::<f64>().abs();
+                        let a2_locked=remaining_active_orders.iter().filter(|(_,o)| o.get_side()==true).map(|(_,order)| order.get_qnt()*a2).sum::<f64>().abs();
+                        let a1m=a1-a1_locked;
+                        let a2m=a2-a2_locked;
+                        tracing::debug!["a1_locked: {}, a2_locked: {}",a1_locked, a2_locked];
+                        man_orders.asset1 = a1m;
+                        man_orders.asset2 = a2m;
+                        man_orders.asset1_locked = a1_locked;
+                        man_orders.asset2_locked = a2_locked; 
+                        man_orders.last_slice_time =t_slice[t_slice.len()-1].0;
+                    };
+                };
 
-                //NOTE if the slice is long the evaluation might brick perormance
-                //spawn a different thread and return result, checking on it each iteration
-                let active_orders: Vec<(i32, Order)> = man_orders
-                    .orders
-                    .iter()
-                    .filter(|(_, (_, active))| *active == true)
-                    .map(|(id, (order, active))| (*id, *order))
-                    .collect();
-                let inactive_orders: Vec<(i32, Order)> = man_orders
-                    .orders
-                    .iter()
-                    .filter(|(_, (_, active))| *active == false)
-                    .map(|(id, (order, active))| (*id, *order))
-                    .collect();
-                let remaining_active_orders =
-                    h_trade.trade_forward(t_slice, &man_orders.eval_mode, active_orders);
-                let mut remaining_orders: HashMap<i32, (Order, bool)> = inactive_orders
-                    .iter()
-                    .map(|(id, order)| (*id, (*order, false)))
-                    .collect();
-                let _res: Vec<_> = remaining_active_orders
-                    .iter()
-                    .map(|(id, order)| {
-                        remaining_orders.insert(*id, (*order, true));
-                    })
-                    .collect();
-                man_orders.orders = remaining_orders;
 
-                egui::ComboBox::from_label("HistEvalSelect")
+                egui::ComboBox::from_label(" ")
                     .selected_text(format!("{}", man_orders.eval_mode.to_str()))
                     .show_ui(ui, |ui| {
                         for e in EvalMode::iter() {
@@ -2195,29 +2270,29 @@ impl ManualOrders {
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
-                        RichText::new(format!["{}:{}", man_orders.asset1_name, man_orders.asset1])
+                        RichText::new(format!["{}:{:.2}", man_orders.asset1_name, man_orders.asset1])
                             .color(Color32::from_rgb(255, 207, 38)),
                     ),
                 );
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
-                        RichText::new(format!["(locked):{}", man_orders.asset1_locked])
-                            .color(Color32::from_rgb(255, 207, 38)),
+                        RichText::new(format!["(locked):{:.2}", man_orders.asset1_locked])
+                            .color(Color32::from_rgb(247, 235, 150)),
                     ),
                 );
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
-                        RichText::new(format!["{}:{}", man_orders.asset2_name, man_orders.asset2])
+                        RichText::new(format!["{}:{:.2}", man_orders.asset2_name, man_orders.asset2])
                             .color(Color32::from_rgb(71, 200, 38)),
                     ),
                 );
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
-                        RichText::new(format!["(locked):{}", man_orders.asset2_locked])
-                            .color(Color32::from_rgb(71, 200, 38)),
+                        RichText::new(format!["(locked):{:.2}", man_orders.asset2_locked])
+                            .color(Color32::from_rgb(212, 242, 150)),
                     ),
                 );
                 ui.end_row();
@@ -2392,7 +2467,7 @@ impl ManualOrders {
                             Order::StopMarket {
                                 buy: bb,
                                 quant: qq,
-                                price: sp,
+                                price: pp,
                                 stop_status: StopStatus::Untouched,
                             },
                             "Stop Market",
@@ -2541,7 +2616,7 @@ impl ManualOrders {
                             man_orders.order = Order::StopMarket {
                                 buy: bb,
                                 quant: qq,
-                                price: pp,
+                                price: sp as f64,
                                 stop_status: StopStatus::Untouched,
                             };
                         }
@@ -2566,12 +2641,16 @@ impl ManualOrders {
                                 man_orders.asset1 = a1;
                                 man_orders.asset2 = a2;
 
+
+                                man_orders.order_set=true;
+
                                 man_orders.asset1_locked = a1_locked;
                                 man_orders.asset2_locked = a2_locked;
 
                                 man_orders.last_id += 1;
                                 let oid = man_orders.last_id;
-                                man_orders.orders.insert(oid, (o, false));
+                                man_orders.orders.insert(oid, (o, true));
+                                
                             }
                             None => {
                                 tracing::error!["Hist order invalid ERROR"];
@@ -2655,7 +2734,7 @@ impl ManualOrders {
                                     ui.label(format!["{}", id]);
                                 });
                                 row.col(|ui| {
-                                    ui.label(format!["{}", order.get_qnt() * man_orders.asset1]);
+                                    ui.label(format!["{} %", order.get_qnt()*100.0]);
                                 });
                                 row.col(|ui| {
                                     ui.label(format!["{}", order.get_price()]);
@@ -2685,6 +2764,7 @@ impl ManualOrders {
                                                 &man_orders.asset1,
                                                 &man_orders.asset2,
                                             );
+                                            man_orders.order_set=false;
                                             man_orders.asset1_locked = a1_l;
                                             man_orders.asset2_locked = a2_l;
                                             man_orders.asset1 = a1;
@@ -2725,9 +2805,9 @@ impl ManualOrders {
         symbol_info: Option<&(String, String, String)>,
     ) {
         if man_orders.single_order_mode==true{
-            ManualOrders::show_multiorder(man_orders, last_price, hist_trade, cli_chan, ui, hlines, live_info, trade_slice, symbol_info);
-        }else{
             ManualOrders::show_singleorder(man_orders, last_price, hist_trade, cli_chan, ui, hlines, live_info, trade_slice, symbol_info);
+        }else{
+            ManualOrders::show_multiorder(man_orders, last_price, hist_trade, cli_chan, ui, hlines, live_info, trade_slice, symbol_info);
         };
     }
 }
@@ -3525,10 +3605,10 @@ const DOTT_LINE_SPACING: f32 = 10.0;
 const STOP_STYLE: LineStyle = LineStyle::Dotted(1.0);
 
 const BUY_ACTIVE: LineState = LineState::ActiveColor(Color32::GREEN);
-const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::GREEN);
+const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(188, 255, 188));
 
 const SELL_ACTIVE: LineState = LineState::ActiveColor(Color32::RED);
-const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::RED);
+const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(255, 188, 188));
 
 #[allow(unused)]
 const LAST_PRICE_COLOR: Color32 = Color32::YELLOW;
@@ -3715,10 +3795,16 @@ impl HistPlot {
             match (res, trade_slice) {
                 (Some(ret_slice), Some(t_slice)) => {
                     hist_extras.last_price = ret_slice[ret_slice.len() - 1].4;
-                    tracing::debug!["hist_extras.last_price {}", hist_extras.last_price];
-                    *t_slice = ret_slice;
+                    tracing::trace!["hist_extras.last_price {}", hist_extras.last_price];
+                    if ret_slice.len() > hist_plot.trade_wicks as usize{
+                        *t_slice = ret_slice[ret_slice.len()-(hist_plot.trade_wicks as usize)..].to_vec();
+                    }else{
+                        *t_slice = ret_slice;
+                    };
                 }
-                _ => {}
+                _ => {
+
+                }
             };
         } else {
             let _res = hist_plot.kline_plot.show_live(

@@ -58,7 +58,7 @@ impl EvalMode {
     }
 }
 
-const fn eval_limit(
+fn eval_limit(
     limit: f64,
     h: f64,
     o: f64,
@@ -77,6 +77,7 @@ const fn eval_limit(
             }
         }
     };
+    tracing::debug!["trade::eval_limit limit:{}, h:{}, l:{}", limit,h,l];
     if buy_sell == true {
         if l <= limit {
             return Some(limit);
@@ -98,7 +99,7 @@ pub enum OrderCondition {
     StopTriggered,
 }
 
-pub const fn eval_order_basic(
+pub fn eval_order_basic(
     h: f64,
     o: f64,
     c: f64,
@@ -531,7 +532,7 @@ fn hist_eval_kline(
     asset1: f64,
     asset2: f64,
     eval_mode: &EvalMode,
-) -> Option<(chrono::NaiveDateTime, f64, f64, Order)> {
+) -> Option<(chrono::NaiveDateTime, f64, f64, Option<Order>)> {
     for k in kline.iter() {
         let (t, o, h, l, c, _) = *k;
         let result = eval_order_basic(h, o, c, l, asset1, asset2, order, eval_mode);
@@ -540,7 +541,8 @@ fn hist_eval_kline(
                 let (order_cond, order) = eval_basic_condition(order_cond, order);
                 match order_cond {
                     OrderCondition::Untouched => continue,
-                    _ => return Some((t, asset1, asset2, order)),
+                    OrderCondition::Filled=> return Some((t, asset1, asset2 ,None)),
+                    _ => return Some((t, asset1, asset2, Some(order))),
                 }
             }
             None => continue,
@@ -641,14 +643,9 @@ impl HistTrade {
                 self.trade_record.push(tr);
                 self.asset1 = asset1;
                 self.asset2 = asset2;
-                match order {
-                    Order::None => return None,
-                    _ => {
-                        return Some(order);
-                    }
-                }
+                return order;
             }
-            None => return None,
+            None => return Some(o),
         }
     }
     pub fn trade_forward(
