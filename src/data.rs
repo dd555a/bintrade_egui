@@ -1709,7 +1709,7 @@ impl SQLConn {
         //YAHOO. bit is fine for now. Maybe make a different asset list for
         //each exhcange...or simply append yahoo to a differet table
     }
-    pub fn update_settings(&mut self, settings: &Settings) -> Result<()> {
+    pub fn update_settings(&mut self, _settings: &Settings) -> Result<()> {
         //TODO
         Ok(())
     }

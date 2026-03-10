@@ -58,7 +58,7 @@ impl EvalMode {
     }
 }
 
-fn eval_limit(
+const fn eval_limit(
     limit: f64,
     h: f64,
     o: f64,
@@ -77,7 +77,6 @@ fn eval_limit(
             }
         }
     };
-    tracing::debug!["trade::eval_limit limit:{}, h:{}, l:{}", limit,h,l];
     if buy_sell == true {
         if l <= limit {
             return Some(limit);
@@ -99,7 +98,7 @@ pub enum OrderCondition {
     StopTriggered,
 }
 
-pub fn eval_order_basic(
+pub const fn eval_order_basic(
     h: f64,
     o: f64,
     c: f64,

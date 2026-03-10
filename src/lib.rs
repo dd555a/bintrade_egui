@@ -1,4 +1,3 @@
-#![allow(deprecated)]
 use crate::gui::Settings;
 use crate::trade::Order;
 use serde_json::Value;

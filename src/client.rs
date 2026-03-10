@@ -7,8 +7,6 @@ use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle as Handle;
 use tokio_util::sync::CancellationToken;
 
-use tracing::instrument;
-
 use crate::{
     BinInstructs, BinResponse, ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse,
 };
@@ -39,7 +37,7 @@ pub fn load_settings() -> Result<Settings> {
 }
 
 #[derive(Clone, Debug)]
-enum Tasks {
+pub enum Tasks {
     Task0Cli {},
     Task1BinWS {
         api_key: Option<String>,
@@ -47,12 +45,10 @@ enum Tasks {
         default_symbol: String,
         default_interval: Intv,
     },
-    #[allow(unused)]
     Task3SQL {},
 }
 impl Tasks {
-    #[allow(unused)]
-    fn new_cli(global_settings: &Settings) -> Result<Tasks> {
+    fn new_cli(_global_settings: &Settings) -> Result<Tasks> {
         return Ok(Tasks::Task0Cli {});
     }
     fn new_binws(global_settings: &Settings) -> Result<Tasks> {
@@ -75,8 +71,7 @@ impl Tasks {
         };
         return Ok(t);
     }
-    #[allow(unused)]
-    fn new_sql(global_settings: &Settings) -> Tasks {
+    fn new_sql(_global_settings: &Settings) -> Tasks {
         let t = Tasks::Task3SQL {};
         return t;
     }
@@ -163,7 +158,6 @@ macro_rules! unpack_channels{
         }
     };
 }
-#[allow(unused)]
 #[derive(Debug)]
 pub struct ClientTask {
     frontend: Frontend,
@@ -173,9 +167,6 @@ pub struct ClientTask {
     last_price: Arc<Mutex<f64>>,
     live_collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
     live_info: Arc<Mutex<LiveInfo>>,
-
-    lp_chan_recv: Option<watch::Receiver<f64>>,
-    lp_chan_send: Option<watch::Sender<f64>>,
 
     cancel_all: CancellationToken,
 
@@ -200,7 +191,7 @@ pub struct ClientTask {
 }
 
 impl ClientTask {
-    fn new(f: Frontend) -> Self {
+    pub fn new(f: Frontend) -> Self {
         Self {
             frontend: f,
             live_dat: Arc::new(Mutex::new(AssetData::new(0))),
@@ -222,17 +213,13 @@ impl ClientTask {
             last_price: Arc::new(Mutex::new(0.0)),
             live_collect: Arc::new(Mutex::new(HashMap::new())),
 
-            lp_chan_recv: None,
-            lp_chan_send: None,
-
             send_sett_sql: None,
             recv_response_sql: None,
             sql_awake: Arc::new(Notify::new()),
             sql_sleep: Arc::new(Notify::new()),
         }
     }
-    #[allow(unused)]
-    fn start_gui(
+    pub fn start_gui(
         mut task_chans: Vec<ChanType>,
         asset_data: Arc<Mutex<AssetData>>,
         hist_asset_data: Arc<Mutex<AssetData>>,
@@ -277,9 +264,8 @@ impl ClientTask {
                 let r = eframe::run_native(
                     "Bintrade Gui",
                     native_options,
-                    Box::new(|cc| {
+                    Box::new(|_| {
                         Ok(Box::new(DesktopApp::new(
-                            cc,
                             schan.clone(),
                             rchan.clone(),
                             asset_data.clone(),
@@ -299,7 +285,7 @@ impl ClientTask {
         });
         return handle;
     }
-    fn parse_frontend_comm(&mut self, msg: &ClientInstruct) {
+    pub fn parse_frontend_comm(&mut self, msg: &ClientInstruct) {
         match msg {
             ClientInstruct::None => (),
 
@@ -353,11 +339,11 @@ impl ClientTask {
             _ => todo!(),
         }
     }
-    fn sleep_all(&mut self) {
+    pub fn sleep_all(&mut self) {
         self.bin_sleep.notify_one();
         self.sql_sleep.notify_one();
     }
-    async fn listen_proc_resp(
+    pub async fn listen_proc_resp(
         send_cli_response: &mut watch::Sender<ClientResponse>,
         resp_bin: &mut watch::Receiver<BinResponse>,
         resp_sql: &mut watch::Receiver<SQLResponse>,
@@ -373,7 +359,7 @@ impl ClientTask {
             }
         }
     }
-    async fn run_cli(&mut self) {
+    pub async fn run_cli(&mut self) {
         let mut recv_settings: watch::Receiver<ClientInstruct> = self
             .recv_settings
             .take()
@@ -406,7 +392,7 @@ impl ClientTask {
         }
     }
 
-    async fn run_main(&mut self, tasks: Vec<Tasks>, settings: Settings) {
+    pub async fn run_main(&mut self, tasks: Vec<Tasks>, settings: Settings) {
         let mut handles: Vec<Handle<()>> = vec![];
         for t in tasks {
             match t {
@@ -478,7 +464,6 @@ impl ClientTask {
                     let sql_handle = tokio::task::spawn(async move {
                         ClientTask::start_sql(
                             chans,
-                            0,
                             cancel_token,
                             awake_notify,
                             sleep_notify,
@@ -496,8 +481,7 @@ impl ClientTask {
         let cli_handle = self.run_cli();
         tokio::join![cli_handle, hh];
     }
-    #[instrument(level = "trace")]
-    async fn start_binclient(
+    pub async fn start_binclient(
         mut task_chans: Vec<ChanType>,
         api_key: Option<String>,
         api_secret: Option<String>,
@@ -566,16 +550,14 @@ impl ClientTask {
             tracing::info!("Binclient task awake");
         }
     }
-    #[allow(unused)]
-    async fn start_sql(
+    pub async fn start_sql(
         mut task_chans: Vec<ChanType>,
-        task_settings: i32,
         cancel_token: CancellationToken,
         awake_notify: Arc<Notify>,
         sleep_notify: Arc<Notify>,
         hist_asset_data: Arc<Mutex<AssetData>>,
     ) {
-        let (mut send_to_client, mut recv_from_client) =
+        let (send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, SRSend, SQLResponse, SRecv, SQLInstructs);
         let mut sql_client = SQLConn::new(hist_asset_data);
         tracing::info!("SQL started");
@@ -585,7 +567,7 @@ impl ClientTask {
                     _ = recv_from_client.changed() =>{
                         let instruct=recv_from_client.borrow_and_update().clone();
                         let response=sql_client.parse_sql_instructs(instruct).await;
-                        send_to_client.send(response);
+                        let _=send_to_client.send(response);
                     }
                     _ = cancel_token.cancelled() => {
                         tracing::info!("SQL task cancelled");
@@ -601,8 +583,7 @@ impl ClientTask {
             tracing::info!("SQL task awake");
         }
     }
-    #[allow(unused)]
-    fn make_chans(&mut self, t: &Tasks) -> Vec<ChanType> {
+    pub fn make_chans(&mut self, t: &Tasks) -> Vec<ChanType> {
         let mut cv: Vec<ChanType> = std::vec::Vec::new();
         match t {
             Tasks::Task0Cli {} => {
@@ -630,11 +611,7 @@ impl ClientTask {
                 );
                 return cv;
             }
-            Tasks::Task1BinWS {
-                api_key,
-                api_secret: _,
-                default_symbol: _,
-                default_interval: _,
+            Tasks::Task1BinWS {..
             } => {
                 use BinInstructs::None as BinNone;
                 use BinResponse::None as BinRNone;

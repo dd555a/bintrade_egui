@@ -45,7 +45,7 @@ const BACKLOAD_WICKS: i64 = 720;
 const SETTINGS_SAVE_PATH: &str = "./Settings.bin";
 
 #[derive(Dbg, Clone)]
-struct KlinePlot {
+pub struct KlinePlot {
     l_boxplot: Vec<BoxElem>,
     l_barchart: Vec<Bar>,
 
@@ -138,7 +138,6 @@ impl KlinePlot {
     fn show_live(
         &mut self,
         ui: &mut egui::Ui,
-        plot_extras: &PlotExtras,
         live_ad: Arc<Mutex<AssetData>>,
         collected_data: Option<&HashMap<String, SymbolOutput>>,
         _live_info: Option<&mut LiveInfo>,
@@ -196,10 +195,8 @@ impl KlinePlot {
                 tracing::trace!["Collected data non empty"];
                 let _res = self.live_live_from_ad(
                     &ad,
-                    &symbol,
                     self.intv.clone(),
                     self.intv.to_view_window(),
-                    None,
                     &data,
                 );
             };
@@ -221,7 +218,7 @@ impl KlinePlot {
                 true,
             );
         };
-        let _res = self.show(ui, plot_extras);
+        let _res = self.show(ui);
 
         ui.label(RichText::new(format!["Current asset: {}", &symbol]).color(Color32::WHITE));
         egui::Grid::new("Kline navi:").show(ui, |ui| {
@@ -378,8 +375,7 @@ impl KlinePlot {
             self.y_bounds = (lowest * v_y, highest * u_y);
         };
     }
-    #[allow(unused)]
-    fn show(&mut self, ui: &mut egui::Ui, plot_extras: &PlotExtras) -> Result<()> {
+    fn show(&mut self, ui: &mut egui::Ui) -> Result<()> {
         let (plot_candles, plot_volume) = self.mk_plt();
         let bp = BoxPlot::new(&self.name, self.l_boxplot.clone())
             .element_formatter(Box::new(time_format));
@@ -440,14 +436,11 @@ impl KlinePlot {
         }
         Ok(())
     }
-    #[allow(unused)]
     fn live_live_from_ad(
         &mut self,
         ad: &AssetData,
-        symbol: &str,
         intv: Intv,
         max_load_points: usize,
-        timestamps: Option<(chrono::NaiveDateTime, chrono::NaiveDateTime)>,
         data: &SymbolOutput,
     ) -> Result<()> {
         if ad.live_asset_symbol_changed.0 == true {
@@ -829,7 +822,7 @@ fn get_chart_params(intv: &Intv) -> (f64, f64) {
     }
 }
 
-//FIXME convert to macros or fork egui_plot library and make a better implementation yourself...
+//FIXME 
 #[allow(unused)]
 fn grid_spacer_1min(input: GridInput) -> [f64; 3] {
     [60.0, 60.0, 1.0]
@@ -1016,7 +1009,7 @@ fn time_format(input: &BoxElem, plot: &BoxPlot) -> String {
 }
 
 #[derive(EnumIter, Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-enum PaneType {
+pub enum PaneType {
     None,
     LiveTrade,
     HistTrade,
@@ -1036,7 +1029,7 @@ impl fmt::Display for PaneType {
 }
 
 #[derive(PartialEq, Dbg)]
-struct Pane {
+pub struct Pane {
     nr: usize,
     ty: PaneType,
 }
@@ -1061,11 +1054,10 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         format!("{}", pane.ty).into()
     }
-    #[allow(unused)]
     fn top_bar_right_ui(
         &mut self,
         _tiles: &egui_tiles::Tiles<Pane>,
-        ui: &mut egui::Ui,
+        _ui: &mut egui::Ui,
         tile_id: egui_tiles::TileId,
         _tabs: &egui_tiles::Tabs,
         _scroll_offset: &mut f32,
@@ -1113,9 +1105,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 LivePlot::show(
                     &mut live_plot,
-                    &p_extras,
                     chan,
-                    &live_price,
                     &c_data,
                     ui,
                     &mut live_info,
@@ -1162,7 +1152,6 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
 
                 HistPlot::show(
                     &mut h_plot,
-                    &p_extras,
                     chan,
                     self.hist_asset_data.clone(),
                     ui,
@@ -1275,15 +1264,13 @@ fn create_tree() -> egui_tiles::Tree<Pane> {
     egui_tiles::Tree::new("my_tree", root, tiles)
 }
 
-#[allow(unused)]
 #[derive(PartialEq, Debug, Clone)]
-enum PlotExtras {
+pub enum PlotExtras {
     None,
     OrderHlines(Vec<HLine>),
     TradeSlice(Vec<(chrono::NaiveDateTime, f64, f64, f64, f64, f64)>),
 }
 
-#[allow(unused)]
 #[derive(PartialEq, Debug, Clone, Default)]
 pub struct LiveInfo {
     pub live_asset_symbol_changed: (bool, String),
@@ -1452,9 +1439,7 @@ impl Default for DesktopApp {
 }
 
 impl DesktopApp {
-    #[allow(unused)]
     pub fn new(
-        cc: &eframe::CreationContext<'_>,
         schan: watch::Sender<ClientInstruct>,
         rchan: watch::Receiver<ClientResponse>,
         asset_data: Arc<Mutex<AssetData>>,
@@ -1485,12 +1470,6 @@ impl DesktopApp {
             ..Default::default()
         }
     }
-    #[allow(unused)]
-    pub fn new_testing(cc: &eframe::CreationContext<'_>) -> Self {
-        Self {
-            ..Default::default()
-        }
-    }
 }
 
 impl eframe::App for DesktopApp {
@@ -1499,10 +1478,6 @@ impl eframe::App for DesktopApp {
             ui.heading("Bintrade_egui 0.1.0");
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Load settings").clicked() {
-                        //TODO - save settings  to file and load them
-                    }
-                    if ui.button("Save settings").clicked() {}
                     if ui.button("Quit").clicked() {
                         let _chan = match self.send_to_cli.clone() {
                             Some(chan) => {
@@ -1613,7 +1588,7 @@ impl eframe::App for DesktopApp {
 }
 
 #[derive(Dbg, Clone)]
-struct ManualOrders {
+pub struct ManualOrders {
     man_orders: Option<HistTrade>,
     active_orders: Option<Vec<Order>>,
     order_set:bool,
@@ -1755,26 +1730,6 @@ macro_rules! make_hotkey_alt{
         }
     };
 }
-macro_rules! make_hotkey_ctrl{
-    ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
-        {
-            if *$($hk_active)* {
-                let shift_mod=Modifiers {
-                        ctrl: true,
-                        ..Default::default()
-                };
-                let sh=KeyboardShortcut{
-                    modifiers:shift_mod,
-                    logical_key:$($k)*::$($key)*, 
-
-                };
-                $($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh))
-            }else{
-                false
-            }
-        }
-    };
-}
 
 macro_rules! make_hotkey_shift{
     ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
@@ -1805,10 +1760,14 @@ fn link_hotkeys(
     let trade_forward=make_hotkey_shift![Key,L,ui, hk_active];
 }
 
+#[allow(unused)]
 const K0:f32=1.00;
+#[allow(unused)]
 const K0_INC:f32=0.001;
 
+#[allow(unused)]
 const K1:f32=1.01;
+#[allow(unused)]
 const K1_INC:f32=0.001;
 
 #[allow(unused)]
@@ -1980,7 +1939,6 @@ fn hotkey_order_single(
 
 
 
-#[allow(unused)]
 impl ManualOrders {
     fn hist_del_order(
         o: &Order,
@@ -1989,54 +1947,49 @@ impl ManualOrders {
         asset1: &f64,
         asset2: &f64,
     ) -> (f64, f64, f64, f64) {
-        let (unlocked_a1, unlocked_a2, buy) = match o {
+        let (unlocked_a1, unlocked_a2) = match o {
             Order::None => {
                 tracing::error!["Order::None should not be passed here"];
                 panic!["Order::None should never be placed let alone deleted..."]
             }
             Order::Market { buy, quant } => {
                 if *buy == true {
-                    (*asset1_locked, *asset2_locked * quant.get_f64(), *buy)
+                    (*asset1_locked, *asset2_locked * quant.get_f64())
                 } else {
-                    (*asset1_locked * quant.get_f64(), *asset2_locked, *buy)
+                    (*asset1_locked * quant.get_f64(), *asset2_locked)
                 }
             }
             Order::Limit {
                 buy,
                 quant,
-                price,
-                limit_status,
+                ..
             } => {
                 if *buy == true {
-                    (*asset1_locked, *asset2_locked * quant.get_f64(), *buy)
+                    (*asset1_locked, *asset2_locked * quant.get_f64())
                 } else {
-                    (*asset1_locked * quant.get_f64(), *asset2_locked, *buy)
+                    (*asset1_locked * quant.get_f64(), *asset2_locked)
                 }
             }
             Order::StopLimit {
                 buy,
                 quant,
-                price,
-                limit_status,
-                stop_price,
-                stop_status,
+                ..
             } => {
                 if *buy == true {
-                    (*asset1_locked, *asset2_locked * quant.get_f64(), *buy)
+                    (*asset1_locked, *asset2_locked * quant.get_f64())
                 } else {
-                    (*asset1_locked * quant.get_f64(), *asset2_locked, *buy)
+                    (*asset1_locked * quant.get_f64(), *asset2_locked)
                 }
             }
             Order::StopMarket {
                 buy,
                 quant,
-                price,
-                stop_status,
+                ..
             } => {
                 if *buy == true {
-                    (*asset1_locked, *asset2_locked * quant.get_f64(), *buy)
+                    (*asset1_locked, *asset2_locked * quant.get_f64())
                 } else {
-                    (*asset1_locked * quant.get_f64(), *asset2_locked, *buy)
+                    (*asset1_locked * quant.get_f64(), *asset2_locked)
                 }
             }
         };
@@ -2084,8 +2037,7 @@ impl ManualOrders {
             Order::Limit {
                 buy,
                 quant,
-                price,
-                limit_status,
+                ..
             } => {
                 if *buy == true {
                     (*asset1, *asset2 * quant.get_f64(), *buy)
@@ -2096,10 +2048,7 @@ impl ManualOrders {
             Order::StopLimit {
                 buy,
                 quant,
-                price,
-                limit_status,
-                stop_price,
-                stop_status,
+                ..
             } => {
                 if *buy == true {
                     (*asset1, *asset2 * quant.get_f64(), *buy)
@@ -2110,8 +2059,7 @@ impl ManualOrders {
             Order::StopMarket {
                 buy,
                 quant,
-                price,
-                stop_status,
+                ..
             } => {
                 if *buy == true {
                     (*asset1, *asset2 * quant.get_f64(), *buy)
@@ -2121,9 +2069,9 @@ impl ManualOrders {
             }
         };
         let (a1, a2) = (asset1 - locked_a1, asset2 - locked_a2);
-        tracing::debug!["hit_order_valiate Asset1:{} Asset2:{}",asset1,asset2];
-        tracing::debug!["hit_order_valiate locked_asset1:{} locked_asset2:{}",locked_a1,locked_a2];
-        tracing::debug!["hit_order_valiate A1:{} A2:{}",a1,a2];
+        tracing::trace!["hit_order_valiate Asset1:{} Asset2:{}",asset1,asset2];
+        tracing::trace!["hit_order_valiate locked_asset1:{} locked_asset2:{}",locked_a1,locked_a2];
+        tracing::trace!["hit_order_valiate A1:{} A2:{}",a1,a2];
         if buy == true {
             if a1 < 0.0 {
                 None
@@ -2138,16 +2086,10 @@ impl ManualOrders {
             }
         }
     }
-    fn new(man_orders: HistTrade) -> Self {
-        Self {
-            man_orders: Some(man_orders),
-            ..Default::default()
-        }
-    }
     fn show_multiorder(
-        mut man_orders: &mut ManualOrders,
+        man_orders: &mut ManualOrders,
         last_price: &f64,
-        mut hist_trade: Option<&mut HistTrade>,
+        hist_trade: Option<&mut HistTrade>,
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
@@ -2172,7 +2114,7 @@ impl ManualOrders {
         };
 
         match (hist_trade, trade_slice) {
-            (Some(mut h_trade), Some(t_slice)) => {
+            (Some(h_trade), Some(t_slice)) => {
                 if man_orders.order_set==true{
                     //h_trade.asset1=man_orders.asset1 ;
                     //h_trade.asset2=man_orders.asset2 ;
@@ -2190,26 +2132,26 @@ impl ManualOrders {
                     //spawn a different thread and return result, checking on it each iteration
                     let last_time=t_slice[t_slice.len()-1].0;
                     if man_orders.last_slice_time != last_time{
-                        tracing::debug!["last_time:{}", last_time];
-                        tracing::debug!["last_slice_time:{}", man_orders.last_slice_time];
-                        tracing::debug!["last_slice_len:{}", t_slice.len()];
+                        tracing::trace!["last_time:{}", last_time];
+                        tracing::trace!["last_slice_time:{}", man_orders.last_slice_time];
+                        tracing::trace!["last_slice_len:{}", t_slice.len()];
                         let active_orders: Vec<(i32, Order)> = man_orders
                             .orders
                             .iter()
                             .filter(|(_, (_, active))| *active == true)
-                            .map(|(id, (order, active))| (*id, *order))
+                            .map(|(id, (order, _active))| (*id, *order))
                             .collect();
-                        tracing::debug!["active_orders:{}", active_orders.len()];
+                        tracing::trace!["active_orders:{}", active_orders.len()];
                         let inactive_orders: Vec<(i32, Order)> = man_orders
                             .orders
                             .iter()
                             .filter(|(_, (_, active))| *active == false)
-                            .map(|(id, (order, active))| (*id, *order))
+                            .map(|(id, (order, _active))| (*id, *order))
                             .collect();
-                        tracing::debug!["inactive_orders:{}", inactive_orders.len()];
+                        tracing::trace!["inactive_orders:{}", inactive_orders.len()];
                         let remaining_active_orders =
                             h_trade.trade_forward(t_slice, &man_orders.eval_mode, active_orders);
-                        tracing::debug!["remaining_active_orders:{}", remaining_active_orders.len()];
+                        tracing::trace!["remaining_active_orders:{}", remaining_active_orders.len()];
                         let mut remaining_orders: HashMap<i32, (Order, bool)> = inactive_orders
                             .iter()
                             .map(|(id, order)| (*id, (*order, false)))
@@ -2227,7 +2169,7 @@ impl ManualOrders {
                         let a2_locked=remaining_active_orders.iter().filter(|(_,o)| o.get_side()==true).map(|(_,order)| order.get_qnt()*a2).sum::<f64>().abs();
                         let a1m=a1-a1_locked;
                         let a2m=a2-a2_locked;
-                        tracing::debug!["a1_locked: {}, a2_locked: {}",a1_locked, a2_locked];
+                        tracing::trace!["a1_locked: {}, a2_locked: {}",a1_locked, a2_locked];
                         man_orders.asset1 = a1m;
                         man_orders.asset2 = a2m;
                         man_orders.asset1_locked = a1_locked;
@@ -2274,13 +2216,15 @@ impl ManualOrders {
                             .color(Color32::from_rgb(255, 207, 38)),
                     ),
                 );
-                ui.add_sized(
-                    egui::vec2(50.0, 20.0),
-                    egui::Label::new(
-                        RichText::new(format!["(locked):{:.2}", man_orders.asset1_locked])
-                            .color(Color32::from_rgb(247, 235, 150)),
-                    ),
-                );
+                if man_orders.asset1_locked !=0.0{
+                    ui.add_sized(
+                        egui::vec2(50.0, 20.0),
+                        egui::Label::new(
+                            RichText::new(format!["(locked):{:.2}", man_orders.asset1_locked])
+                                .color(Color32::from_rgb(247, 235, 150)),
+                        ),
+                    );
+                };
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
@@ -2288,19 +2232,21 @@ impl ManualOrders {
                             .color(Color32::from_rgb(71, 200, 38)),
                     ),
                 );
-                ui.add_sized(
-                    egui::vec2(50.0, 20.0),
-                    egui::Label::new(
-                        RichText::new(format!["(locked):{:.2}", man_orders.asset2_locked])
-                            .color(Color32::from_rgb(212, 242, 150)),
-                    ),
-                );
+                if man_orders.asset2_locked !=0.0{
+                    ui.add_sized(
+                        egui::vec2(50.0, 20.0),
+                        egui::Label::new(
+                            RichText::new(format!["(locked):{:.2}", man_orders.asset2_locked])
+                                .color(Color32::from_rgb(212, 242, 150)),
+                        ),
+                    );
+                };
                 ui.end_row();
             });
         ui.end_row();
         egui::Grid::new("Last price:").striped(true).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
+                //ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
                 //ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
                 ui.label(
                     RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
@@ -2354,7 +2300,6 @@ impl ManualOrders {
                 ui.end_row();
 
                 ui.end_row();
-                let mut dummy: Option<f64> = None;
                 ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
 
                 ui.horizontal(|ui| {
@@ -2364,7 +2309,7 @@ impl ManualOrders {
                     ui.selectable_value(&mut man_orders.quant_selector, Quant::Q100, "100%");
                 });
                 ui.end_row();
-                if (man_orders.quant_selector != man_orders.last_quant) {
+                if man_orders.quant_selector != man_orders.last_quant {
                     man_orders.quant = man_orders.quant_selector;
                     man_orders.last_quant = man_orders.quant_selector;
                     match man_orders.quant {
@@ -2544,15 +2489,12 @@ impl ManualOrders {
                     Order::None => {}
                 }
 
-                //NOTE add hotkeys method if ui.button("Add").clicked() || ui.ctx().input(|i| i.key_pressed(egui::Key::A)) {
-                //
-
                 if ui.button("Add").clicked()  {
                     let res = man_orders.price_string.parse();
                     man_orders.price = match res {
                         Ok(pp) => pp,
                         Err(e) => {
-                            tracing::error!["Unable to parse price string!"];
+                            tracing::error!["Unable to parse price string! {}",e];
                             man_orders.price_string = "0.0".to_string();
                             0.0
                         }
@@ -2561,7 +2503,7 @@ impl ManualOrders {
                     man_orders.stop_price = match res {
                         Ok(sp) => sp,
                         Err(e) => {
-                            tracing::error!["Unable to stop parse price string!"];
+                            tracing::error!["Unable to stop parse price string! {}", e];
                             man_orders.stop_price_string = "0.0".to_string();
                             0.0
                         }
@@ -2691,7 +2633,7 @@ impl ManualOrders {
             });
             ui.vertical(|ui| {
                 let available_height = ui.available_height();
-                let mut table = TableBuilder::new(ui)
+                let table = TableBuilder::new(ui)
                     .resizable(true)
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                     .column(Column::auto().resizable(false))
@@ -2727,7 +2669,7 @@ impl ManualOrders {
                     })
                     .body(|mut body| {
                         let orders = man_orders.orders.clone();
-                        for (id, (order, active)) in orders.iter() {
+                        for (id, (order, _active)) in orders.iter() {
                             let row_height = 18.0;
                             body.row(row_height, |mut row| {
                                 row.col(|ui| {
@@ -2747,7 +2689,7 @@ impl ManualOrders {
                                 });
                                 row.col(|ui| {
                                     if ui.button("Delete").clicked() {
-                                        if let Some(live_inf) = live_info {
+                                        if let Some(_live_inf) = live_info {
                                             let msg = ClientInstruct::SendBinInstructs(
                                                 BinInstructs::CancelOrder {
                                                     id: *id,
@@ -2780,6 +2722,7 @@ impl ManualOrders {
         });
 
     }
+    #[allow(unused)]
     fn show_singleorder(
         mut man_orders: &mut ManualOrders,
         last_price: &f64,
@@ -2794,9 +2737,9 @@ impl ManualOrders {
         todo!()
     }
     fn show(
-        mut man_orders: &mut ManualOrders,
+        man_orders: &mut ManualOrders,
         last_price: &f64,
-        mut hist_trade: Option<&mut HistTrade>,
+        hist_trade: Option<&mut HistTrade>,
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
         hlines: Option<&mut Vec<HLine>>,
@@ -2813,7 +2756,7 @@ impl ManualOrders {
 }
 
 #[derive(Dbg, Clone)]
-struct LivePlot {
+pub struct LivePlot {
     live_asset_data: Arc<Mutex<AssetData>>,
     kline_plot: KlinePlot,
     search_string: String,
@@ -2859,19 +2802,15 @@ impl LivePlot {
             ..Default::default()
         }
     }
-    #[allow(unused)]
     fn show(
         live_plot: &mut LivePlot,
-        plot_extras: &PlotExtras,
         cli_chan: watch::Sender<ClientInstruct>,
-        live_price: &f64,
         collect_data: &HashMap<String, SymbolOutput>,
         ui: &mut egui::Ui,
         live_info: &mut LiveInfo,
     ) {
         live_plot.kline_plot.show_live(
             ui,
-            plot_extras,
             live_plot.live_asset_data.clone(),
             Some(collect_data),
             Some(live_info),
@@ -2901,7 +2840,7 @@ impl LivePlot {
                             ui.selectable_value(&mut live_plot.intv, i, i.to_str());
                         }
                     });
-                let search = ui.add_sized(
+                ui.add_sized(
                     egui::vec2(100.0, 20.0),
                     egui::TextEdit::singleline(&mut live_plot.search_string)
                         .hint_text("Search for asset"),
@@ -2939,13 +2878,13 @@ impl LivePlot {
 }
 
 #[derive(Clone, Dbg, Default)]
-struct HistExtras {
+pub struct HistExtras {
     last_price: f64,
     symbol_info: (String, String, String),
 }
 
 #[derive(Dbg)]
-struct HistPlot {
+pub struct HistPlot {
     hist_asset_data: Arc<Mutex<AssetData>>,
     kline_plot: KlinePlot,
     search_string: String,
@@ -3042,16 +2981,6 @@ pub enum KeysStatus {
     Invalid,
     Valid,
 }
-#[allow(unused)]
-impl KeysStatus {
-    fn to_str(&self) -> String {
-        match self {
-            KeysStatus::NotAdded => "Keys not added".to_string(),
-            KeysStatus::Invalid => "Keys invalid".to_string(),
-            KeysStatus::Valid => "Keys valid".to_string(),
-        }
-    }
-}
 
 #[derive(Dbg, Default, Encode, Decode, Clone, PartialEq)]
 pub struct Settings {
@@ -3081,7 +3010,6 @@ pub struct Settings {
     pub balances: HashMap<String, (f64, f64)>,
 }
 
-#[allow(unused)]
 impl Settings {
     pub fn new() -> Self {
         Settings {
@@ -3100,7 +3028,6 @@ impl Settings {
         //FIXME add more requirements
         true
     }
-    #[allow(unused)]
     fn show(
         settings: &mut Settings,
         live_info: &LiveInfo,
@@ -3214,7 +3141,7 @@ impl Settings {
                         settings.binance_priv_key = None;
                         settings.enc_binance_pub_key = None;
                         settings.enc_binance_priv_key = None;
-                        settings.save_settings_file(None);
+                        let _=settings.save_settings_file(None);
                     };
                     let mut sett = settings.clone();
                     sett.binance_pub_key = None;
@@ -3243,7 +3170,7 @@ impl Settings {
         ui.vertical(|ui| {
             ui.label(RichText::new(format!["BINANCE BLANCES",]).color(Color32::YELLOW));
             let available_height = ui.available_height();
-            let mut table = TableBuilder::new(ui)
+            let table = TableBuilder::new(ui)
                 .resizable(true)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .column(Column::auto().resizable(false))
@@ -3325,7 +3252,7 @@ impl Settings {
     pub fn save_settings_file(&mut self, password: Option<String>) -> Result<()> {
         match password {
             Some(pass) => {
-                self.encrypt_keys(pass);
+                let _=self.encrypt_keys(pass);
             }
             None => {
                 if self.save_api_keys == false {
@@ -3354,7 +3281,7 @@ impl Settings {
         };
         let mut data: Vec<u8> = vec![];
         file.read_to_end(&mut data)?;
-        let (mut settings, _): (Settings, usize) = bincode::decode_from_slice(&data, config)?;
+        let (settings, _): (Settings, usize) = bincode::decode_from_slice(&data, config)?;
         Ok(Some(settings))
     }
     pub fn load_settings_file(password: Option<String>) -> Result<Option<Self>> {
@@ -3381,7 +3308,7 @@ impl Settings {
 }
 
 #[derive(Dbg, Default)]
-struct DataManager {
+pub struct DataManager {
     coin_list: Vec<String>,            //load Assetlist (All binance assets)
     downloaded_coin_list: Vec<String>, //load AssetlistDL (All binance assets)
     search_coin_shortlist: Vec<String>,
@@ -3579,7 +3506,6 @@ impl DataManager {
     }
 }
 
-#[allow(unused)]
 enum LineStyle {
     Solid(f32),
     Dotted(f32),
@@ -3591,11 +3517,9 @@ enum LineState {
     InactiveColor(Color32),
 }
 
-#[allow(unused)]
 enum HlineType {
     BuyOrder((LineState, LineStyle)),
     SellOrder((LineState, LineStyle)),
-    LastPrice((LineStyle, Color32)),
 }
 
 const PRICE_STYLE: LineStyle = LineStyle::Solid(1.0);
@@ -3610,12 +3534,6 @@ const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(188, 
 const SELL_ACTIVE: LineState = LineState::ActiveColor(Color32::RED);
 const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(255, 188, 188));
 
-#[allow(unused)]
-const LAST_PRICE_COLOR: Color32 = Color32::YELLOW;
-#[allow(unused)]
-const LAST_PRICE_LINE: LineStyle = LineStyle::Dotted(0.5);
-
-#[allow(unused)]
 impl HlineType {
     fn hline_order(o: &Order, active: bool) -> Vec<HLine> {
         let side = o.get_side();
@@ -3629,14 +3547,12 @@ impl HlineType {
             Order::None => {
                 vec![]
             }
-            Order::Market { buy, quant } => {
+            Order::Market { .. } => {
                 vec![]
             }
             Order::Limit {
-                buy,
-                quant,
                 price,
-                limit_status,
+                ..
             } => {
                 if side == true {
                     vec![
@@ -3651,12 +3567,9 @@ impl HlineType {
                 }
             }
             Order::StopLimit {
-                buy,
-                quant,
                 price,
-                limit_status,
                 stop_price,
-                stop_status,
+                ..
             } => {
                 if side == true {
                     vec![
@@ -3675,10 +3588,8 @@ impl HlineType {
                 }
             }
             Order::StopMarket {
-                buy,
-                quant,
                 price,
-                stop_status,
+                ..
             } => {
                 if side == true {
                     vec![
@@ -3740,22 +3651,6 @@ impl HlineType {
                     }
                 }
             }
-            HlineType::LastPrice((l, color)) => match l {
-                LineStyle::Solid(width) => {
-                    let s = Stroke::new(*width, *color);
-                    HLine::new("Last price", *value)
-                        .stroke(s)
-                        .style(LineStyleEgui::Solid)
-                }
-                LineStyle::Dotted(width) => {
-                    let s = Stroke::new(*width, *color);
-                    HLine::new("Last price", *value)
-                        .stroke(s)
-                        .style(LineStyleEgui::Dotted {
-                            spacing: DOTT_LINE_SPACING,
-                        })
-                }
-            },
         }
     }
 }
@@ -3774,7 +3669,6 @@ impl HistPlot {
     }
     fn show(
         hist_plot: &mut HistPlot,
-        plot_extras: &PlotExtras,
         cli_chan: watch::Sender<ClientInstruct>,
         hist_ad: Arc<Mutex<AssetData>>,
         ui: &mut egui::Ui,
@@ -3784,7 +3678,6 @@ impl HistPlot {
         if hist_plot.trade_slice_loaded == true {
             let res = hist_plot.kline_plot.show_live(
                 ui,
-                plot_extras,
                 hist_ad,
                 None,
                 None,
@@ -3809,7 +3702,6 @@ impl HistPlot {
         } else {
             let _res = hist_plot.kline_plot.show_live(
                 ui,
-                plot_extras,
                 hist_ad,
                 None,
                 None,

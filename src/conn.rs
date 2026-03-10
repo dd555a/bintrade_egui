@@ -54,7 +54,6 @@ pub struct SymbolInfo {
     pub quoteCommissionPrecision: i64,
     //filters: Value
 }
-#[allow(unused)]
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
 pub struct FutSymbolInfo {
