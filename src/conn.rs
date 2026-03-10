@@ -1,24 +1,20 @@
-#![allow(unused)]
 use binance_async::Binance;
 use binance_async::models::*;
 use binance_async::rest::spot::GetAccountRequest;
+#[allow(unused)]
 use binance_async::rest::usdm::{self, StartUserDataStreamRequest, StartUserDataStreamResponse};
 
-use binance_async::websocket::{
-    AccountUpdate, AccountUpdateBalance, AggregateTrade, BinanceWebsocket, CandelStickMessage,
-    Depth, MiniTicker, Ticker, TradeMessage, UserOrderUpdate, usdm::WebsocketMessage,
-};
+use binance_async::websocket::{BinanceWebsocket, usdm::WebsocketMessage};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use strum::IntoEnumIterator;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 
 use anyhow::{Context, Result, anyhow};
-use binance::api::Binance as Binance2;
 use derive_debug::Dbg;
 use futures::StreamExt;
 use num::FromPrimitive;
@@ -26,13 +22,10 @@ use num::ToPrimitive;
 use reqwest;
 use rust_decimal::Decimal;
 use serde_json::json;
-use tokio::sync::watch::{Receiver, Sender};
-use tracing::instrument;
 use websockets::WebSocket;
 
 use crate::data::{
     AssetData, Intv, Kline as KlineMine, Klines, get_asset_bases_binance, validate_asset_binance,
-    validate_asset_dl,
 };
 use crate::gui::{KeysStatus, LiveInfo, Settings};
 use crate::trade::Order;
@@ -119,6 +112,7 @@ pub async fn get_exchange_info() -> Result<Vec<SymbolInfo>> {
 ]
 */
 
+#[allow(unused)]
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
 struct GetKline {
@@ -244,6 +238,7 @@ impl KlineTick {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 struct TradeWS {}
 
+#[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum BinWSResponse {
     OrderBook(OrderBookWS),
@@ -257,8 +252,8 @@ impl Default for BinWSResponse {
     }
 }
 
+#[allow(unused)]
 impl BinWSResponse {
-    #[instrument(level = "trace")]
     fn subscribe_key(&self, symbol: &str) -> String {
         let ret = match &self {
             BinWSResponse::OrderBook(_) => {
@@ -277,7 +272,6 @@ impl BinWSResponse {
         tracing::debug!["{}", &ret];
         ret
     }
-    #[instrument(level = "trace")]
     fn parse_into_by_str(input: Value) -> Result<(String, BinWSResponse)> {
         let ws_output_type = input["e"]
             .as_str()
@@ -434,7 +428,6 @@ pub struct SymbolOutput {
 #[derive(Debug, Default)]
 struct WSTick {
     unsorted_output: Mutex<Vec<(String, BinWSResponse)>>,
-    send_price: Sender<f64>,
     watch_price_ty: BinWSResponse,
     sub_params: HashMap<String, Vec<String>>,
     symbol_sorted_output: Arc<Mutex<HashMap<String, SymbolOutput>>>,
@@ -452,7 +445,6 @@ impl WSTick {
             ..Default::default()
         }
     }
-    #[instrument(level = "trace")]
     async fn sort(&mut self) -> Vec<(String, BinWSResponse)> {
         let mut uo = self
             .unsorted_output
@@ -460,7 +452,6 @@ impl WSTick {
             .expect("Unable to unlock mutex: binance::sort()");
         uo.drain(..).collect::<Vec<(String, BinWSResponse)>>()
     }
-    #[instrument(level = "trace")]
     async fn place_unsorted(&mut self, symbol: String, input: BinWSResponse) -> Result<()> {
         tracing::trace!["Binws response: {:?}", input];
         match input {
@@ -469,11 +460,11 @@ impl WSTick {
                     .symbol_sorted_output
                     .lock()
                     .expect("(BINCLIENT) poisoned data collection mutex");
-                if let Some(mut queue) = cum_queue.get_mut(&symbol) {
-                    queue.order_book.push(o.clone());
+                if let Some(queue) = cum_queue.get_mut(&symbol) {
+                    queue.order_book.push(o);
                 } else {
                     let mut queue = SymbolOutput::default();
-                    queue.order_book.push(o.clone());
+                    queue.order_book.push(o);
                     cum_queue.insert(symbol, queue);
                 };
             }
@@ -482,12 +473,12 @@ impl WSTick {
                     .symbol_sorted_output
                     .lock()
                     .expect("(BINCLIENT) poisoned data collection mutex");
-                if let Some(mut queue) = cum_queue.get_mut(&symbol) {
-                    queue.agg_trade.push(o.clone());
+                if let Some(queue) = cum_queue.get_mut(&symbol) {
+                    queue.agg_trade.push(o);
                     tracing::trace!["Agg trade queue {:?}", &queue];
                 } else {
                     let mut queue = SymbolOutput::default();
-                    queue.agg_trade.push(o.clone());
+                    queue.agg_trade.push(o);
                     cum_queue.insert(symbol, queue);
                 };
             }
@@ -496,11 +487,11 @@ impl WSTick {
                     .symbol_sorted_output
                     .lock()
                     .expect("(BINCLIENT) poisoned data collection mutex");
-                if let Some(mut queue) = cum_queue.get_mut(&symbol) {
-                    queue.trade.push(o.clone());
+                if let Some(queue) = cum_queue.get_mut(&symbol) {
+                    queue.trade.push(o);
                 } else {
                     let mut queue = SymbolOutput::default();
-                    queue.trade.push(o.clone());
+                    queue.trade.push(o);
                     cum_queue.insert(symbol, queue);
                 };
             }
@@ -509,40 +500,38 @@ impl WSTick {
                     .symbol_sorted_output
                     .lock()
                     .expect("(BINCLIENT) poisoned data collection mutex");
-                if let Some(mut queue) = cum_queue.get_mut(&symbol) {
+                if let Some(queue) = cum_queue.get_mut(&symbol) {
                     if kline.x == true {
                         tracing::trace!["\x1b  CLOSED kline \x1b[93m  = {:?}", &kline];
-                        if let Some(mut kline_closed_queue) = queue.closed_klines.get_mut(&intv) {
+                        if let Some(kline_closed_queue) = queue.closed_klines.get_mut(&intv) {
                             kline_closed_queue.push(kline.clone());
                             //clear the tick queue once the kline is closed
                             tracing::trace![
                                 "\x1b kline_tick CLOSED queue size \x1b[93m  = {:?}",
                                 kline_closed_queue
                             ];
-                            queue.all_klines.insert(intv.clone(), vec![]);
-                            if let Some(mut kline_all_queue) = queue.all_klines.get_mut(&intv) {
+                            queue.all_klines.insert(intv, vec![]);
+                            if let Some(kline_all_queue) = queue.all_klines.get_mut(&intv) {
                                 kline_all_queue.clear();
                                 tracing::trace!["\x1b kline_tick OPEN clear() ran! \x1b[93m  "];
                             };
                             //Notify that a kline is closed - close time
                         } else {
-                            queue
-                                .closed_klines
-                                .insert(intv.clone(), vec![kline.clone()]);
+                            queue.closed_klines.insert(intv, vec![kline.clone()]);
                             tracing::trace![
                                 "\x1b kline_tick CLOSED queue size :1 - initiated\x1b[93m"
                             ];
                             //plot closed_klines directly and fill any gaps
                         };
                     } else {
-                        if let Some(mut kline_all_queue) = queue.all_klines.get_mut(&intv) {
+                        if let Some(kline_all_queue) = queue.all_klines.get_mut(&intv) {
                             kline_all_queue.push(kline.clone());
                             tracing::trace![
                                 "\x1b kline_tick OPEN queue size \x1b[93m  = {:?}",
                                 &kline_all_queue.len()
                             ];
                         } else {
-                            queue.all_klines.insert(intv.clone(), vec![kline.clone()]);
+                            queue.all_klines.insert(intv, vec![kline.clone()]);
                             tracing::trace![
                                 "\x1b kline_tick OPEN queue size :1 - initiated\x1b[93m"
                             ];
@@ -551,11 +540,9 @@ impl WSTick {
                 } else {
                     let mut queue = SymbolOutput::default();
                     if kline.x == true {
-                        queue
-                            .closed_klines
-                            .insert(intv.clone(), vec![kline.clone()]);
+                        queue.closed_klines.insert(intv, vec![kline.clone()]);
                     } else {
-                        queue.all_klines.insert(intv.clone(), vec![kline.clone()]);
+                        queue.all_klines.insert(intv, vec![kline.clone()]);
                     };
                     cum_queue.insert(symbol, queue);
                 };
@@ -563,13 +550,12 @@ impl WSTick {
         }
         Ok(())
     }
-    #[instrument(level = "trace")]
     async fn append_tick(&mut self, input: Value) -> Result<()> {
         tracing::trace!["\x1b[93m Raw ws output\x1b[93m : {:?}", input];
         let (symbol, sorted) =
             BinWSResponse::parse_into_by_str(input).context("Failed to parse into str")?;
         match (sorted, self.watch_price_ty) {
-            (BinWSResponse::Trade(val), BinWSResponse::Trade(_)) => {
+            (BinWSResponse::Trade(_val), BinWSResponse::Trade(_)) => {
                 //todo!()
             }
             (BinWSResponse::AggTrade(val), BinWSResponse::AggTrade(_)) => {
@@ -579,10 +565,10 @@ impl WSTick {
                     .expect("Unable to unlock mutex: binance::append_tick()");
                 *lp1 = val.p;
             }
-            (BinWSResponse::OrderBook(val), BinWSResponse::AggTrade(_)) => {
+            (BinWSResponse::OrderBook(_val), BinWSResponse::AggTrade(_)) => {
                 //todo!()
             }
-            (BinWSResponse::KlineTick((_, val)), BinWSResponse::KlineTick((_, _))) => {
+            (BinWSResponse::KlineTick((_, _val)), BinWSResponse::KlineTick((_, _))) => {
                 //todo!()
             }
             _ => (),
@@ -596,15 +582,12 @@ impl WSTick {
         tracing::trace!["Raw ws successfully placed"];
         Ok(())
     }
-    fn get_data_ref(&self) -> Arc<Mutex<HashMap<String, SymbolOutput>>> {
-        Arc::clone(&self.symbol_sorted_output)
-    }
-    #[instrument(level = "trace")]
-    async fn connect(&self) -> Result<(WebSocket)> {
+    async fn connect(&self) -> Result<WebSocket> {
         let mut p = self.sub_params.clone();
         tracing::debug!["\x1b[93m Subscribe message hashmap\x1b[93m : {:?}", p];
         let mut ovec: Vec<String> = vec![];
-        p.iter_mut()
+        let _ = p
+            .iter_mut()
             .map(|(_, mut out)| {
                 tracing::debug!["\x1b[93m Iter out\x1b[93m : {:?}", out];
                 ovec.append(&mut out);
@@ -624,7 +607,6 @@ impl WSTick {
         tracing::info!["Web socket connected with message:{:?}", sub_message];
         Ok(conn)
     }
-    #[instrument(level = "trace")]
     async fn collect_output(&mut self, buffer_size: usize, conn: &mut WebSocket) -> Result<()> {
         let mut n = 0;
         loop {
@@ -633,7 +615,7 @@ impl WSTick {
                 tracing::trace!["\x1b[93m WS raw output: \x1b[0m {:?}", msg];
                 if let Some((m, _, _)) = msg.clone().into_text() {
                     let v: Value = serde_json::from_str(&m)?;
-                    if let Some(id) = v.get("id") {
+                    if let Some(_) = v.get("id") {
                         tracing::trace!["\x1b[93m WS output (NOT APPEND): \x1b[0m {:?}", msg];
                     } else {
                         tracing::trace!["\x1b[93m WS output (APPEND): \x1b[0m {:?}", msg];
@@ -661,7 +643,6 @@ impl WSTick {
         self.disconnect = false;
         Ok(())
     }
-    #[instrument(level = "trace")]
     async fn run(&mut self, buffer_size: usize) -> Result<()> {
         let mut conn = self.connect().await?;
         self.collect_output(buffer_size, &mut conn).await?;
@@ -792,7 +773,6 @@ impl BinanceClient {
         tracing::info!("{:?}", resp);
         Ok(resp.order_id)
     }
-    #[instrument(level = "trace")]
     async fn cancel_order(&self, sym: &str, id: &i32) -> Result<()> {
         let resp = self
             .binance_client
@@ -820,7 +800,7 @@ impl BinanceClient {
         tracing::info!("{:?}", resp);
         Ok(())
     }
-    #[instrument(level = "trace")]
+    #[allow(unused)]
     async fn start_user_stream(&self) -> Result<()> {
         let listen_key = self
             .binance_client
@@ -842,7 +822,6 @@ impl BinanceClient {
         }
         Ok(())
     }
-    #[instrument(level = "trace")]
     pub async fn connect_ws(&mut self, params: HashMap<String, Vec<String>>) -> Result<()> {
         //NOTE may have to get rid this self due to inter mutability,,,
         self.exchange_info = get_exchange_info().await?;
@@ -854,6 +833,7 @@ impl BinanceClient {
         tracing::trace!["Connect WS ws: {:?}", &self];
         Ok(())
     }
+    #[allow(unused)]
     pub async fn get_initial_data(
         &mut self,
         symbol: &str,
@@ -928,17 +908,21 @@ impl BinanceClient {
         let mut balances: HashMap<String, (f64, f64)> = HashMap::new();
         match res {
             Ok(acc) => {
-                acc.balances.iter().map(|a| {
-                    let free = match a.free.to_f64() {
-                        Some(res) => res,
-                        None => 0.0,
-                    };
-                    let locked = match a.locked.to_f64() {
-                        Some(res) => res,
-                        None => 0.0,
-                    };
-                    balances.insert(a.asset.clone(), (free, locked))
-                });
+                let _: Vec<_> = acc
+                    .balances
+                    .iter()
+                    .map(|a| {
+                        let free = match a.free.to_f64() {
+                            Some(res) => res,
+                            None => 0.0,
+                        };
+                        let locked = match a.locked.to_f64() {
+                            Some(res) => res,
+                            None => 0.0,
+                        };
+                        balances.insert(a.asset.clone(), (free, locked))
+                    })
+                    .collect();
             }
             Err(e) => {
                 tracing::error!["Get balances error: {}", e];
@@ -968,17 +952,21 @@ impl BinanceClient {
         let mut balances: HashMap<String, (f64, f64)> = HashMap::new();
         match res {
             Ok(acc) => {
-                acc.balances.iter().map(|a| {
-                    let free = match a.free.to_f64() {
-                        Some(res) => res,
-                        None => 0.0,
-                    };
-                    let locked = match a.locked.to_f64() {
-                        Some(res) => res,
-                        None => 0.0,
-                    };
-                    balances.insert(a.asset.clone(), (free, locked))
-                });
+                let _: Vec<_> = acc
+                    .balances
+                    .iter()
+                    .map(|a| {
+                        let free = match a.free.to_f64() {
+                            Some(res) => res,
+                            None => 0.0,
+                        };
+                        let locked = match a.locked.to_f64() {
+                            Some(res) => res,
+                            None => 0.0,
+                        };
+                        balances.insert(a.asset.clone(), (free, locked))
+                    })
+                    .collect();
             }
             Err(e) => {
                 tracing::error!["Get balances error: {}", e];
@@ -991,7 +979,7 @@ impl BinanceClient {
         live_info.acc_balances = balances;
         Ok(())
     }
-    #[instrument(level = "trace")]
+    #[allow(unused)]
     async fn change_ws_params(&mut self, new_params: HashMap<String, Vec<String>>) -> Result<()> {
         //TODO check if possible to change params without disconnecting
         self.ws_tick.disconnect = true;
@@ -1003,13 +991,11 @@ impl BinanceClient {
         tracing::debug!["{:?}", &self];
         Ok(())
     }
-    #[instrument(level = "trace")]
     pub async fn disconnect_ws(&mut self) {
         tracing::debug!["{:?}", &self];
         self.ws_tick.disconnect = true;
         tracing::debug!["{:?}", &self];
     }
-    #[instrument(level = "trace")]
     pub async fn get_user_data(&mut self) -> Result<()> {
         let resp = self
             .binance_client
@@ -1021,7 +1007,6 @@ impl BinanceClient {
         self.account_info = Some(resp);
         Ok(())
     }
-    #[instrument(level = "trace")]
     pub async fn get_ws_params(
         &mut self,
         symbol: &str,
@@ -1055,14 +1040,13 @@ impl BinanceClient {
 
         Ok(params)
     }
-    pub fn update_settings(&mut self, settings: &Settings) -> Result<()> {
+    pub fn update_settings(&mut self, _settings: &Settings) -> Result<()> {
         //TODO
         Ok(())
     }
-    #[instrument(level = "trace")]
     pub async fn parse_binance_instructs(&mut self, i: BinInstructs) -> BinResponse {
         match i {
-            BinInstructs::CancelOrder { id, symbol, o } => {
+            BinInstructs::CancelOrder { id, symbol, .. } => {
                 let res = self.cancel_order(&symbol, &id).await;
                 let resp: BinResponse = match res {
                     Ok(_) => BinResponse::Success,
@@ -1186,15 +1170,13 @@ impl BinanceClient {
                                 e.context(ERR_CTX)
                             ]
                         );
-                        //TODO check internet connection here with max retryies
-                        //BinResponse::Failure((string_error,GeneralError::SystemError(Sys_err::No_Network)))
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
                 tracing::debug!["Connect ws end {:?}", &self];
                 resp
             }
-            BinInstructs::ConnectUserWS { params: ref p } => {
+            BinInstructs::ConnectUserWS { params: _ } => {
                 tracing::debug!["Connect ws start {:?}", &self];
                 let res = self.start_user_stream().await;
                 let resp: BinResponse = match res {
@@ -1205,8 +1187,6 @@ impl BinanceClient {
                             "{}",
                             anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(ERR_CTX)]
                         );
-                        //TODO check internet connection here with max retryies
-                        //BinResponse::Failure((string_error,GeneralError::SystemError(Sys_err::No_Network)))
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
@@ -1214,7 +1194,7 @@ impl BinanceClient {
                 resp
             }
             BinInstructs::Disconnect => {
-                let res = self.disconnect_ws().await;
+                let _res = self.disconnect_ws().await;
                 BinResponse::Success
             }
             BinInstructs::GetUserData => {
@@ -1236,7 +1216,7 @@ impl BinanceClient {
                 o: order,
             } => {
                 tracing::debug!["Connect ws start {:?}", &self];
-                let (order_type, order_side, price, stop_price, quantity) =
+                let (order_type, order_side, price, _stop_price, quantity) =
                     parse_order_to_ba(&order);
                 let res = self
                     .send_new_order(&s, order_type, order_side, price, quantity)
@@ -1245,9 +1225,7 @@ impl BinanceClient {
                     Ok(order_id) => {
                         let live_inf = self.live_info.clone();
                         let mut live_i = live_inf.lock().expect("Unable to unlock live_info mutex");
-                        live_i
-                            .live_orders
-                            .insert(order_id as i32, (order.clone(), true));
+                        live_i.live_orders.insert(order_id as i32, (order, true));
                         self.live_orders = live_i.live_orders.clone();
                         BinResponse::Success
                     }
@@ -1281,7 +1259,7 @@ impl BinanceClient {
                         return BinResponse::Failure((string_error, GeneralError::Generic));
                     }
                 };
-                let (order_type, order_side, price, stop_price, quantity) =
+                let (order_type, order_side, price, _stop_price, quantity) =
                     parse_order_to_ba(&order);
                 let res = self
                     .send_new_order(&s, order_type, order_side, price, quantity)
@@ -1304,7 +1282,7 @@ impl BinanceClient {
                 let o_ids: Vec<u64> = self
                     .live_orders
                     .iter()
-                    .map(|(id, (order, active))| *id as u64)
+                    .map(|(id, (_order, _active))| *id as u64)
                     .collect();
                 let res = self.cancel_all_orders(&s, o_ids).await;
                 let resp = match res {
@@ -1373,7 +1351,6 @@ impl BinanceClient {
     }
 }
 
-#[instrument(level = "trace")]
 fn parse_order_to_ba(order: &Order) -> (OrderType, OrderSide, f64, f64, f64) {
     //async fn send_new_order(&self, sym:String, otype: OrderType, sid:OrderSide, pric:f64, quant:f64)
     tracing::debug!["Order to parse:{:?}", &order];
@@ -1412,6 +1389,7 @@ fn parse_order_to_ba(order: &Order) -> (OrderType, OrderSide, f64, f64, f64) {
     tracing::debug!["End order parsed:{:?}", &res];
     (res.0, side, res.2, res.3, res.4)
 }
+#[allow(unused)]
 #[derive(Deserialize, Debug)]
 #[allow(non_snake_case)]
 pub struct AggTrade {
