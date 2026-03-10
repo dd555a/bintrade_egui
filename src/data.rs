@@ -1353,12 +1353,16 @@ impl SQLConn {
         for intv in Intv::iter() {
             let s: &str = intv.to_str();
             tracing::trace!("load_part_data2 Loading data for:{} interval:{}", symbol, s);
+            let offset=match &intv{
+                 Intv::Min1 => 0,
+                 _=>intv.to_ms()+1_000,
+            };
             let k = kfrom_sql_wcheck(
                 &symbol,
                 &meta_pool,
                 &pool,
                 &intv,
-                *trade_time,
+                *trade_time-offset,
                 *backload_wicks as usize,
             )
             .await

@@ -708,7 +708,7 @@ impl HistTrade {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TradeRecord {
     asset_pair: String,
     transaction_time: DateTime<Utc>,
@@ -726,15 +726,7 @@ impl TradeRecord {
     pub fn new(pair: &str) -> Self {
         TradeRecord {
             asset_pair: pair.to_string(),
-            transaction_time: DateTime::<Utc>::default(),
-            trades_made: 0,
-            asset1_held: false,
-            asset1: 0.0,
-            asset2: 0.0,
-            last_asset1: 0.0,
-            last_asset2: 0.0,
-            ch1: 0.0,
-            ch2: 0.0,
+            ..Default::default()
         }
     }
 }
