@@ -11,7 +11,6 @@ use crate::{
     BinInstructs, BinResponse, ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse,
 };
 use serde_json::Value;
-use strum::IntoEnumIterator;
 
 use futures::future::join_all;
 
@@ -506,30 +505,31 @@ impl ClientTask {
             live_info,
         );
         tracing::info!("Binclient started");
+        cli.default_symbol=default_symbol.to_string();
+        cli.current_symbol=default_symbol.to_string();
+        cli.default_intv=default_intv;
+        let res=cli.get_def_ws_params(true).await;
+        let mut params=match res{
+            Ok(h)=>h,
+            Err(e)=>{
+                tracing::error!["Unable to get default parameters{}",e];
+                HashMap::default()
+            }
+        };
         loop {
-            let res = cli.get_ws_params(&default_symbol, &default_intv).await;
-            let params = match res {
-                Ok(params) => params,
-                Err(_) => {
-                    let mut sub_params =
-                        vec![format!["{}@aggTrade", default_symbol.to_lowercase()]];
-                    for i in Intv::iter() {
-                        sub_params.push(format![
-                            "{}@kline_{}",
-                            default_symbol.to_lowercase(),
-                            i.to_bin_str()
-                        ])
-                    }
-                    let mut params: HashMap<String, Vec<String>> = HashMap::new();
-                    params.insert(default_symbol.to_string(), sub_params);
-                    params
-                }
-            };
-
             loop {
                 select! {
                     _ = cli.connect_ws(params.clone()) =>{
                         tracing::debug!["WS exited"];
+                        let res=cli.get_curr_ws_params(true).await;
+                        match res{
+                            Ok(p)=>{
+                                params=p;
+                            }
+                            Err(e)=>{
+                                tracing::error!["{}",e];
+                            }
+                        }
                     }
                     _ = recv_from_client.changed() =>{
                         let instruct=recv_from_client.borrow_and_update().clone();

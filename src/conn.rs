@@ -24,6 +24,9 @@ use rust_decimal::Decimal;
 use serde_json::json;
 use websockets::WebSocket;
 
+use core::pin::{pin};
+use futures::stream::{FuturesUnordered};
+
 use crate::data::{
     AssetData, Intv, Kline as KlineMine, Klines, get_asset_bases_binance, validate_asset_binance,
 };
@@ -147,6 +150,38 @@ impl GetKline {
             .collect();
         KlineMine::new_sql(res)
     }
+}
+async fn get_latest_wicks2(
+    client: &reqwest::Client,
+    symbol: &str,
+    i: &Intv,
+)->(KlineMine,Intv){
+    let k = get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
+    let kl = match k {
+        Ok(kli) => kli,
+        Err(e) => {
+            tracing::error![
+                "Unable to get inital kline for interval: {} {}",
+                i.to_str(),
+                e
+            ];
+            let mut kl = vec![];
+            for n in 0..5 {
+                let res = get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
+                match res {
+                    Ok(k) => {
+                        kl = k;
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::error!["unable to get inital kline {}, retry {}/5", e, n];
+                    }
+                };
+            }
+            kl
+        }
+    };
+    (GetKline::to_kline(&kl),*i)
 }
 
 async fn get_latest_wicks(
@@ -426,7 +461,7 @@ pub struct SymbolOutput {
 }
 
 #[derive(Debug, Default)]
-struct WSTick {
+pub struct WSTick {
     unsorted_output: Mutex<Vec<(String, BinWSResponse)>>,
     watch_price_ty: BinWSResponse,
     sub_params: HashMap<String, Vec<String>>,
@@ -655,24 +690,29 @@ impl WSTick {
 pub struct BinanceClient {
     #[dbg(skip)]
     pub binance_client: Binance,
-    pub_key: Option<String>,
-    sec_key: Option<String>,
-    current_order_id: u64,
-    ws_buffer_size: usize,
-    ws_tick: WSTick,
+    pub pub_key: Option<String>,
+    pub sec_key: Option<String>,
+    pub current_order_id: u64,
+    pub ws_buffer_size: usize,
+    pub ws_tick: WSTick,
 
-    api_keys_valid: bool,
-    account_info: Option<AccountInformation>,
-    exchange_info: Vec<SymbolInfo>,
-    live_ad: Arc<Mutex<AssetData>>,
-    live_info: Arc<Mutex<LiveInfo>>,
+    pub api_keys_valid: bool,
+    pub account_info: Option<AccountInformation>,
+    pub exchange_info: Vec<SymbolInfo>,
+    pub live_ad: Arc<Mutex<AssetData>>,
+    pub live_info: Arc<Mutex<LiveInfo>>,
 
-    current_symbol: String,
-    base_balances: (f64, f64),
-    qoute_balances: (f64, f64),
-    balances: HashMap<String, (f64, f64)>,
-    current_symbol_bases: (String, String),
-    live_orders: HashMap<i32, (Order, bool)>,
+    pub current_symbol: String,
+    pub base_balances: (f64, f64),
+    pub qoute_balances: (f64, f64),
+    pub balances: HashMap<String, (f64, f64)>,
+    pub current_symbol_bases: (String, String),
+    pub live_orders: HashMap<i32, (Order, bool)>,
+    pub stop_client:bool,
+    pub ws_connect:bool,
+
+    pub default_symbol: String,
+    pub default_intv: Intv,
 }
 
 impl Default for BinanceClient {
@@ -689,8 +729,12 @@ impl Default for BinanceClient {
             live_ad: Arc::new(Mutex::new(AssetData::default())),
             live_info: Arc::new(Mutex::new(LiveInfo::default())),
             api_keys_valid: false,
+            stop_client:false,
+            ws_connect:false,
 
             current_symbol: String::default(),
+            default_symbol: String::default(),
+            default_intv: Intv::default(),
             base_balances: (0.0, 0.0),
             qoute_balances: (0.0, 0.0),
             balances: HashMap::new(),
@@ -854,38 +898,30 @@ impl BinanceClient {
                 return Ok(());
             }
         };
+        let ss=symbol.to_string();
+        let mut klines_unordered=Intv::iter().map(move |i| {
+            let s=ss.clone();
+            let intv=i.clone();
+            let client = reqwest::Client::new();
+            tokio::task::spawn(async move{
+                get_latest_wicks2(&client, &s, &intv).await
+            })
+        }).collect::<FuturesUnordered<_>>();
+        let mut ku=pin![klines_unordered];
+
         let mut klines = Klines::new_empty();
-        let client = reqwest::Client::new();
-        for i in Intv::iter() {
-            let k = get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
-            let kl = match k {
-                Ok(kli) => kli,
-                Err(e) => {
-                    tracing::error![
-                        "Unable to get inital kline for interval: {} {}",
-                        i.to_str(),
-                        e
-                    ];
-                    let mut kl = vec![];
-                    for n in 0..5 {
-                        let res = get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
-                        match res {
-                            Ok(k) => {
-                                kl = k;
-                                break;
-                            }
-                            Err(e) => {
-                                tracing::error!["unable to get inital kline {}, retry {}/5", e, n];
-                            }
-                        };
-                    }
-                    kl
+        while let Some(res) = ku.next().await{
+            match res{
+                Ok((kline,intv))=>{
+                    klines.insert(&intv,kline);
+                    tracing::debug!["kline inserted for Symbol:{} Interval:{:?}",&symbol,intv];
                 }
-            };
-            let kl_0 = GetKline::to_kline(&kl);
-            tracing::debug!["GET REQUEST KLINE INSERTED for {:?}", &i];
-            klines.insert(&i, kl_0);
-        }
+                Err(e)=>{
+                    tracing::error!["Kline JoinError:{}",e];
+                }
+            }
+        };
+
         //FIXME
         if self.api_keys_valid == true {
             self.get_balances(&symbol);
@@ -988,13 +1024,10 @@ impl BinanceClient {
             .run(self.ws_buffer_size)
             .await
             .context(ERR_CTX)?;
-        tracing::debug!["{:?}", &self];
         Ok(())
     }
     pub async fn disconnect_ws(&mut self) {
-        tracing::debug!["{:?}", &self];
         self.ws_tick.disconnect = true;
-        tracing::debug!["{:?}", &self];
     }
     pub async fn get_user_data(&mut self) -> Result<()> {
         let resp = self
@@ -1002,15 +1035,33 @@ impl BinanceClient {
             .request(GetAccountRequest {})
             .await
             .context(ERR_CTX)?;
-        tracing::debug!["{:?}", &self];
-        tracing::info!("{:?}", resp);
+        tracing::debug!("{:?}", resp);
         self.account_info = Some(resp);
         Ok(())
+    }
+    pub async fn get_def_ws_params(
+        &mut self,
+        get_initial_data:bool,
+    )->Result<HashMap<String, Vec<String>>>{
+        let def_sym=self.default_symbol.clone();
+        let def_intv=self.default_intv;
+        let p=self.get_ws_params(&def_sym,&def_intv, get_initial_data).await?;
+        Ok(p)
+    }
+    pub async fn get_curr_ws_params(
+        &mut self,
+        get_initial_data:bool,
+    )->Result<HashMap<String, Vec<String>>>{
+        let def_sym=self.current_symbol.clone();
+        let def_intv=self.default_intv;
+        let p=self.get_ws_params(&def_sym,&def_intv, get_initial_data).await?;
+        Ok(p)
     }
     pub async fn get_ws_params(
         &mut self,
         symbol: &str,
         default_intv: &Intv,
+        get_initial_data:bool,
     ) -> Result<HashMap<String, Vec<String>>> {
         let mut sub_params = vec![format!["{}@aggTrade", symbol.to_lowercase()]];
         for i in Intv::iter() {
@@ -1023,19 +1074,22 @@ impl BinanceClient {
         let mut params: HashMap<String, Vec<String>> = HashMap::new();
         params.insert(symbol.to_string(), sub_params);
 
-        let res = self
-            .get_initial_data(&symbol, &default_intv, 2_000, self.live_ad.clone())
-            .await;
-        match res {
-            Ok(_) => {
-                tracing::trace!["Initial data for BTCUSDT received"];
-                let mut ad = self
-                    .live_ad
-                    .lock()
-                    .expect("get_ws_params: Unable to unlock mutex");
-                ad.live_asset_symbol_changed = (true, symbol.to_string());
-            }
-            Err(e) => tracing::error!["Initial data connection failed, ERROR: {}", e],
+        if get_initial_data{
+            let res = self
+                .get_initial_data(&symbol, &default_intv, 2_000, self.live_ad.clone())
+                .await;
+            match res {
+                Ok(_) => {
+                    tracing::trace!["Initial data for {} received",&symbol];
+                    let mut ad = self
+                        .live_ad
+                        .lock()
+                        .expect("get_ws_params: Unable to unlock mutex");
+                    ad.live_asset_symbol_changed = (true, symbol.to_string());
+                }
+                Err(e) => tracing::error!["Initial data connection failed, ERROR: {}", e],
+            };
+
         };
 
         Ok(params)
@@ -1306,7 +1360,23 @@ impl BinanceClient {
                 symbol: ref s,
                 defualt_symbol: ref ss,
             } => {
-                let res = self.get_ws_params(s, &Intv::default()).await;
+                let res=validate_asset_binance(s).await;
+                match res{
+                    Ok(ans)=>{
+                        match ans{
+                            true=>(),
+                            false=>{
+                                tracing::error!["Cannot find asset on binance:{}",s];
+                                return BinResponse::Failure((format!["Cannot find asset on binance:{}",s], GeneralError::Generic));
+                            }
+                        }
+                    },
+                    Err(e)=>{
+                        tracing::error!["Validate binance asset error:{}",e];
+                        return BinResponse::Failure((format!["{}",e], GeneralError::Generic));
+                    }
+                };
+                let res = self.get_ws_params(s, &Intv::default(), false).await;
                 let params = match res {
                     Ok(params) => params,
                     Err(e) => {
@@ -1333,18 +1403,11 @@ impl BinanceClient {
                         params
                     }
                 };
+                self.ws_tick.sub_params=params.clone();
+                self.current_symbol=s.clone();
+                tracing::debug!["Live re-connect params {:?}",params];
                 self.disconnect_ws().await;
-
-                let res = self.connect_ws(params).await;
-                let resp = match res {
-                    Ok(_) => BinResponse::Success,
-                    Err(e) => {
-                        let string_error = format!["{}", &e];
-                        tracing::error!("{}", anyhow!["Unable to change asset: {}", string_error]);
-                        BinResponse::Failure((string_error, GeneralError::Generic))
-                    }
-                };
-                resp
+                BinResponse::Success
             }
             BinInstructs::None => BinResponse::None,
         }

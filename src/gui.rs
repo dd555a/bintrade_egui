@@ -3107,33 +3107,16 @@ impl LivePlot {
                         .hint_text("Search for asset"),
                 );
                 if ui.button("Search").clicked() {
-                    if live_plot.kline_plot.live_asset_changed == false {
-                        let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset {
-                            symbol: live_plot.search_string.clone(),
-                            defualt_symbol: live_plot.default_symbol.clone(),
-                        });
-                        let _res = cli_chan.send(msg);
-                    } else {
-                        if live_plot.last_symbol != live_plot.kline_plot.symbol {
-                            let msg =
-                                ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset {
-                                    symbol: live_plot.search_string.clone(),
-                                    defualt_symbol: live_plot.default_symbol.clone(),
-                                });
-                            let _res = cli_chan.send(msg);
-                            live_plot.last_symbol = live_plot.kline_plot.symbol.clone();
-                            live_plot.kline_plot.live_asset_changed = true;
-                        };
-                    };
-                }
-                /*
-                if ui.button("Reload chart").clicked() {
-                    //FIXME add a way to reload chart
-                    //
-                    //
-                    //
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset {
+                        symbol: live_plot.search_string.clone(),
+                        defualt_symbol: live_plot.default_symbol.clone(),
+                    });
+                    let _res = cli_chan.send(msg);
                 };
-                */
+                if ui.button("Reload chart").clicked() {
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::Disconnect);
+                    let _res = cli_chan.send(msg);
+                };
             });
     }
 }
