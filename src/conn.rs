@@ -772,22 +772,24 @@ impl BinanceClient {
         Ok(())
     }
     async fn add_replace_api_keys(&mut self, pub_key: &str, priv_key: &str) -> Result<()> {
-        self.binance_client = Binance::with_key_and_secret(&pub_key, &priv_key);
-        let res = self.get_all_balances().await;
-        //FIXME unlock the mutex twice here, fix later
-        let live_inf = self.live_info.clone();
+        let client=Binance::with_key_and_secret(&pub_key, &priv_key);
+        let res = client.request(GetAccountRequest {}).await;
+        let live_inf=self.live_info.clone();
         let mut live_info = live_inf.lock().expect("live_info poisoned mutex");
-        match res {
-            Ok(_) => {
+        match res{
+            Ok(_acc_info) => {
                 tracing::info!["API keys changed, account balances updated"];
                 self.api_keys_valid = true;
                 live_info.keys_status = KeysStatus::Valid;
+                self.binance_client=client;
             }
             Err(e) => {
                 tracing::error!["Unable to get binance account balances: {}", e];
                 self.api_keys_valid = false;
                 live_info.keys_status = KeysStatus::Invalid;
+                return Err(anyhow!["{}",e]);
             }
+
         };
         Ok(())
     }
@@ -1199,7 +1201,7 @@ impl BinanceClient {
                         tracing::error!(
                             "{}",
                             anyhow![
-                                "{:?} Unable to connect to ws  e:{}",
+                                "{:?} Unable to replace api keys:{}",
                                 i.clone(),
                                 e.context(ERR_CTX)
                             ]

@@ -3290,10 +3290,12 @@ impl Settings {
         settings.balances = live_info.acc_balances.clone();
         settings.key_status = live_info.keys_status;
 
+
         egui::Grid::new("Account")
             .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
+            ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
                 ui.label(RichText::new(format!["BINANCE KEYS",]).color(Color32::YELLOW));
                 ui.end_row();
                 ui.add_sized(
@@ -3324,13 +3326,14 @@ impl Settings {
                     let _res = cli_chan.send(msg);
                     settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
                     settings.binance_priv_key = Some(settings.priv_api_key_enter_string.clone());
-                    if settings.enc_api_keys == true {
-                        let _res = settings.encrypt_keys(settings.password_string.clone());
-                    };
-                    //NOTE not sure if this is OK... better way to shred strings
+                    let pass=settings.password_string.clone();
+                    settings.password_string = String::default();
                     settings.api_key_enter_string = String::default();
                     settings.priv_api_key_enter_string = String::default();
-                    settings.password_string = String::default();
+                    if settings.enc_api_keys == true {
+                        let _res = settings.encrypt_keys(pass);
+                    };
+                    //NOTE not sure if this is OK... better way to shred strings
                 };
                 if ui.button("Remove keys").clicked() {
                     settings.api_key_enter_string = String::default();
@@ -3341,10 +3344,27 @@ impl Settings {
                     settings.enc_binance_priv_key = None;
                     let msg = ClientInstruct::SendBinInstructs(BinInstructs::RemoveApiKeys {});
                     let _res = cli_chan.send(msg);
+                    tracing::info!["Api removed"];
                 };
                 if ui.button("Unlock keys").clicked() {
-                    settings.api_key_enter_string = String::default();
-                    settings.priv_api_key_enter_string = String::default();
+                    let res = settings.decrypt_keys(settings.password_string.clone());
+                    match res{
+                        Ok(_)=>{
+                            tracing::info!["Api keys decrypted"];
+                            if let (Some(pub_key),Some(priv_key))=(settings.binance_pub_key.clone(),settings.binance_priv_key.clone()){
+                                let msg = ClientInstruct::SendBinInstructs(BinInstructs::AddReplaceApiKeys {
+                                    pub_key,
+                                    priv_key,
+                                });
+                                let _res = cli_chan.send(msg);
+                            }else{
+                                tracing::error!["API keys none!"]
+                            };
+                        }
+                        Err(e)=>{
+                            tracing::error!["Decrypt keys error:{}",e];
+                        }
+                    };
                 };
                 ui.end_row();
                 match settings.key_status {
@@ -3375,14 +3395,27 @@ impl Settings {
                 ui.checkbox(&mut settings.enc_api_keys, "Encrypt api keys w password");
                 ui.end_row();
                 if ui.button("Save settings").clicked() {
+                    settings.password_string = String::default();
                     if settings.save_api_keys == true {
                         let res = if settings.enc_api_keys == true {
                             settings.binance_pub_key = None;
                             settings.binance_priv_key = None;
+
+                            settings.api_key_enter_string = String::default();
+                            settings.priv_api_key_enter_string = String::default();
+
                             settings.save_settings_file(Some(settings.password_string.clone()))
                         } else {
+
+                            settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
+                            settings.binance_priv_key = Some(settings.priv_api_key_enter_string.clone());
+
+                            settings.api_key_enter_string = String::default();
+                            settings.priv_api_key_enter_string = String::default();
+
                             settings.enc_binance_pub_key = None;
                             settings.enc_binance_priv_key = None;
+
                             settings.save_settings_file(None)
                         };
                         match res {
@@ -3503,6 +3536,7 @@ impl Settings {
         Ok(())
     }
     pub fn save_settings_file(&mut self, password: Option<String>) -> Result<()> {
+        self.password_string=String::default();
         match password {
             Some(pass) => {
                 let _ = self.encrypt_keys(pass);
