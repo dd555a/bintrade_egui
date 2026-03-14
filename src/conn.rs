@@ -1,10 +1,11 @@
-use binance_async::Binance;
-use binance_async::models::*;
-use binance_async::rest::spot::GetAccountRequest;
-#[allow(unused)]
-use binance_async::rest::usdm::{self, StartUserDataStreamRequest, StartUserDataStreamResponse};
-
-use binance_async::websocket::{BinanceWebsocket, usdm::WebsocketMessage};
+#![allow(warnings)]
+use binance::account::*;
+use binance::api::Binance;
+use binance::futures::userstream::*;
+use binance::rest_model::{
+    AccountInformation, Order as BinanceOrder, OrderSide, OrderType, TimeInForce,
+};
+use tokio::time::{Duration, sleep};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -24,19 +25,21 @@ use rust_decimal::Decimal;
 use serde_json::json;
 use websockets::WebSocket;
 
-use core::pin::{pin};
-use futures::stream::{FuturesUnordered};
+use core::pin::pin;
+use futures::stream::FuturesUnordered;
 
 use crate::data::{
     AssetData, Intv, Kline as KlineMine, Klines, get_asset_bases_binance, validate_asset_binance,
 };
 use crate::gui::{KeysStatus, LiveInfo, Settings};
-use crate::trade::Order;
+use crate::trade::{LimitStatus, Order, Quant};
 use crate::{BinInstructs, BinResponse, GeneralError};
 
 use chrono::{DateTime, Utc};
 
 const ERR_CTX: &str = "Binance client | websocket:";
+const DEFAULT_BUFFER_SIZE: usize = 50;
+const ORDER_CHECK_INTV_MS: u64 = 1_000;
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug, Clone)]
@@ -51,6 +54,19 @@ pub struct SymbolInfo {
     pub baseCommissionPrecision: i64,
     pub quoteCommissionPrecision: i64,
     //filters: Value
+}
+#[derive(Deserialize, Debug, Clone)]
+pub struct UserS {
+    pub fuck: i64,
+}
+impl UserS {
+    async fn begin(api: &str, api_secret: &str) -> Result<()> {
+        let userstream: UserStream =
+            Binance::new(Some(api.to_string()), Some(api_secret.to_string()));
+        let listen_key = userstream.start().await?;
+        let keep_alive = userstream.keep_alive(&listen_key.listen_key).await?;
+        Ok(())
+    }
 }
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug)]
@@ -151,11 +167,7 @@ impl GetKline {
         KlineMine::new_sql(res)
     }
 }
-async fn get_latest_wicks2(
-    client: &reqwest::Client,
-    symbol: &str,
-    i: &Intv,
-)->(KlineMine,Intv){
+async fn get_latest_wicks2(client: &reqwest::Client, symbol: &str, i: &Intv) -> (KlineMine, Intv) {
     let k = get_latest_wicks(&client, &symbol, i.to_bin_str()).await;
     let kl = match k {
         Ok(kli) => kli,
@@ -181,7 +193,7 @@ async fn get_latest_wicks2(
             kl
         }
     };
-    (GetKline::to_kline(&kl),*i)
+    (GetKline::to_kline(&kl), *i)
 }
 
 async fn get_latest_wicks(
@@ -237,7 +249,6 @@ struct AggTradeWS {
     q: f64,
     //s: String,
 }
-//{'t': 1748736000000, 'T': 1751327999999, 's': 'TRUMPUSDT', 'i': '1M', 'f': 141621259, 'L': 142166556, 'o': '11.24000000', 'c': '11.19000000', 'h': '11.90000000', 'l': '10.94000000', 'v': '15876266.19100000', 'n': 545298, 'x': False, 'q': '179814040.65914000', 'V': '8111489.88500000', 'Q': '91972469.36091000', 'B': '0'}
 #[allow(non_snake_case)]
 #[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
 pub struct KlineTick {
@@ -304,7 +315,7 @@ impl BinWSResponse {
                 format!["{}@kline_{}", symbol.to_lowercase(), intv.to_bin_str()]
             }
         };
-        tracing::debug!["{}", &ret];
+        tracing::trace!["{}", &ret];
         ret
     }
     fn parse_into_by_str(input: Value) -> Result<(String, BinWSResponse)> {
@@ -464,7 +475,7 @@ pub struct SymbolOutput {
 pub struct WSTick {
     unsorted_output: Mutex<Vec<(String, BinWSResponse)>>,
     watch_price_ty: BinWSResponse,
-    sub_params: HashMap<String, Vec<String>>,
+    pub sub_params: HashMap<String, Vec<String>>,
     symbol_sorted_output: Arc<Mutex<HashMap<String, SymbolOutput>>>,
     live_price1: Arc<Mutex<f64>>,
     disconnect: bool,
@@ -619,12 +630,12 @@ impl WSTick {
     }
     async fn connect(&self) -> Result<WebSocket> {
         let mut p = self.sub_params.clone();
-        tracing::debug!["\x1b[93m Subscribe message hashmap\x1b[93m : {:?}", p];
+        tracing::trace!["\x1b[93m Subscribe message hashmap\x1b[93m : {:?}", p];
         let mut ovec: Vec<String> = vec![];
         let _ = p
             .iter_mut()
             .map(|(_, mut out)| {
-                tracing::debug!["\x1b[93m Iter out\x1b[93m : {:?}", out];
+                tracing::trace!["\x1b[93m Iter out\x1b[93m : {:?}", out];
                 ovec.append(&mut out);
             })
             .collect::<()>();
@@ -636,7 +647,7 @@ impl WSTick {
             "id": 1,
             "params":ovec.as_slice(), //NOTE press x to doubt...
         });
-        tracing::debug!["\x1b[93m Subscribe message\x1b[0m :  {:?}", sub_message];
+        tracing::trace!["\x1b[93m Subscribe message\x1b[0m :  {:?}", sub_message];
         let mut conn = WebSocket::connect(socket).await?;
         conn.send_text(sub_message.to_string()).await?;
         tracing::info!["Web socket connected with message:{:?}", sub_message];
@@ -670,7 +681,7 @@ impl WSTick {
             tracing::trace!["\x1b[93m Unsorted  messages placed \x1b[0m"];
             //TODO start multiple websockets for multiple symbols?
             if self.disconnect == true {
-                tracing::debug!["\x1b[93m WS disconnect called!\x1b[0m"];
+                tracing::trace!["\x1b[93m WS disconnect called!\x1b[0m"];
                 break;
             }
         }
@@ -689,12 +700,10 @@ impl WSTick {
 #[derive(Dbg)]
 pub struct BinanceClient {
     #[dbg(skip)]
-    pub binance_client: Binance,
-    pub pub_key: Option<String>,
-    pub sec_key: Option<String>,
+    pub binance_client: Account,
     pub current_order_id: u64,
     pub ws_buffer_size: usize,
-    pub ws_tick: WSTick,
+    pub ws_tick: Option<WSTick>,
 
     pub api_keys_valid: bool,
     pub account_info: Option<AccountInformation>,
@@ -708,8 +717,8 @@ pub struct BinanceClient {
     pub balances: HashMap<String, (f64, f64)>,
     pub current_symbol_bases: (String, String),
     pub live_orders: HashMap<i32, (Order, bool)>,
-    pub stop_client:bool,
-    pub ws_connect:bool,
+    pub stop_client: bool,
+    pub ws_connect: bool,
 
     pub default_symbol: String,
     pub default_intv: Intv,
@@ -718,19 +727,17 @@ pub struct BinanceClient {
 impl Default for BinanceClient {
     fn default() -> Self {
         Self {
-            binance_client: Binance::default(),
-            pub_key: None,
-            sec_key: None,
+            binance_client: Account::new(None, None),
             current_order_id: 0,
             ws_buffer_size: 50,
-            ws_tick: WSTick::default(),
+            ws_tick: Some(WSTick::default()),
             account_info: None,
             exchange_info: vec![],
             live_ad: Arc::new(Mutex::new(AssetData::default())),
             live_info: Arc::new(Mutex::new(LiveInfo::default())),
             api_keys_valid: false,
-            stop_client:false,
-            ws_connect:false,
+            stop_client: false,
+            ws_connect: false,
 
             current_symbol: String::default(),
             default_symbol: String::default(),
@@ -754,12 +761,10 @@ impl BinanceClient {
         live_info: Arc<Mutex<LiveInfo>>,
     ) -> Self {
         Self {
-            binance_client: Binance::default(),
-            pub_key,
-            sec_key,
+            binance_client: Binance::new(pub_key, sec_key),
             current_order_id: 0,
             ws_buffer_size: 15,
-            ws_tick: WSTick::new(collect, live_price_watch),
+            ws_tick: Some(WSTick::new(collect, live_price_watch)),
             account_info: None,
             exchange_info: vec![],
             live_ad,
@@ -768,115 +773,133 @@ impl BinanceClient {
         }
     }
     async fn remove_api_keys(&mut self) -> Result<()> {
-        self.binance_client = Binance::default();
+        self.binance_client = Account::new(None, None);
         Ok(())
     }
     async fn add_replace_api_keys(&mut self, pub_key: &str, priv_key: &str) -> Result<()> {
-        let client=Binance::with_key_and_secret(&pub_key, &priv_key);
-        let res = client.request(GetAccountRequest {}).await;
-        let live_inf=self.live_info.clone();
+        let client: Account = Binance::new(Some(pub_key.to_string()), Some(priv_key.to_string()));
+        let res = client.get_account().await;
+
+        let live_inf = self.live_info.clone();
         let mut live_info = live_inf.lock().expect("live_info poisoned mutex");
-        match res{
+        match res {
             Ok(_acc_info) => {
                 tracing::info!["API keys changed, account balances updated"];
                 self.api_keys_valid = true;
                 live_info.keys_status = KeysStatus::Valid;
-                self.binance_client=client;
+                self.binance_client = client;
             }
             Err(e) => {
                 tracing::error!["Unable to get binance account balances: {}", e];
                 self.api_keys_valid = false;
                 live_info.keys_status = KeysStatus::Invalid;
-                return Err(anyhow!["{}",e]);
+                return Err(anyhow!["{}", e]);
             }
-
         };
         Ok(())
     }
-    async fn send_new_order(
-        &self,
-        sym: &str,
-        otype: OrderType,
-        sid: OrderSide,
-        pric: f64,
-        quant: f64,
-    ) -> Result<u64> {
-        let resp = self
-            .binance_client
-            .request(usdm::NewOrderRequest {
-                symbol: sym.into(),
-                //r#type: OrderType::Limit,
-                r#type: otype,
-                //side: OrderSide::Buy,
-                side: sid,
-                price: Decimal::from_f64(pric),
-                quantity: Decimal::from_f64(quant),
-                time_in_force: Some(TimeInForce::GTC),
-                ..Default::default()
-            })
-            .await
-            .context(ERR_CTX)?;
-        tracing::info!("{:?}", resp);
-        Ok(resp.order_id)
+    async fn send_new_order(&mut self, sym: &str, o: &Order) -> Result<u64> {
+        let order_request: OrderRequest =
+            parse_to_binance(sym, &o, self.qoute_balances.0, self.base_balances.0);
+        let transaction = self.binance_client.place_order(order_request).await?;
+        self.get_all_balances().await;
+        Ok(transaction.order_id)
+    }
+    //NOTE this is a horrible way to do this but for now it's fine
+    pub async fn check_live_orders_change(live_info: Arc<Mutex<LiveInfo>>, binance: Account) {
+        loop {
+            let res = binance.get_all_open_orders().await;
+            match res {
+                Ok(orders) => {
+                    let ((a1_string, a2_string), (a1_l_old, a2_l_old)) = {
+                        let live_i = live_info.lock().expect("Live info mutex poisoned!");
+                        (
+                            live_i.current_pair_strings.clone(),
+                            (live_i.current_pair_locked_balances),
+                        )
+                    };
+
+                    let res_a1 = binance.get_balance(&a1_string).await;
+                    let a1_locked = match res_a1 {
+                        Ok(balance) => balance.free,
+                        Err(e) => {
+                            tracing::error!["check_live_orders_change {}", e];
+                            a1_l_old
+                        }
+                    };
+                    let res_a2 = binance.get_balance(&a2_string).await;
+                    let a2_locked = match res_a2 {
+                        Ok(balance) => balance.free,
+                        Err(e) => {
+                            tracing::error!["check_live_orders_change {}", e];
+                            a2_l_old
+                        }
+                    };
+                    let mut live_orders = HashMap::default();
+                    let (a1_locked, a2_locked) = (0.0, 0.0);
+                    let _res: Vec<_> = orders
+                        .iter()
+                        .map(|order_binance| {
+                            let res = from_binance_order(&order_binance, &a1_locked, &a2_locked);
+                            match res {
+                                Ok(o) => {
+                                    live_orders.insert(order_binance.order_id as i32, (o, true));
+                                }
+                                Err(e) => {
+                                    tracing::error!["check_live_orders_change {}", e];
+                                }
+                            };
+                        })
+                        .collect();
+                    let mut live_inf = live_info.lock().expect("Live info mutex poisoned!");
+                    live_inf.live_orders = live_orders;
+                }
+                Err(e) => {
+                    tracing::error!["check_live_orders_change {}", e];
+                }
+            }
+            sleep(Duration::from_millis(ORDER_CHECK_INTV_MS)).await;
+        }
     }
     async fn cancel_order(&self, sym: &str, id: &i32) -> Result<()> {
-        let resp = self
-            .binance_client
-            .request(usdm::CancelOrderRequest {
-                symbol: sym.into(),
-                order_id: Some(*id as u64),
-                ..Default::default()
-            })
-            .await
-            .context(ERR_CTX)?;
-        tracing::info!("{:?}", resp);
+        let order_cancelation = OrderCancellation {
+            symbol: sym.to_string(),
+            order_id: Some(*id as u64),
+            orig_client_order_id: None,
+            new_client_order_id: None,
+            recv_window: None,
+        };
+        let transaction = self.binance_client.cancel_order(order_cancelation).await?;
+        tracing::info!["{:?}", transaction];
         Ok(())
     }
     async fn cancel_all_orders(&self, symbol: &str, ids: Vec<u64>) -> Result<()> {
-        let s = symbol.to_string();
-        let resp = self
+        let transaction = self
             .binance_client
-            .request(usdm::CancelMultipleOrdersRequest {
-                symbol: s,
-                order_id_list: ids,
-                ..Default::default()
-            })
-            .await
-            .context(ERR_CTX)?;
-        tracing::info!("{:?}", resp);
+            .cancel_all_open_orders(symbol.to_string())
+            .await?;
+        tracing::info!["Cancelled orders: {:?}", transaction];
         Ok(())
     }
     #[allow(unused)]
     async fn start_user_stream(&self) -> Result<()> {
-        let listen_key = self
-            .binance_client
-            .request(StartUserDataStreamRequest {})
-            .await
-            .context(ERR_CTX)
-            .context("Binance client:unable to connect_ws user stream")?;
-        let mut ws: BinanceWebsocket<WebsocketMessage> =
-            BinanceWebsocket::new(&[listen_key.listen_key.as_str()])
-                .await
-                .context(ERR_CTX)?;
-        loop {
-            let msg = ws
-                .next()
-                .await
-                .ok_or(anyhow!["Ws exited on a None"])
-                .context(ERR_CTX)?;
-            tracing::debug!("{msg:?}");
-        }
-        Ok(())
+        todo!()
     }
-    pub async fn connect_ws(&mut self, params: HashMap<String, Vec<String>>) -> Result<()> {
-        //NOTE may have to get rid this self due to inter mutability,,,
-        self.exchange_info = get_exchange_info().await?;
-        self.ws_tick.sub_params = params;
-        self.ws_tick
-            .run(self.ws_buffer_size)
-            .await
-            .context(ERR_CTX)?;
-        tracing::trace!["Connect WS ws: {:?}", &self];
+    pub async fn run(&mut self, params: HashMap<String, Vec<String>>) -> Result<()> {
+        //tokio::task::spawn(async move {  });
+        todo!()
+    }
+    pub async fn connect_ws(
+        mut ws_tick: WSTick,
+        params: HashMap<String, Vec<String>>,
+        buffer_size: usize,
+    ) -> Result<()> {
+        ws_tick.sub_params = params.clone();
+        let ws_tick = tokio::task::spawn(async move {
+            ws_tick.run(buffer_size).await;
+            ws_tick
+        })
+        .await?;
         Ok(())
     }
     #[allow(unused)]
@@ -900,33 +923,42 @@ impl BinanceClient {
                 return Ok(());
             }
         };
-        let ss=symbol.to_string();
-        let mut klines_unordered=Intv::iter().map(move |i| {
-            let s=ss.clone();
-            let intv=i.clone();
-            let client = reqwest::Client::new();
-            tokio::task::spawn(async move{
-                get_latest_wicks2(&client, &s, &intv).await
+        let ss = symbol.to_string();
+        let mut klines_unordered = Intv::iter()
+            .map(move |i| {
+                let s = ss.clone();
+                let intv = i.clone();
+                let client = reqwest::Client::new();
+                tokio::task::spawn(async move { get_latest_wicks2(&client, &s, &intv).await })
             })
-        }).collect::<FuturesUnordered<_>>();
-        let mut ku=pin![klines_unordered];
+            .collect::<FuturesUnordered<_>>();
+        let mut ku = pin![klines_unordered];
 
         let mut klines = Klines::new_empty();
-        while let Some(res) = ku.next().await{
-            match res{
-                Ok((kline,intv))=>{
-                    klines.insert(&intv,kline);
-                    tracing::debug!["kline inserted for Symbol:{} Interval:{:?}",&symbol,intv];
+        while let Some(res) = ku.next().await {
+            match res {
+                Ok((kline, intv)) => {
+                    klines.insert(&intv, kline);
+                    tracing::trace!["kline inserted for Symbol:{} Interval:{:?}", &symbol, intv];
                 }
-                Err(e)=>{
-                    tracing::error!["Kline JoinError:{}",e];
+                Err(e) => {
+                    tracing::error!["Kline JoinError:{}", e];
                 }
             }
+        }
+        let res = self.get_open_orders_binance().await;
+        match res {
+            Ok(_) => (),
+            Err(e) => {
+                tracing::error!["Get binance orders error! {}", e];
+            }
         };
-
-        //FIXME
-        if self.api_keys_valid == true {
-            self.get_balances(&symbol);
+        let res = self.get_balances(&symbol).await;
+        match res {
+            Ok(_) => (),
+            Err(e) => {
+                tracing::error!["Get balances error! {}", e];
+            }
         };
 
         let mut live_b = live_ad
@@ -936,13 +968,37 @@ impl BinanceClient {
         live_b.kline_data.insert(symbol.to_string(), klines);
         live_b.acc_balances = self.balances.clone();
         live_b.current_pair_strings = self.current_symbol_bases.clone();
-        live_b.current_pair_free_balances = (self.base_balances.0, self.qoute_balances.1);
-        live_b.current_pair_locked_balances = (self.base_balances.1, self.qoute_balances.0);
+        live_b.current_pair_free_balances = (self.base_balances.0, self.qoute_balances.0);
+        live_b.current_pair_locked_balances = (self.base_balances.1, self.qoute_balances.1);
 
         Ok(())
     }
+    async fn get_open_orders_binance(&mut self) -> Result<()> {
+        let orders = self.binance_client.get_all_open_orders().await?;
+        let _res: Vec<_> = orders
+            .iter()
+            .map(|order_binance| {
+                tracing::debug!["BINANCE ORDER{:?}", order_binance];
+                let res = from_binance_order(
+                    &order_binance,
+                    &self.base_balances.1,
+                    &self.qoute_balances.1,
+                );
+                match res {
+                    Ok(o) => {
+                        self.live_orders
+                            .insert(order_binance.order_id as i32, (o, true));
+                    }
+                    Err(e) => {
+                        tracing::error!["{}", e];
+                    }
+                };
+            })
+            .collect();
+        Ok(())
+    }
     async fn get_balances(&mut self, symbol: &str) -> Result<()> {
-        let res = self.binance_client.request(GetAccountRequest {}).await;
+        let res = self.binance_client.get_account().await;
         let mut balances: HashMap<String, (f64, f64)> = HashMap::new();
         match res {
             Ok(acc) => {
@@ -986,7 +1042,7 @@ impl BinanceClient {
         Ok(())
     }
     async fn get_all_balances(&mut self) -> Result<()> {
-        let res = self.binance_client.request(GetAccountRequest {}).await;
+        let res = self.binance_client.get_account().await;
         let mut balances: HashMap<String, (f64, f64)> = HashMap::new();
         match res {
             Ok(acc) => {
@@ -1020,50 +1076,55 @@ impl BinanceClient {
     #[allow(unused)]
     async fn change_ws_params(&mut self, new_params: HashMap<String, Vec<String>>) -> Result<()> {
         //TODO check if possible to change params without disconnecting
-        self.ws_tick.disconnect = true;
-        self.ws_tick.sub_params = new_params;
-        self.ws_tick
-            .run(self.ws_buffer_size)
-            .await
-            .context(ERR_CTX)?;
+        let ws_tick = self
+            .ws_tick
+            .as_mut()
+            .ok_or(anyhow!["WS tick should BE SOME here - change WS params"])?;
+        ws_tick.sub_params = new_params;
+        ws_tick.disconnect = true;
         Ok(())
     }
-    pub async fn disconnect_ws(&mut self) {
-        self.ws_tick.disconnect = true;
+    pub async fn disconnect_ws(&mut self) -> Result<()> {
+        let ws_tick = self
+            .ws_tick
+            .as_mut()
+            .ok_or(anyhow!["WS tick should BE SOME disconnect WS"])?;
+        ws_tick.disconnect = true;
+        Ok(())
     }
     pub async fn get_user_data(&mut self) -> Result<()> {
-        let resp = self
-            .binance_client
-            .request(GetAccountRequest {})
-            .await
-            .context(ERR_CTX)?;
-        tracing::debug!("{:?}", resp);
+        let resp = self.binance_client.get_account().await.context(ERR_CTX)?;
+        tracing::trace!("{:?}", resp);
         self.account_info = Some(resp);
         Ok(())
     }
     pub async fn get_def_ws_params(
         &mut self,
-        get_initial_data:bool,
-    )->Result<HashMap<String, Vec<String>>>{
-        let def_sym=self.default_symbol.clone();
-        let def_intv=self.default_intv;
-        let p=self.get_ws_params(&def_sym,&def_intv, get_initial_data).await?;
+        get_initial_data: bool,
+    ) -> Result<HashMap<String, Vec<String>>> {
+        let def_sym = self.default_symbol.clone();
+        let def_intv = self.default_intv;
+        let p = self
+            .get_ws_params(&def_sym, &def_intv, get_initial_data)
+            .await?;
         Ok(p)
     }
     pub async fn get_curr_ws_params(
         &mut self,
-        get_initial_data:bool,
-    )->Result<HashMap<String, Vec<String>>>{
-        let def_sym=self.current_symbol.clone();
-        let def_intv=self.default_intv;
-        let p=self.get_ws_params(&def_sym,&def_intv, get_initial_data).await?;
+        get_initial_data: bool,
+    ) -> Result<HashMap<String, Vec<String>>> {
+        let def_sym = self.current_symbol.clone();
+        let def_intv = self.default_intv;
+        let p = self
+            .get_ws_params(&def_sym, &def_intv, get_initial_data)
+            .await?;
         Ok(p)
     }
     pub async fn get_ws_params(
         &mut self,
         symbol: &str,
         default_intv: &Intv,
-        get_initial_data:bool,
+        get_initial_data: bool,
     ) -> Result<HashMap<String, Vec<String>>> {
         let mut sub_params = vec![format!["{}@aggTrade", symbol.to_lowercase()]];
         for i in Intv::iter() {
@@ -1076,13 +1137,13 @@ impl BinanceClient {
         let mut params: HashMap<String, Vec<String>> = HashMap::new();
         params.insert(symbol.to_string(), sub_params);
 
-        if get_initial_data{
+        if get_initial_data {
             let res = self
                 .get_initial_data(&symbol, &default_intv, 2_000, self.live_ad.clone())
                 .await;
             match res {
                 Ok(_) => {
-                    tracing::trace!["Initial data for {} received",&symbol];
+                    tracing::trace!["Initial data for {} received", &symbol];
                     let mut ad = self
                         .live_ad
                         .lock()
@@ -1091,13 +1152,12 @@ impl BinanceClient {
                 }
                 Err(e) => tracing::error!["Initial data connection failed, ERROR: {}", e],
             };
-
         };
 
         Ok(params)
     }
-    pub fn update_settings(&mut self, _settings: &Settings) -> Result<()> {
-        //TODO
+    pub fn update_settings(&mut self, settings: &Settings) -> Result<()> {
+        self.default_symbol = settings.default_asset.clone();
         Ok(())
     }
     pub async fn parse_binance_instructs(&mut self, i: BinInstructs) -> BinResponse {
@@ -1108,13 +1168,20 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        tracing::error!(
-                            "{}",
-                            anyhow!["Unable to cancel_order:{}", e.context(ERR_CTX)]
-                        );
+                        tracing::error!("{}", anyhow!["Unable to cancel_order:{}", e]);
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
+                let res = self.get_open_orders_binance().await;
+                match res {
+                    Ok(_) => (),
+                    Err(e) => {
+                        tracing::error!["Get binance orders error! {}", e];
+                    }
+                };
+                let live_inf = self.live_info.clone();
+                let mut live_i = live_inf.lock().expect("Unable to unlock live_info mutex");
+                self.live_orders = live_i.live_orders.clone();
                 resp
             }
             BinInstructs::UpdateSettings(ref settings) => {
@@ -1201,7 +1268,7 @@ impl BinanceClient {
                         tracing::error!(
                             "{}",
                             anyhow![
-                                "{:?} Unable to replace api keys:{}",
+                                "{:?} Unable to replace api keys: {}",
                                 i.clone(),
                                 e.context(ERR_CTX)
                             ]
@@ -1213,7 +1280,9 @@ impl BinanceClient {
             }
             BinInstructs::ConnectWS { params: ref p } => {
                 tracing::trace!["Connect ws start {:?}", &self];
-                let res = self.connect_ws(p.clone()).await;
+                let res =
+                    BinanceClient::connect_ws(WSTick::default(), p.clone(), DEFAULT_BUFFER_SIZE)
+                        .await;
                 let resp: BinResponse = match res {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
@@ -1229,11 +1298,11 @@ impl BinanceClient {
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
-                tracing::debug!["Connect ws end {:?}", &self];
+                tracing::trace!["Connect ws end {:?}", &self];
                 resp
             }
             BinInstructs::ConnectUserWS { params: _ } => {
-                tracing::debug!["Connect ws start {:?}", &self];
+                tracing::trace!["Connect ws start {:?}", &self];
                 let res = self.start_user_stream().await;
                 let resp: BinResponse = match res {
                     Ok(_) => BinResponse::Success,
@@ -1246,7 +1315,7 @@ impl BinanceClient {
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
-                tracing::debug!["Connect ws end {:?}", &self];
+                tracing::trace!["Connect ws end {:?}", &self];
                 resp
             }
             BinInstructs::Disconnect => {
@@ -1254,7 +1323,7 @@ impl BinanceClient {
                 BinResponse::Success
             }
             BinInstructs::GetUserData => {
-                tracing::debug!["Connect ws start {:?}", &self];
+                tracing::trace!["Connect ws start {:?}", &self];
                 let res = self.get_user_data().await;
                 let resp = match res {
                     Ok(_) => BinResponse::Success,
@@ -1264,37 +1333,36 @@ impl BinanceClient {
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
-                tracing::debug!["Connect ws end {:?}", &self];
+                tracing::trace!["Connect ws end {:?}", &self];
                 resp
             }
             BinInstructs::PlaceOrder {
                 symbol: ref s,
                 o: order,
             } => {
-                tracing::debug!["Connect ws start {:?}", &self];
-                let (order_type, order_side, price, _stop_price, quantity) =
-                    parse_order_to_ba(&order);
-                let res = self
-                    .send_new_order(&s, order_type, order_side, price, quantity)
-                    .await;
+                tracing::trace!["Connect ws start {:?}", &self];
+                let res = self.send_new_order(&s, &order).await;
                 let resp = match res {
                     Ok(order_id) => {
+                        let res = self.get_open_orders_binance().await;
+                        match res {
+                            Ok(_) => (),
+                            Err(e) => {
+                                tracing::error!["Get binance orders error! {}", e];
+                            }
+                        };
                         let live_inf = self.live_info.clone();
                         let mut live_i = live_inf.lock().expect("Unable to unlock live_info mutex");
-                        live_i.live_orders.insert(order_id as i32, (order, true));
                         self.live_orders = live_i.live_orders.clone();
                         BinResponse::Success
                     }
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        tracing::error!(
-                            "{}",
-                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(ERR_CTX)]
-                        );
+                        tracing::error!("{}", anyhow!["Unable to place order ERROR: {}", e]);
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
-                tracing::debug!["Connect ws end {:?}", &self];
+                tracing::trace!["Connect ws end {:?}", &self];
                 resp
             }
             BinInstructs::CancelAndReplaceOrder {
@@ -1302,24 +1370,17 @@ impl BinanceClient {
                 symbol: ref s,
                 o: order,
             } => {
-                tracing::debug!["Connect ws start {:?}", &self];
+                tracing::trace!["Connect ws start {:?}", &self];
                 let res = self.cancel_order(&s, &id).await;
                 match res {
                     Ok(_) => {}
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        tracing::error!(
-                            "{}",
-                            anyhow!["{:?} Unable to  e:{}", i.clone(), e.context(ERR_CTX)]
-                        );
+                        tracing::error!("{}", anyhow!["Unable to cancel order:{}", e]);
                         return BinResponse::Failure((string_error, GeneralError::Generic));
                     }
                 };
-                let (order_type, order_side, price, _stop_price, quantity) =
-                    parse_order_to_ba(&order);
-                let res = self
-                    .send_new_order(&s, order_type, order_side, price, quantity)
-                    .await;
+                let res = self.send_new_order(&s, &order).await;
                 let resp = match res {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
@@ -1331,7 +1392,16 @@ impl BinanceClient {
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
-                tracing::debug!["Connect ws end {:?}", &self];
+                let res = self.get_open_orders_binance().await;
+                match res {
+                    Ok(_) => (),
+                    Err(e) => {
+                        tracing::error!["Get binance orders error! {}", e];
+                    }
+                };
+                let live_inf = self.live_info.clone();
+                let mut live_i = live_inf.lock().expect("Unable to unlock live_info mutex");
+                self.live_orders = live_i.live_orders.clone();
                 resp
             }
             BinInstructs::CancelAllOrders { symbol: ref s } => {
@@ -1345,37 +1415,41 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        tracing::error!(
-                            "{}",
-                            anyhow![
-                                "{:?} Unable to sell_now e:{}",
-                                i.clone(),
-                                e.context(ERR_CTX)
-                            ]
-                        );
+                        tracing::error!("Unable to cancel all orders! {}", e);
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
+                let res = self.get_open_orders_binance().await;
+                match res {
+                    Ok(_) => (),
+                    Err(e) => {
+                        tracing::error!["Get binance orders error! {}", e];
+                    }
+                };
+                let live_inf = self.live_info.clone();
+                let mut live_i = live_inf.lock().expect("Unable to unlock live_info mutex");
+                self.live_orders = live_i.live_orders.clone();
                 resp
             }
             BinInstructs::ChangeLiveAsset {
                 symbol: ref s,
                 defualt_symbol: ref ss,
             } => {
-                let res=validate_asset_binance(s).await;
-                match res{
-                    Ok(ans)=>{
-                        match ans{
-                            true=>(),
-                            false=>{
-                                tracing::error!["Cannot find asset on binance:{}",s];
-                                return BinResponse::Failure((format!["Cannot find asset on binance:{}",s], GeneralError::Generic));
-                            }
+                let res = validate_asset_binance(s).await;
+                match res {
+                    Ok(ans) => match ans {
+                        true => (),
+                        false => {
+                            tracing::error!["Cannot find asset on binance:{}", s];
+                            return BinResponse::Failure((
+                                format!["Cannot find asset on binance:{}", s],
+                                GeneralError::Generic,
+                            ));
                         }
                     },
-                    Err(e)=>{
-                        tracing::error!["Validate binance asset error:{}",e];
-                        return BinResponse::Failure((format!["{}",e], GeneralError::Generic));
+                    Err(e) => {
+                        tracing::error!["Validate binance asset error:{}", e];
+                        return BinResponse::Failure((format!["{}", e], GeneralError::Generic));
                     }
                 };
                 let res = self.get_ws_params(s, &Intv::default(), false).await;
@@ -1405,9 +1479,17 @@ impl BinanceClient {
                         params
                     }
                 };
-                self.ws_tick.sub_params=params.clone();
-                self.current_symbol=s.clone();
-                tracing::debug!["Live re-connect params {:?}",params];
+                tracing::trace!["Live re-connect params {:?}", params];
+                let res = self.ws_tick.as_mut();
+                match res {
+                    Some(ws_tick) => {
+                        ws_tick.sub_params = params;
+                    }
+                    None => {
+                        tracing::error!["WS tick should be SOME here, CHANGE LIVE ASSET"];
+                    }
+                };
+                self.current_symbol = s.clone();
                 self.disconnect_ws().await;
                 BinResponse::Success
             }
@@ -1415,45 +1497,192 @@ impl BinanceClient {
         }
     }
 }
+//NOTE this is a really dumb way to reduce precision but it works and I haven't found better...
+trait To6Fig<T> {
+    fn to_6fig(&self) -> T;
+}
+impl To6Fig<f64> for f64 {
+    fn to_6fig(&self) -> f64 {
+        (self * 100_000.0).trunc() / 100_000.0
+    }
+}
+impl To6Fig<f32> for f32 {
+    fn to_6fig(&self) -> f32 {
+        (self * 100_000.0).trunc() / 100_000.0
+    }
+}
 
-fn parse_order_to_ba(order: &Order) -> (OrderType, OrderSide, f64, f64, f64) {
-    //async fn send_new_order(&self, sym:String, otype: OrderType, sid:OrderSide, pric:f64, quant:f64)
-    tracing::debug!["Order to parse:{:?}", &order];
-    let res: (OrderType, bool, f64, f64, f64) = match order {
-        Order::Market { buy: b, quant: q } => (OrderType::Market, *b, 0.0, 0.0, q.get_f64()),
+fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
+    let (side, order_type, quantity, qoute_qnt, price, stop_price): (
+        OrderSide,
+        OrderType,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+    ) = match o {
+        Order::Market { buy: b, quant: q } => {
+            let (side, quant) = match b {
+                true => {
+                    let quant = q.get_f64() * a2;
+                    (OrderSide::Buy, quant)
+                }
+                false => {
+                    let quant = q.get_f64() * a1;
+                    (OrderSide::Sell, quant)
+                }
+            };
+            (side, OrderType::Market, None, None, None, None)
+        }
         Order::Limit {
             buy: b,
-            quant: q,
             price: p,
-            limit_status: _,
-        } => (OrderType::Limit, *b, *p, 0.0, q.get_f64()),
+            limit_status: _li,
+            quant: q,
+        } => {
+            let (side, quant) = match b {
+                true => {
+                    let quant = q.get_f64() * a1 / p;
+                    //FIXME find a way to divide this correcrly.... minimum step size
+                    //get lot siz&e, chekc that quantity is correct
+                    /*
+                    eprintln!["Quantity: {}",q.get_f64()];
+                    eprintln!["Price: {}",p];
+                    eprintln!["A2: {}",a2];
+                    eprintln!["A1: {}",a1];
+                    eprintln!["quant: {}",quant];
+                    eprintln!["qq: {}",qq];
+                     * */
+                    (OrderSide::Buy, quant.to_6fig())
+                }
+                false => {
+                    let quant = q.get_f64() * a2 * p;
+                    (OrderSide::Sell, quant.to_6fig())
+                }
+            };
+            (
+                side,
+                OrderType::Limit,
+                Some(quant),
+                None,
+                Some(p.clone()),
+                None,
+            )
+        }
         Order::StopLimit {
             buy: b,
-            quant: q,
             price: p,
-            limit_status: _,
             stop_price: sp,
-            stop_status: _,
-        } => (OrderType::StopLossLimit, *b, *p, *sp as f64, q.get_f64()),
+            stop_status: _s,
+            limit_status: _li,
+            quant: q,
+        } => {
+            let (side, quant) = match b {
+                true => {
+                    let quant = q.get_f64() * a1 / p;
+                    (OrderSide::Buy, quant.to_6fig())
+                }
+                false => {
+                    let quant = q.get_f64() * a2 * p;
+                    (OrderSide::Sell, quant.to_6fig())
+                }
+            };
+            (
+                side,
+                OrderType::StopLossLimit,
+                Some(quant),
+                None,
+                Some(p.clone()),
+                Some(sp.to_6fig().clone() as f64),
+            )
+        }
         Order::StopMarket {
             buy: b,
-            quant: q,
             price: p,
-            stop_status: _,
-        } => (OrderType::StopLoss, *b, *p, 0.0, q.get_f64()),
-        Order::None => {
-            panic!("Order none should never be parsed!")
+            stop_status: _s,
+            quant: q,
+        } => {
+            let (side, quant) = match b {
+                true => {
+                    let quant = q.get_f64() * a1 / p;
+                    (OrderSide::Buy, quant.to_6fig())
+                }
+                false => {
+                    let quant = q.get_f64() * a2 * p;
+                    (OrderSide::Sell, quant.to_6fig())
+                }
+            };
+            (
+                side,
+                OrderType::StopLoss,
+                Some(quant),
+                None,
+                Some(p.clone()),
+                None,
+            )
+        }
+        _ => panic!(),
+    };
+    OrderRequest {
+        symbol: sym.to_string(),
+        side,
+        order_type,
+        time_in_force: Some(TimeInForce::GTC),
+        quantity,
+        quote_order_qty: None,
+        price: price,
+        new_client_order_id: None,
+        stop_price,
+        iceberg_qty: None,
+        new_order_resp_type: None,
+        recv_window: None,
+    }
+}
+
+fn from_binance_order(bo: &BinanceOrder, locked_a1: &f64, locked_a2: &f64) -> Result<Order> {
+    let (side, quant) = match bo.side {
+        OrderSide::Buy => {
+            let quant = Quant::from_f64(bo.orig_qty / locked_a2);
+            (true, quant)
+        }
+        OrderSide::Sell => {
+            let quant = Quant::from_f64(bo.orig_qty / locked_a1);
+            (false, quant)
         }
     };
-    let side;
-    if res.1 == true {
-        side = OrderSide::Buy;
-    } else {
-        side = OrderSide::Sell;
+    match bo.order_type {
+        OrderType::Market => Ok(Order::Market { buy: side, quant }),
+        OrderType::Limit => {
+            let limit_status = {
+                if bo.executed_qty == 0.0 {
+                    LimitStatus::Untouched
+                } else {
+                    if 0.0 <= bo.executed_qty && bo.executed_qty <= bo.orig_qty {
+                        LimitStatus::PartFilled {
+                            percent_fill: (bo.orig_qty / bo.executed_qty) as f32,
+                        }
+                    } else {
+                        LimitStatus::FullyFilled
+                    }
+                }
+            };
+            Ok(Order::Limit {
+                buy: side,
+                quant,
+                price: bo.price,
+                limit_status,
+            })
+        }
+        OrderType::StopLoss => {
+            todo!()
+        }
+        OrderType::TakeProfit => {
+            todo!()
+        }
+        _ => Err(anyhow!["Unsupporder order type from Binance!"]),
     }
-    tracing::debug!["End order parsed:{:?}", &res];
-    (res.0, side, res.2, res.3, res.4)
 }
+
 #[allow(unused)]
 #[derive(Deserialize, Debug)]
 #[allow(non_snake_case)]

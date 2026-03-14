@@ -27,7 +27,7 @@ use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
 
 use bincode::{Decode, Encode, config};
-use chrono::{DateTime, Datelike, Utc, Local};
+use chrono::{DateTime, Datelike, Local, Utc};
 use derive_debug::Dbg;
 use magic_crypt::{MagicCryptTrait, new_magic_crypt};
 
@@ -140,12 +140,19 @@ impl KlinePlot {
         ui: &mut egui::Ui,
         live_ad: Arc<Mutex<AssetData>>,
         collected_data: Option<&HashMap<String, SymbolOutput>>,
-        _live_info: Option<&mut LiveInfo>,
+        live_info: Option<&mut LiveInfo>,
         return_wicks: Option<usize>,
         last_price_hist: Option<&mut f64>,
         hist_symbol_info: Option<&mut (String, String, String)>,
     ) -> Option<Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>> {
         let ad = live_ad.lock().expect("Live AD mutex locked");
+        if let Some(live_inf) = live_info {
+            live_inf.live_asset_symbol_changed = ad.live_asset_symbol_changed.clone();
+            live_inf.acc_balances = ad.acc_balances.clone();
+            live_inf.current_pair_strings = ad.current_pair_strings.clone();
+            live_inf.current_pair_free_balances = ad.current_pair_free_balances.clone();
+            live_inf.current_pair_locked_balances = ad.current_pair_locked_balances.clone();
+        };
         let ret = match return_wicks {
             Some(ret_wicks) => {
                 let ret = ad.kline_data.get(&self.symbol);
@@ -477,7 +484,6 @@ impl KlinePlot {
         self.static_loaded = true;
         return Ok(());
     }
-    //#[instrument(level="debug")]
     fn live_from_ad(
         &mut self,
         ad: &AssetData,
@@ -834,7 +840,7 @@ fn x_format_1min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -855,7 +861,7 @@ fn x_format_3min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -876,7 +882,7 @@ fn x_format_5min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -897,7 +903,7 @@ fn x_format_15min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -918,7 +924,7 @@ fn x_format_30min(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -939,7 +945,7 @@ fn x_format_1h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -959,7 +965,7 @@ fn x_format_2h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -980,7 +986,7 @@ fn x_format_4h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -1002,7 +1008,7 @@ fn x_format_6h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -1023,7 +1029,7 @@ fn x_format_8h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -1044,7 +1050,7 @@ fn x_format_12h(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -1065,7 +1071,7 @@ fn x_format_1d(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -1086,7 +1092,7 @@ fn x_format_3d(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -1107,7 +1113,7 @@ fn x_format_1w(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -1128,7 +1134,7 @@ fn x_format_1mo(gridmark: GridMark, range: &RangeInclusive<f64>) -> String {
     let res = DateTime::<Utc>::from_timestamp(fixed_gridmark, 0);
     let date_time = match res {
         Some(dt) => {
-            let d:DateTime::<Local>=dt.into();
+            let d: DateTime<Local> = dt.into();
             d
         }
         None => {
@@ -1424,6 +1430,7 @@ pub struct LiveInfo {
     pub current_pair_locked_balances: (f64, f64),
     pub live_orders: HashMap<i32, (Order, bool)>,
     pub keys_status: KeysStatus,
+    pub live_info_changed: bool,
 }
 
 #[derive(Dbg)]
@@ -1740,6 +1747,7 @@ pub struct ManualOrders {
 
     hotkeys: bool,
     single_order_mode: bool,
+    so_mode: SingleOrderMode,
 
     current_symbol: String,
 
@@ -1783,10 +1791,10 @@ pub struct ManualOrders {
     trade_slice_loaded: bool,
 }
 
-//TODO find a way to group GUI elements together. The horror...
 impl Default for ManualOrders {
     fn default() -> Self {
         Self {
+            so_mode: SingleOrderMode::default(),
             last_slice_time: DateTime::<Utc>::default(),
             eval_mode: EvalMode::default(),
             man_orders: None,
@@ -1852,6 +1860,26 @@ fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLin
         })
         .collect::<Vec<_>>();
 }
+macro_rules! make_hotkey_ctrl{
+    ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
+        {
+            if *$($hk_active)* {
+                let shift_mod=Modifiers {
+                        ctrl: true,
+                        ..Default::default()
+                };
+                let sh=KeyboardShortcut{
+                    modifiers:shift_mod,
+                    logical_key:$($k)*::$($key)*,
+
+                };
+                $($ui)*.ctx().input_mut(|i| i.consume_shortcut(&sh))
+            }else{
+                false
+            }
+        }
+    };
+}
 
 macro_rules! make_hotkey_alt{
     ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
@@ -1910,6 +1938,133 @@ const K1: f32 = 1.01;
 const K1_INC: f32 = 0.001;
 
 #[allow(unused)]
+#[derive(Clone, Default, Debug)]
+pub struct SingleOrderMode {
+    hk_active: bool,
+    order: Order,
+    order_active: bool,
+    asset1_held: bool,
+    order_active_after_change: bool,
+    k0_n: usize,
+    k1_n: usize,
+
+    k0_intv_s: String,
+    k1_intv_s: String,
+
+    k0_i: f32,
+    k1_i: f32,
+
+    parse_ks: bool,
+    place_order: bool,
+}
+#[allow(unused)]
+impl SingleOrderMode {
+    fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        last_price: &f64,
+        cli_chan: watch::Sender<ClientInstruct>,
+        hist_orders: Option<&mut HashMap<i32, (Order, bool)>>,
+        sym: &str,
+    ) {
+        let hk_active = &self.hk_active;
+
+        ui.checkbox(
+            &mut self.order_active_after_change,
+            "Order stays active after change",
+        );
+
+        ui.add(egui::TextEdit::singleline(&mut self.k0_intv_s).hint_text("K1"));
+        ui.add(egui::TextEdit::singleline(&mut self.k1_intv_s).hint_text("K2"));
+        ui.end_row();
+
+        let trade_forward = make_hotkey_shift![Key, L, ui, hk_active];
+        let delete_all_orders = make_hotkey_alt![Key, D, ui, hk_active];
+        if delete_all_orders {
+            if let Some(ref ho) = hist_orders {
+            } else {
+                let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
+                    symbol: sym.to_string(),
+                });
+                let _res = cli_chan.send(msg);
+            };
+        };
+
+        if self.asset1_held == true {
+            let qoute_asset_now = make_hotkey_ctrl![Key, R, ui, hk_active];
+            if qoute_asset_now && hist_orders.is_none() {
+                let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
+                    symbol: sym.to_string(),
+                });
+                let _res = cli_chan.send(msg);
+                //FIXME this might brick... test test TEST TEST
+                let msg = ClientInstruct::SendBinInstructs(BinInstructs::PlaceOrder {
+                    symbol: sym.to_string(),
+                    o: Order::Market {
+                        buy: false,
+                        quant: Quant::Q100,
+                    },
+                });
+                let _res = cli_chan.send(msg);
+            }
+        };
+        if self.parse_ks {
+            let res = &self.k0_intv_s.parse::<f32>();
+            self.k0_i = match res {
+                Ok(pp) => *pp,
+                Err(e) => {
+                    tracing::error!["Unable to parse k0 string! {}", e];
+                    self.k0_intv_s = "0.0".to_string();
+                    0.0
+                }
+            };
+            let res = &self.k1_intv_s.parse::<f32>();
+            self.k1_i = match res {
+                Ok(pp) => *pp,
+                Err(e) => {
+                    tracing::error!["Unable to parse k1 string! {}", e];
+                    self.k1_intv_s = "0.0".to_string();
+                    0.0
+                }
+            };
+            self.parse_ks = false;
+        };
+        if self.place_order {
+            if let Some(ref ho) = hist_orders {
+                //FIXME - place hist orders here
+            } else {
+                if self.order_active {
+                    //FIXME - place live orders here
+                    //
+                    //
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::PlaceOrder {
+                        symbol: sym.to_string(),
+                        o: self.order,
+                    });
+                    let _res = cli_chan.send(msg);
+                }
+            }
+            self.place_order = false;
+        };
+        hotkey_order_single(
+            last_price,
+            ui,
+            &self.hk_active,
+            &mut self.order,
+            &mut self.order_active,
+            &self.asset1_held,
+            &self.order_active_after_change,
+            &mut self.k0_n,
+            &mut self.k1_n,
+            &self.k0_i,
+            &self.k1_i,
+            &mut self.parse_ks,
+            &mut self.place_order,
+        );
+    }
+}
+
+#[allow(unused)]
 fn hotkey_order_single(
     last_price: &f64,
     ui: &mut egui::Ui,
@@ -1920,6 +2075,10 @@ fn hotkey_order_single(
     order_active_after_change: &bool,
     k0_n: &mut usize,
     k1_n: &mut usize,
+    k0_i: &f32,
+    k1_i: &f32,
+    parse_ks: &mut bool,
+    place_order: &mut bool,
 ) {
     *order_active = make_hotkey_shift![Key, A, ui, hk_active];
     let quant = Quant::Q100;
@@ -2002,7 +2161,7 @@ fn hotkey_order_single(
                 Order::Limit {
                     buy: *b,
                     quant: *q,
-                    price: *p * (K0 as f64 + K0_INC as f64 * (*k0_n as f64)),
+                    price: *p * (K0 as f64 + *k0_i as f64 * (*k0_n as f64)),
                     limit_status: *ll,
                 }
             }
@@ -2015,13 +2174,18 @@ fn hotkey_order_single(
                 stop_price: sp,
             } => {
                 *k0_n += 1;
+                let kk = (K1 as f64 + *k0_i as f64 * (*k1_n as f64));
+                let k1_computed = match b {
+                    true => *p / kk,
+                    false => *p * kk,
+                };
                 Order::StopLimit {
                     buy: *b,
                     quant: *q,
-                    price: *p * (K0 as f64 + K0_INC as f64 * (*k0_n as f64)),
+                    price: *p * (K0 as f64 + *k0_i as f64 * (*k0_n as f64)),
                     limit_status: *sl,
                     stop_status: *ll,
-                    stop_price: *sp,
+                    stop_price: kk as f32,
                 }
             }
             Order::StopMarket {
@@ -2034,7 +2198,7 @@ fn hotkey_order_single(
                 Order::StopMarket {
                     buy: *b,
                     quant: *q,
-                    price: *p * (K0 as f64 + K0_INC as f64 * (*k0_n as f64)),
+                    price: *p * (K0 as f64 + *k0_i as f64 * (*k0_n as f64)),
                     stop_status: *ll,
                 }
             }
@@ -2071,7 +2235,7 @@ fn hotkey_order_single(
                     price: *p,
                     limit_status: *sl,
                     stop_status: *ll,
-                    stop_price: *sp * (K1 as f32 + K1_INC * (*k1_n as f32)),
+                    stop_price: *sp * (K1 as f32 + *k1_i * (*k1_n as f32)),
                 }
             }
             Order::StopMarket {
@@ -2430,68 +2594,64 @@ impl ManualOrders {
                 tracing::error!["This shouldn't happen manual_orders"]
             }
         };
-        egui::Grid::new("Current symboll:")
-            .striped(true)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    /*
-                    ui.label(
-                        RichText::new(format!["Current asset: {}", man_orders.current_symbol])
-                            .color(Color32::WHITE),
-                    );
-                    */
-                    ui.end_row();
-                });
-            });
-        ui.end_row();
-        egui::Grid::new("Man order assets:")
-            .striped(true)
-            .show(ui, |ui| {
-                ui.add_sized(
-                    egui::vec2(50.0, 20.0),
-                    egui::Label::new(
-                        RichText::new(format![
-                            "{}:{:.2}",
-                            man_orders.asset1_name, man_orders.asset1
-                        ])
-                        .color(Color32::from_rgb(255, 207, 38)),
-                    ),
+        egui::Grid::new("Current symboll:").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                /*
+                ui.label(
+                    RichText::new(format!["Current asset: {}", man_orders.current_symbol])
+                        .color(Color32::WHITE),
                 );
-                if man_orders.asset1_locked != 0.0 {
-                    ui.add_sized(
-                        egui::vec2(50.0, 20.0),
-                        egui::Label::new(
-                            RichText::new(format!["(locked):{:.2}", man_orders.asset1_locked])
-                                .color(Color32::from_rgb(247, 235, 150)),
-                        ),
-                    );
-                };
-                ui.add_sized(
-                    egui::vec2(50.0, 20.0),
-                    egui::Label::new(
-                        RichText::new(format![
-                            "{}:{:.2}",
-                            man_orders.asset2_name, man_orders.asset2
-                        ])
-                        .color(Color32::from_rgb(71, 200, 38)),
-                    ),
-                );
-                if man_orders.asset2_locked != 0.0 {
-                    ui.add_sized(
-                        egui::vec2(50.0, 20.0),
-                        egui::Label::new(
-                            RichText::new(format!["(locked):{:.2}", man_orders.asset2_locked])
-                                .color(Color32::from_rgb(212, 242, 150)),
-                        ),
-                    );
-                };
+                */
                 ui.end_row();
             });
+        });
         ui.end_row();
-        egui::Grid::new("Last price:").striped(true).show(ui, |ui| {
+        egui::Grid::new("Man order assets:").show(ui, |ui| {
+            ui.add_sized(
+                egui::vec2(50.0, 20.0),
+                egui::Label::new(
+                    RichText::new(format![
+                        "{}:{:.2}",
+                        man_orders.asset1_name, man_orders.asset1
+                    ])
+                    .color(Color32::from_rgb(255, 207, 38)),
+                ),
+            );
+            if man_orders.asset1_locked != 0.0 {
+                ui.add_sized(
+                    egui::vec2(50.0, 20.0),
+                    egui::Label::new(
+                        RichText::new(format!["(locked):{:.2}", man_orders.asset1_locked])
+                            .color(Color32::from_rgb(247, 235, 150)),
+                    ),
+                );
+            };
+            ui.add_sized(
+                egui::vec2(50.0, 20.0),
+                egui::Label::new(
+                    RichText::new(format![
+                        "{}:{:.2}",
+                        man_orders.asset2_name, man_orders.asset2
+                    ])
+                    .color(Color32::from_rgb(71, 200, 38)),
+                ),
+            );
+            if man_orders.asset2_locked != 0.0 {
+                ui.add_sized(
+                    egui::vec2(50.0, 20.0),
+                    egui::Label::new(
+                        RichText::new(format!["(locked):{:.2}", man_orders.asset2_locked])
+                            .color(Color32::from_rgb(212, 242, 150)),
+                    ),
+                );
+            };
+            ui.end_row();
+        });
+        ui.end_row();
+        egui::Grid::new("Last price:").show(ui, |ui| {
             ui.horizontal(|ui| {
-                //ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
-                //ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
+                ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
+                ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
                 ui.label(
                     RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
                 );
@@ -2539,7 +2699,7 @@ impl ManualOrders {
         };
         ui.end_row();
 
-        egui::Grid::new("parent grid").striped(true).show(ui, |ui| {
+        egui::Grid::new("parent grid").show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.end_row();
 
@@ -2842,6 +3002,14 @@ impl ManualOrders {
                         };
                     };
                 };
+                if ui.button("Cancel all").clicked() {
+                    if let Some(live_inf) = live_info {
+                        let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
+                            symbol: live_inf.live_asset_symbol_changed.1.clone(),
+                        });
+                        let _res = cli_chan.send(msg);
+                    };
+                };
                 if let Some(live_inf) = live_info {
                     man_orders.orders = live_inf.live_orders.clone();
 
@@ -2875,6 +3043,7 @@ impl ManualOrders {
             });
             ui.vertical(|ui| {
                 let available_height = ui.available_height();
+
                 let table = TableBuilder::new(ui)
                     .resizable(true)
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -2975,7 +3144,14 @@ impl ManualOrders {
         trade_slice: Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]>,
         symbol_info: Option<&(String, String, String)>,
     ) {
-        todo!()
+        ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
+        man_orders.so_mode.show(
+            ui,
+            last_price,
+            cli_chan,
+            Some(&mut man_orders.orders),
+            &man_orders.current_symbol,
+        );
     }
     fn show(
         man_orders: &mut ManualOrders,
@@ -3091,33 +3267,31 @@ impl LivePlot {
             live_plot.kline_plot.intv = live_plot.intv;
             live_plot.reload = false;
         };
-        egui::Grid::new("Lplot order assets:")
-            .striped(true)
-            .show(ui, |ui| {
-                egui::ComboBox::from_label("")
-                    .selected_text(format!("{}", live_plot.intv.to_str()))
-                    .show_ui(ui, |ui| {
-                        for i in Intv::iter() {
-                            ui.selectable_value(&mut live_plot.intv, i, i.to_str());
-                        }
-                    });
-                ui.add_sized(
-                    egui::vec2(100.0, 20.0),
-                    egui::TextEdit::singleline(&mut live_plot.search_string)
-                        .hint_text("Search for asset"),
-                );
-                if ui.button("Search").clicked() {
-                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset {
-                        symbol: live_plot.search_string.clone(),
-                        defualt_symbol: live_plot.default_symbol.clone(),
-                    });
-                    let _res = cli_chan.send(msg);
-                };
-                if ui.button("Reload chart").clicked() {
-                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::Disconnect);
-                    let _res = cli_chan.send(msg);
-                };
-            });
+        egui::Grid::new("Lplot order assets:").show(ui, |ui| {
+            egui::ComboBox::from_label("")
+                .selected_text(format!("{}", live_plot.intv.to_str()))
+                .show_ui(ui, |ui| {
+                    for i in Intv::iter() {
+                        ui.selectable_value(&mut live_plot.intv, i, i.to_str());
+                    }
+                });
+            ui.add_sized(
+                egui::vec2(100.0, 20.0),
+                egui::TextEdit::singleline(&mut live_plot.search_string)
+                    .hint_text("Search for asset"),
+            );
+            if ui.button("Search").clicked() {
+                let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset {
+                    symbol: live_plot.search_string.clone(),
+                    defualt_symbol: live_plot.default_symbol.clone(),
+                });
+                let _res = cli_chan.send(msg);
+            };
+            if ui.button("Reload chart").clicked() {
+                let msg = ClientInstruct::SendBinInstructs(BinInstructs::Disconnect);
+                let _res = cli_chan.send(msg);
+            };
+        });
     }
 }
 
@@ -3275,7 +3449,7 @@ impl Settings {
         }
     }
     pub fn verify_password_req(password: &str) -> bool {
-        if password.len() < 15 {
+        if password.len() < 17 {
             return false;
         };
         //FIXME add more requirements
@@ -3290,12 +3464,10 @@ impl Settings {
         settings.balances = live_info.acc_balances.clone();
         settings.key_status = live_info.keys_status;
 
-
         egui::Grid::new("Account")
-            .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
-            ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
+                ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
                 ui.label(RichText::new(format!["BINANCE KEYS",]).color(Color32::YELLOW));
                 ui.end_row();
                 ui.add_sized(
@@ -3326,15 +3498,15 @@ impl Settings {
                     let _res = cli_chan.send(msg);
                     settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
                     settings.binance_priv_key = Some(settings.priv_api_key_enter_string.clone());
-                    let pass=settings.password_string.clone();
+                    let pass = settings.password_string.clone();
                     settings.password_string = String::default();
                     settings.api_key_enter_string = String::default();
                     settings.priv_api_key_enter_string = String::default();
                     if settings.enc_api_keys == true {
                         let _res = settings.encrypt_keys(pass);
                     };
-                    //NOTE not sure if this is OK... better way to shred strings
                 };
+                ui.end_row();
                 if ui.button("Remove keys").clicked() {
                     settings.api_key_enter_string = String::default();
                     settings.priv_api_key_enter_string = String::default();
@@ -3346,23 +3518,26 @@ impl Settings {
                     let _res = cli_chan.send(msg);
                     tracing::info!["Api removed"];
                 };
+                ui.end_row();
                 if ui.button("Unlock keys").clicked() {
                     let res = settings.decrypt_keys(settings.password_string.clone());
-                    match res{
-                        Ok(_)=>{
+                    match res {
+                        Ok(_) => {
                             tracing::info!["Api keys decrypted"];
-                            if let (Some(pub_key),Some(priv_key))=(settings.binance_pub_key.clone(),settings.binance_priv_key.clone()){
-                                let msg = ClientInstruct::SendBinInstructs(BinInstructs::AddReplaceApiKeys {
-                                    pub_key,
-                                    priv_key,
-                                });
+                            if let (Some(pub_key), Some(priv_key)) = (
+                                settings.binance_pub_key.clone(),
+                                settings.binance_priv_key.clone(),
+                            ) {
+                                let msg = ClientInstruct::SendBinInstructs(
+                                    BinInstructs::AddReplaceApiKeys { pub_key, priv_key },
+                                );
                                 let _res = cli_chan.send(msg);
-                            }else{
+                            } else {
                                 tracing::error!["API keys none!"]
                             };
                         }
-                        Err(e)=>{
-                            tracing::error!["Decrypt keys error:{}",e];
+                        Err(e) => {
+                            tracing::error!["Decrypt keys error:{}", e];
                         }
                     };
                 };
@@ -3383,10 +3558,17 @@ impl Settings {
                 };
             });
         egui::Grid::new("Application settings")
-            .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
                 ui.label(RichText::new(format!["APPLICATION SETTINGS",]).color(Color32::YELLOW));
+                ui.end_row();
+                ui.label(RichText::new(format!["Default Symbol",]).color(Color32::WHITE));
+                ui.end_row();
+                ui.add_sized(
+                    egui::vec2(100.0, 20.0),
+                    egui::TextEdit::singleline(&mut settings.default_asset)
+                        .hint_text("Set default symbol"),
+                );
                 ui.end_row();
                 ui.checkbox(
                     &mut settings.save_api_keys,
@@ -3406,9 +3588,9 @@ impl Settings {
 
                             settings.save_settings_file(Some(settings.password_string.clone()))
                         } else {
-
                             settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
-                            settings.binance_priv_key = Some(settings.priv_api_key_enter_string.clone());
+                            settings.binance_priv_key =
+                                Some(settings.priv_api_key_enter_string.clone());
 
                             settings.api_key_enter_string = String::default();
                             settings.priv_api_key_enter_string = String::default();
@@ -3437,11 +3619,51 @@ impl Settings {
                     let msg = ClientInstruct::UpdateSettings(sett);
                     let _res = cli_chan.send(msg);
                 };
+                if ui.button("Load settings").clicked() {
+                    let pass = if settings.password_string.is_empty() {
+                        Some(settings.password_string.clone())
+                    } else {
+                        None
+                    };
+                    let res = Settings::load_settings_file(pass);
+                    match res {
+                        Ok(s) => match s {
+                            Some(s) => {
+                                *settings = s;
+                            }
+                            None => {
+                                tracing::error!["Settings file none!"];
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!["{}", e];
+                        }
+                    }
+                    match (
+                        settings.binance_pub_key.clone(),
+                        settings.binance_priv_key.clone(),
+                    ) {
+                        (Some(pub_key), Some(priv_key)) => {
+                            let msg =
+                                ClientInstruct::SendBinInstructs(BinInstructs::AddReplaceApiKeys {
+                                    pub_key,
+                                    priv_key,
+                                });
+                            let _res = cli_chan.send(msg);
+                        }
+                        (None, None) => {}
+                        _ => {}
+                    }
+                };
             });
         egui::Grid::new("Account_balances")
-            .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
+                if ui.button("Refresh balances").clicked() {
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::GetAllBalances {});
+                    let _res = cli_chan.send(msg);
+                };
+                /*
                 match &settings.key_status {
                     KeysStatus::Valid => {
                         if ui.button("Refresh balances").clicked() {
@@ -3452,6 +3674,7 @@ impl Settings {
                     }
                     _ => {}
                 };
+                 * */
             });
         ui.vertical(|ui| {
             ui.label(RichText::new(format!["BINANCE BLANCES",]).color(Color32::YELLOW));
@@ -3536,7 +3759,7 @@ impl Settings {
         Ok(())
     }
     pub fn save_settings_file(&mut self, password: Option<String>) -> Result<()> {
-        self.password_string=String::default();
+        self.password_string = String::default();
         match password {
             Some(pass) => {
                 let _ = self.encrypt_keys(pass);
@@ -3642,7 +3865,6 @@ impl DataManager {
         ui: &mut egui::Ui,
     ) {
         egui::Grid::new("Data Manager DL")
-            .striped(true)
             .min_col_width(30.0)
             .show(ui, |ui| {
                 ui.add_sized(
@@ -3991,126 +4213,119 @@ impl HistPlot {
         };
 
         ui.end_row();
-        egui::Grid::new("Hplot order assets:")
-            .striped(true)
-            .show(ui, |ui| {
-                egui::ComboBox::from_label("")
-                    .selected_text(format!("{}", hist_plot.intv.to_str()))
-                    .show_ui(ui, |ui| {
-                        for i in Intv::iter() {
-                            ui.selectable_value(&mut hist_plot.intv, i, i.to_str());
-                        }
-                    });
-                ui.add_sized(
-                    egui::vec2(100.0, 20.0),
-                    egui::TextEdit::singleline(&mut hist_plot.search_load_string)
-                        .hint_text("Search for asset"),
-                );
-                ui.add(
-                    egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
-                        .id_salt("trade_time"),
-                );
-                ui.add(
-                    egui::TextEdit::singleline(&mut hist_plot.trade_h_s).hint_text("Trade hours"),
-                );
-                /*
-                ui.add_sized(
-                    egui::vec2(0.5, 20.0),
-                    egui::Label::new(":"),
-                );
-                */
-                ui.add(
-                    egui::TextEdit::singleline(&mut hist_plot.trade_min_s).hint_text("Trade mins"),
-                );
-                if ui.button("Go to").clicked() {
-                    let res: Result<u16, ParseIntError> = hist_plot.trade_h_s.parse();
-                    let trade_h = match res {
-                        Ok(n) => {
-                            if n <= 23 {
-                                n
-                            } else {
-                                tracing::error!["Unable to parse hour: larger than 23"];
-                                hist_plot.trade_h_s = "00".to_string();
-                                0
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!["Parsing error for hour: {}", e];
+        egui::Grid::new("Hplot order assets:").show(ui, |ui| {
+            egui::ComboBox::from_label("")
+                .selected_text(format!("{}", hist_plot.intv.to_str()))
+                .show_ui(ui, |ui| {
+                    for i in Intv::iter() {
+                        ui.selectable_value(&mut hist_plot.intv, i, i.to_str());
+                    }
+                });
+            ui.add_sized(
+                egui::vec2(100.0, 20.0),
+                egui::TextEdit::singleline(&mut hist_plot.search_load_string)
+                    .hint_text("Search for asset"),
+            );
+            ui.add(
+                egui_extras::DatePickerButton::new(&mut hist_plot.picked_date_end)
+                    .id_salt("trade_time"),
+            );
+            ui.add(egui::TextEdit::singleline(&mut hist_plot.trade_h_s).hint_text("Trade hours"));
+            /*
+            ui.add_sized(
+                egui::vec2(0.5, 20.0),
+                egui::Label::new(":"),
+            );
+            */
+            ui.add(egui::TextEdit::singleline(&mut hist_plot.trade_min_s).hint_text("Trade mins"));
+            if ui.button("Go to").clicked() {
+                let res: Result<u16, ParseIntError> = hist_plot.trade_h_s.parse();
+                let trade_h = match res {
+                    Ok(n) => {
+                        if n <= 23 {
+                            n
+                        } else {
+                            tracing::error!["Unable to parse hour: larger than 23"];
+                            hist_plot.trade_h_s = "00".to_string();
                             0
                         }
-                    };
-                    let res: Result<u16, ParseIntError> = hist_plot.trade_min_s.parse();
-                    let trade_min = match res {
-                        Ok(n) => {
-                            if n <= 59 {
-                                n
-                            } else {
-                                tracing::error!["Unable to parse minutes: larger than 59"];
-                                hist_plot.trade_min_s = "00".to_string();
-                                0
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!["Parsing error for hour: {}", e];
-                            0
-                        }
-                    };
-                    let trade_date = hist_plot.picked_date_end.clone();
-                    let trade_time = trade_date
-                        .and_hms_opt(trade_h.into(), trade_min.into(), 0)
-                        .expect("Failed to parse trade time")
-                        .and_utc()
-                        .timestamp_millis();
-                    tracing::trace!["GO to>> END: {}", trade_time];
-                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
-                        symbol: hist_plot.search_load_string.clone(),
-                        trade_time: trade_time,
-                        backload_wicks: BACKLOAD_WICKS,
-                    });
-                    hist_plot.kline_plot.symbol = hist_plot.search_load_string.clone();
-                    hist_plot.trade_time = trade_time;
-                    let _res = cli_chan.send(msg);
+                    }
+                    Err(e) => {
+                        tracing::error!["Parsing error for hour: {}", e];
+                        0
+                    }
                 };
-                //ui.end_row();
-                if ui.button("Trade N wicks >>").clicked() {
-                    let res: Result<u16, ParseIntError> = hist_plot.trade_wicks_s.parse();
-                    let n_wicks = match res {
-                        Ok(n) => n,
-                        Err(e) => {
-                            tracing::error!["Parsing error for trade wicks: {}", e];
-                            hist_plot.trade_wicks_s = format!["{}", DEFAULT_TRADE_WICKS];
-                            DEFAULT_TRADE_WICKS
+                let res: Result<u16, ParseIntError> = hist_plot.trade_min_s.parse();
+                let trade_min = match res {
+                    Ok(n) => {
+                        if n <= 59 {
+                            n
+                        } else {
+                            tracing::error!["Unable to parse minutes: larger than 59"];
+                            hist_plot.trade_min_s = "00".to_string();
+                            0
                         }
-                    };
+                    }
+                    Err(e) => {
+                        tracing::error!["Parsing error for hour: {}", e];
+                        0
+                    }
+                };
+                let trade_date = hist_plot.picked_date_end.clone();
+                let trade_time = trade_date
+                    .and_hms_opt(trade_h.into(), trade_min.into(), 0)
+                    .expect("Failed to parse trade time")
+                    .and_utc()
+                    .timestamp_millis();
+                tracing::trace!["GO to>> END: {}", trade_time];
+                let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
+                    symbol: hist_plot.search_load_string.clone(),
+                    trade_time: trade_time,
+                    backload_wicks: BACKLOAD_WICKS,
+                });
+                hist_plot.kline_plot.symbol = hist_plot.search_load_string.clone();
+                hist_plot.trade_time = trade_time;
+                let _res = cli_chan.send(msg);
+            };
+            //ui.end_row();
+            if ui.button("Trade N wicks >>").clicked() {
+                let res: Result<u16, ParseIntError> = hist_plot.trade_wicks_s.parse();
+                let n_wicks = match res {
+                    Ok(n) => n,
+                    Err(e) => {
+                        tracing::error!["Parsing error for trade wicks: {}", e];
+                        hist_plot.trade_wicks_s = format!["{}", DEFAULT_TRADE_WICKS];
+                        DEFAULT_TRADE_WICKS
+                    }
+                };
 
-                    hist_plot.navi_wicks = n_wicks;
+                hist_plot.navi_wicks = n_wicks;
 
-                    let new_trade_time =
-                        hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
-                    tracing::trace![
-                        "Trade >> START: {} END: {}",
-                        &hist_plot.trade_time,
-                        &new_trade_time
-                    ];
-                    let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
-                        symbol: hist_plot.search_load_string.clone(),
-                        trade_time: new_trade_time,
-                        backload_wicks: BACKLOAD_WICKS,
-                    });
-                    let _res = cli_chan.send(msg);
-                    hist_plot.trade_time = new_trade_time;
-                    hist_plot.trade_slice_loaded = true;
-                    //FIXME click here
-                    //
-                    //
-                    //
-                    //
-                }
-                ui.add(
-                    egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s)
-                        .hint_text("Trade N wicks"),
-                );
-                ui.end_row();
-            });
+                let new_trade_time =
+                    hist_plot.trade_time + hist_plot.intv.to_ms() * (n_wicks as i64);
+                tracing::trace![
+                    "Trade >> START: {} END: {}",
+                    &hist_plot.trade_time,
+                    &new_trade_time
+                ];
+                let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadHistDataPart2 {
+                    symbol: hist_plot.search_load_string.clone(),
+                    trade_time: new_trade_time,
+                    backload_wicks: BACKLOAD_WICKS,
+                });
+                let _res = cli_chan.send(msg);
+                hist_plot.trade_time = new_trade_time;
+                hist_plot.trade_slice_loaded = true;
+                //FIXME click here
+                //
+                //
+                //
+                //
+            }
+            ui.add(
+                egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s).hint_text("Trade N wicks"),
+            );
+            ui.end_row();
+        });
     }
 }

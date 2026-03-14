@@ -18,7 +18,7 @@ use eframe::EventLoopBuilderHook;
 use eframe::egui;
 use winit::platform::wayland::EventLoopBuilderExtWayland;
 
-use crate::conn::{BinanceClient, SymbolOutput};
+use crate::conn::{BinanceClient, SymbolOutput, get_exchange_info};
 use crate::data::{AssetData, Intv, SQLConn};
 use crate::gui::{DesktopApp, LiveInfo, Settings};
 
@@ -27,7 +27,14 @@ use anyhow::{Context, Result};
 const ERR_CTX: &str = "Main client";
 
 pub fn load_settings() -> Result<Settings> {
-    let res = Settings::load_settings_enc()?;
+    let r = Settings::load_settings_enc();
+    let res = match r {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!["{}", e];
+            None
+        }
+    };
     let sett = match res {
         Some(settings) => settings,
         None => Settings::new(),
@@ -393,6 +400,10 @@ impl ClientTask {
 
     pub async fn run_main(&mut self, tasks: Vec<Tasks>, settings: Settings) {
         let mut handles: Vec<Handle<()>> = vec![];
+        let (a_key, a_sec_key) = (
+            settings.binance_pub_key.clone(),
+            settings.binance_priv_key.clone(),
+        );
         for t in tasks {
             match t {
                 Tasks::Task0Cli {} => {
@@ -418,10 +429,9 @@ impl ClientTask {
                     }
                 }
                 Tasks::Task1BinWS {
-                    ref api_key,
-                    ref api_secret,
                     ref default_symbol,
                     ref default_interval,
+                    ..
                 } => {
                     let chans = self.make_chans(&t);
                     let cancel_token = self.cancel_all.clone();
@@ -431,8 +441,8 @@ impl ClientTask {
                     let sleep_notify = self.bin_sleep.clone();
                     let lp = self.last_price.clone();
                     let live_ad = self.live_dat.clone();
-                    let a_key = api_key.clone();
-                    let a_secret = api_secret.clone();
+                    let a_key = a_key.clone();
+                    let a_secret = a_sec_key.clone();
                     let def_symb = default_symbol.clone();
                     let def_intv = default_interval.clone();
                     let bin_cli_handle = tokio::task::spawn(async move {
@@ -496,41 +506,75 @@ impl ClientTask {
     ) {
         let (send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
-        let mut cli = BinanceClient::new(
-            api_key,
-            api_secret,
-            live_collect,
-            live_price,
-            live_ad,
-            live_info,
-        );
-        tracing::info!("Binclient started");
-        cli.default_symbol=default_symbol.to_string();
-        cli.current_symbol=default_symbol.to_string();
-        cli.default_intv=default_intv;
-        let res=cli.get_def_ws_params(true).await;
-        let mut params=match res{
-            Ok(h)=>h,
-            Err(e)=>{
-                tracing::error!["Unable to get default parameters{}",e];
-                HashMap::default()
-            }
-        };
         loop {
+            let mut cli = BinanceClient::new(
+                api_key.clone(),
+                api_secret.clone(),
+                live_collect.clone(),
+                live_price.clone(),
+                live_ad.clone(),
+                live_info.clone(),
+            );
+            tracing::info!("Binclient started");
+            cli.default_symbol = default_symbol.to_string();
+            cli.current_symbol = default_symbol.to_string();
+            cli.default_intv = default_intv;
+            let res = cli.get_def_ws_params(true).await;
+            let params = match res {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::error!["Unable to get default parameters{}", e];
+                    HashMap::default()
+                }
+            };
+            let res = get_exchange_info().await;
+            match res {
+                Ok(e) => {
+                    cli.exchange_info = e;
+                }
+                Err(e) => {
+                    tracing::error!["Unable to get exchange info{}", e];
+                }
+            };
+            let mut ws_tick = cli
+                .ws_tick
+                .take()
+                .expect("Should be Some... really it should...");
+            ws_tick.sub_params = params.clone();
+
+            let cc2 = cancel_token.clone();
+            let ss2 = sleep_notify.clone();
+            let _ws_task_handle = tokio::task::spawn(async move {
+                select! {
+                    _ =BinanceClient::connect_ws(ws_tick, params.clone(), 50) =>{
+                    }
+                    _ = cc2.cancelled() => {
+                        tracing::info!("Binclient task cancelled");
+                    }
+                    _ = ss2.notified() => {
+                        tracing::info!("Binclient task put to sleep");
+                    }
+                };
+            });
+            let bin = cli.binance_client.clone();
+            let live_i = live_info.clone();
+            let cc = cancel_token.clone();
+            let ss = sleep_notify.clone();
+            let _live_info_update_handle = tokio::task::spawn(async move {
+                select! {
+                    _ = BinanceClient::check_live_orders_change(live_i, bin) =>{
+                    }
+                    _ = cc.cancelled() => {
+                        tracing::info!("Binclient task cancelled");
+                    }
+                    _ = ss.notified() => {
+                        tracing::info!("Binclient task put to sleep");
+                    }
+                };
+            });
+
             loop {
                 select! {
-                    _ = cli.connect_ws(params.clone()) =>{
-                        tracing::debug!["WS exited"];
-                        let res=cli.get_curr_ws_params(true).await;
-                        match res{
-                            Ok(p)=>{
-                                params=p;
-                            }
-                            Err(e)=>{
-                                tracing::error!["{}",e];
-                            }
-                        }
-                    }
                     _ = recv_from_client.changed() =>{
                         let instruct=recv_from_client.borrow_and_update().clone();
                         let response=cli.parse_binance_instructs(instruct).await;
@@ -544,7 +588,7 @@ impl ClientTask {
                         tracing::info!("Binclient task put to sleep");
                         break;
                     }
-                }
+                };
             }
             awake_notify.notified().await;
             tracing::info!("Binclient task awake");
