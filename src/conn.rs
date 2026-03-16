@@ -822,28 +822,36 @@ impl BinanceClient {
                             live_i.keys_status,
                         )
                     };
-                    let a1_locked=if !&a1_string.is_empty(){
+                    let a1_locked = if !&a1_string.is_empty() {
                         let res_a1 = binance.get_balance(&a1_string).await;
                         match res_a1 {
                             Ok(balance) => balance.free,
                             Err(e) => {
-                                tracing::error!["check_live_orders_change ERROR: {} asset: {}", e, &a1_string];
+                                tracing::error![
+                                    "check_live_orders_change ERROR: {} asset: {}",
+                                    e,
+                                    &a1_string
+                                ];
                                 a1_l_old
                             }
                         }
-                    }else{
+                    } else {
                         a1_l_old
                     };
-                    let a2_locked=if !&a2_string.is_empty(){
+                    let a2_locked = if !&a2_string.is_empty() {
                         let res_a2 = binance.get_balance(&a2_string).await;
                         match res_a2 {
                             Ok(balance) => balance.free,
                             Err(e) => {
-                                tracing::error!["check_live_orders_change ERROR: {} asset: {}", e, &a2_string];
+                                tracing::error![
+                                    "check_live_orders_change ERROR: {} asset: {}",
+                                    e,
+                                    &a2_string
+                                ];
                                 a2_l_old
                             }
                         }
-                    }else{
+                    } else {
                         a2_l_old
                     };
                     let mut live_orders = HashMap::default();

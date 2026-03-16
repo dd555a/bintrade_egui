@@ -1954,38 +1954,40 @@ pub struct SingleOrderMode {
     place_order: bool,
 }
 
-
-
-fn show_hotkeys(
-    ui: &mut egui::Ui,
-){
-
+fn show_hotkeys(ui: &mut egui::Ui) {
     egui::Grid::new("hk grid").show(ui, |ui| {
         ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
-        ui.label("
+        ui.label(
+            "
         Shift+A - toggle order activate \n
         Shift+Num0 - place market order\n
         Shift+Num1 - place limit order\n
-        ");
-        ui.label("
+        ",
+        );
+        ui.label(
+            "
         Shift+Num2 - place stop limit order \n
         Shift+Num3 - place stop market order \n
         Shift+J - K0+ \n
         Shift+K - K0- \n
-        "); 
-        ui.label("
+        ",
+        );
+        ui.label(
+            "
         Alt + J - K1+ \n
         Alt + K - K2-\n
         Shift + D  del all open orders\n
-        "); 
-        ui.label("
+        ",
+        );
+        ui.label(
+            "
         Shift + R qoute asset now\n
         Shift + L - Hist only - trade forward\n
         Shift + H - undo last trade
-        ");
+        ",
+        );
         ui.end_row();
-        });
-    
+    });
 }
 
 #[allow(unused)]
@@ -2006,18 +2008,15 @@ impl SingleOrderMode {
             );
             ui.add_sized(
                 egui::vec2(25.0, 20.0),
-                egui::TextEdit::singleline(&mut self.k0_intv_s).hint_text("K0")
+                egui::TextEdit::singleline(&mut self.k0_intv_s).hint_text("K0"),
             );
             ui.add_sized(
                 egui::vec2(25.0, 20.0),
-                egui::TextEdit::singleline(&mut self.k1_intv_s).hint_text("K1")
+                egui::TextEdit::singleline(&mut self.k1_intv_s).hint_text("K1"),
             );
             ui.end_row();
-
         });
         show_hotkeys(ui);
-
-
 
         let trade_forward = make_hotkey_shift![Key, L, ui, hk_active];
         let delete_all_orders = make_hotkey_alt![Key, D, ui, hk_active];
@@ -2697,8 +2696,8 @@ impl ManualOrders {
             ui.horizontal(|ui| {
                 ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
                 ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
-                if man_orders.single_order_mode{
-                    man_orders.so_mode.hk_active=true;
+                if man_orders.single_order_mode {
+                    man_orders.so_mode.hk_active = true;
                 };
                 ui.label(
                     RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
@@ -3063,7 +3062,12 @@ impl ManualOrders {
 
                     match live_inf.keys_status {
                         KeysStatus::Invalid => {
-                            ui.label(RichText::new(format!["Api Keys Invalid, Not Added, or Not Unlocked",]).color(Color32::RED));
+                            ui.label(
+                                RichText::new(format![
+                                    "Api Keys Invalid, Not Added, or Not Unlocked",
+                                ])
+                                .color(Color32::RED),
+                            );
                         }
                         KeysStatus::Valid => {
                             ui.label(
@@ -3536,7 +3540,7 @@ impl Settings {
                 };
                 ui.end_row();
             });
-            ui.end_row();
+        ui.end_row();
         egui::Grid::new("Account sss")
             .min_col_width(30.0)
             .show(ui, |ui| {
@@ -3546,12 +3550,13 @@ impl Settings {
                         priv_key: settings.priv_api_key_enter_string.clone(),
                     });
                     let _res = cli_chan.send(msg);
-                    if settings.enc_api_keys{
+                    if settings.enc_api_keys {
                         let pass = settings.password_string.clone();
                         let _res = settings.encrypt_keys(pass);
-                    }else{
+                    } else {
                         settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
-                        settings.binance_priv_key = Some(settings.priv_api_key_enter_string.clone());
+                        settings.binance_priv_key =
+                            Some(settings.priv_api_key_enter_string.clone());
                     };
                     settings.password_string = String::default();
                     settings.api_key_enter_string = String::default();
@@ -3596,7 +3601,6 @@ impl Settings {
                 };
                 ui.end_row();
                 if ui.button("Remove keys").clicked() {
-
                     settings.api_key_enter_string = String::default();
                     settings.priv_api_key_enter_string = String::default();
                     settings.binance_pub_key = None;
@@ -3605,7 +3609,7 @@ impl Settings {
                     settings.enc_binance_pub_key = None;
                     settings.enc_binance_priv_key = None;
 
-                    let _res=settings.save_settings_file(None);
+                    let _res = settings.save_settings_file(None);
                     tracing::info!["Api keys removed"];
                     let msg = ClientInstruct::SendBinInstructs(BinInstructs::RemoveApiKeys {});
                     let _res = cli_chan.send(msg);
@@ -3616,7 +3620,7 @@ impl Settings {
             .min_col_width(30.0)
             .show(ui, |ui| {
                 ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
-                if settings.enc_api_keys{
+                if settings.enc_api_keys {
                     if ui.button("Unlock keys").clicked() {
                         let res = settings.decrypt_keys(settings.password_string.clone());
                         match res {
@@ -3643,7 +3647,10 @@ impl Settings {
                 ui.end_row();
                 match settings.key_status {
                     KeysStatus::Invalid => {
-                        ui.label(RichText::new(format!["Api Keys Invalid, Not Added, or Not Unlocked",]).color(Color32::RED));
+                        ui.label(
+                            RichText::new(format!["Api Keys Invalid, Not Added, or Not Unlocked",])
+                                .color(Color32::RED),
+                        );
                     }
                     KeysStatus::Valid => {
                         ui.label(RichText::new(format!["Api Keys Valid",]).color(Color32::GREEN));
@@ -3715,7 +3722,9 @@ impl Settings {
                     });
                 })
                 .body(|mut body| {
-                    for (asset, (avail_balance, lock_balance)) in settings.balances.iter().filter(|(_,n)| **n!=(0.0,0.0)) {
+                    for (asset, (avail_balance, lock_balance)) in
+                        settings.balances.iter().filter(|(_, n)| **n != (0.0, 0.0))
+                    {
                         let row_height = 18.0;
                         body.row(row_height, |mut row| {
                             row.col(|ui| {
@@ -3793,7 +3802,7 @@ impl Settings {
         file.write_all(&res)?;
         Ok(())
     }
-    pub fn save_default_file()->Result<()>{
+    pub fn save_default_file() -> Result<()> {
         let config = config::standard();
         let res = bincode::encode_to_vec(Settings::default(), config)?;
         let mut file = std::fs::File::create(SETTINGS_SAVE_PATH)?;
@@ -3943,14 +3952,14 @@ impl DataManager {
                 .expect("Unable to unlock mutex: DATA MANAGER");
             if ad.downloaded_assets.is_empty() == true {
             } else {
-            data_manager.asset_list = ad.downloaded_assets.clone();
+                data_manager.asset_list = ad.downloaded_assets.clone();
                 data_manager.asset_list_loaded = true;
             }
         };
         if ui.button("Reload asset list").clicked() {
             let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadDLAssetList);
             let _res = cli_chan.send(msg);
-            data_manager.asset_list_loaded=false;
+            data_manager.asset_list_loaded = false;
         };
         //NOTE add this but not clickable toggle_ui_compact(ui,&mut data_manager.update_success);
         ui.end_row();

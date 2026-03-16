@@ -36,23 +36,21 @@ use anyhow::{Context, Result};
 
 const ERR_CTX: &str = "Main client";
 
-
-async fn check_sleep_channel(mut chan:watch::Receiver<BinInstructs>, bin_client:&mut Account){
-    loop{
-        let _res=chan.changed().await;
-        let msg=chan.borrow_and_update();
-        match *msg{
+async fn check_sleep_channel(mut chan: watch::Receiver<BinInstructs>, bin_client: &mut Account) {
+    loop {
+        let _res = chan.changed().await;
+        let msg = chan.borrow_and_update();
+        match *msg {
             BinInstructs::AddReplaceApiKeys {
                 ref pub_key,
                 ref priv_key,
-            }=>{
-                let cli:Account=Binance::new(Some(pub_key.to_string()),Some(priv_key.to_string()));
-                *bin_client=cli;
-                break
+            } => {
+                let cli: Account =
+                    Binance::new(Some(pub_key.to_string()), Some(priv_key.to_string()));
+                *bin_client = cli;
+                break;
             }
-            _=>{
-
-            }
+            _ => {}
         }
     }
 }
@@ -565,7 +563,7 @@ impl ClientTask {
                 }
             };
 
-            let recv_from_client2=recv_from_client.clone();
+            let recv_from_client2 = recv_from_client.clone();
             let mut cli = BinanceClient::new(
                 api_key.clone(),
                 api_secret.clone(),
@@ -620,11 +618,11 @@ impl ClientTask {
             let live_i = live_info.clone();
             let cc = cancel_token.clone();
             let ss = sleep_notify.clone();
-            let an1=awake_notify.clone();
+            let an1 = awake_notify.clone();
             let _live_info_update_handle = tokio::task::spawn(async move {
-                let mut bin_client=bin.clone();
-                loop{
-                    loop{
+                let mut bin_client = bin.clone();
+                loop {
+                    loop {
                         select! {
                             _ = BinanceClient::check_live_orders_change(live_i.clone(), bin_client.clone()) =>{
                             }
@@ -641,8 +639,7 @@ impl ClientTask {
                                 break;
                             }
                         };
-
-                    };
+                    }
                     an1.notified().await;
                     tracing::info!("Binclient task awake");
                 }
@@ -813,14 +810,11 @@ pub fn cli_run() -> Result<()> {
                 "Unable to load Settings.bin, running with defaults, ERROR: {}",
                 e
             ];
-            let res=Settings::save_default_file();
-            match res{
-                Ok(_)=>(),
-                Err(e)=>{
-                    tracing::error![
-                        "Unable to save default Settings.bin file, ERROR: {}",
-                        e
-                    ];
+            let res = Settings::save_default_file();
+            match res {
+                Ok(_) => (),
+                Err(e) => {
+                    tracing::error!["Unable to save default Settings.bin file, ERROR: {}", e];
                 }
             }
             (Settings::default(), None)
