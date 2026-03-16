@@ -1922,10 +1922,6 @@ macro_rules! make_hotkey_shift{
         }
     };
 }
-#[allow(unused)]
-fn link_hotkeys(last_price: &f64, ui: &mut egui::Ui, hk_active: &bool) {
-    let trade_forward = make_hotkey_shift![Key, L, ui, hk_active];
-}
 
 #[allow(unused)]
 const K0: f32 = 1.00;
@@ -1957,6 +1953,41 @@ pub struct SingleOrderMode {
     parse_ks: bool,
     place_order: bool,
 }
+
+
+
+fn show_hotkeys(
+    ui: &mut egui::Ui,
+){
+
+    egui::Grid::new("hk grid").show(ui, |ui| {
+        ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
+        ui.label("
+        Shift+A - toggle order activate \n
+        Shift+Num0 - place market order\n
+        Shift+Num1 - place limit order\n
+        ");
+        ui.label("
+        Shift+Num2 - place stop limit order \n
+        Shift+Num3 - place stop market order \n
+        Shift+J - K0+ \n
+        Shift+K - K0- \n
+        "); 
+        ui.label("
+        Alt + J - K1+ \n
+        Alt + K - K2-\n
+        Shift + D  del all open orders\n
+        "); 
+        ui.label("
+        Shift + R qoute asset now\n
+        Shift + L - Hist only - trade forward\n
+        Shift + H - undo last trade
+        ");
+        ui.end_row();
+        });
+    
+}
+
 #[allow(unused)]
 impl SingleOrderMode {
     fn show(
@@ -1968,19 +1999,31 @@ impl SingleOrderMode {
         sym: &str,
     ) {
         let hk_active = &self.hk_active;
+        egui::Grid::new("hk grid2").show(ui, |ui| {
+            ui.checkbox(
+                &mut self.order_active_after_change,
+                "Order stays active after change",
+            );
+            ui.add_sized(
+                egui::vec2(25.0, 20.0),
+                egui::TextEdit::singleline(&mut self.k0_intv_s).hint_text("K0")
+            );
+            ui.add_sized(
+                egui::vec2(25.0, 20.0),
+                egui::TextEdit::singleline(&mut self.k1_intv_s).hint_text("K1")
+            );
+            ui.end_row();
 
-        ui.checkbox(
-            &mut self.order_active_after_change,
-            "Order stays active after change",
-        );
+        });
+        show_hotkeys(ui);
 
-        ui.add(egui::TextEdit::singleline(&mut self.k0_intv_s).hint_text("K1"));
-        ui.add(egui::TextEdit::singleline(&mut self.k1_intv_s).hint_text("K2"));
-        ui.end_row();
+
 
         let trade_forward = make_hotkey_shift![Key, L, ui, hk_active];
         let delete_all_orders = make_hotkey_alt![Key, D, ui, hk_active];
+        //tracing::debug!["hk_active: {}", hk_active];
         if delete_all_orders {
+            tracing::debug!["DEl all orders presed"];
             if let Some(ref ho) = hist_orders {
             } else {
                 let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
@@ -1990,8 +2033,9 @@ impl SingleOrderMode {
             };
         };
 
-        if self.asset1_held == true {
+        if self.asset1_held {
             let qoute_asset_now = make_hotkey_ctrl![Key, R, ui, hk_active];
+            tracing::debug!["Qute asset now pressed!"];
             if qoute_asset_now && hist_orders.is_none() {
                 let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
                     symbol: sym.to_string(),
@@ -2009,6 +2053,7 @@ impl SingleOrderMode {
             }
         };
         if self.parse_ks {
+            tracing::debug!["parse_ks called"];
             let res = &self.k0_intv_s.parse::<f32>();
             self.k0_i = match res {
                 Ok(pp) => *pp,
@@ -2652,6 +2697,9 @@ impl ManualOrders {
             ui.horizontal(|ui| {
                 ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
                 ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
+                if man_orders.single_order_mode{
+                    man_orders.so_mode.hk_active=true;
+                };
                 ui.label(
                     RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
                 );
@@ -3014,16 +3062,8 @@ impl ManualOrders {
                     man_orders.orders = live_inf.live_orders.clone();
 
                     match live_inf.keys_status {
-                        KeysStatus::NotAdded => {
-                            ui.label(
-                                RichText::new(format!["Add or unlock binance API keys",])
-                                    .color(Color32::ORANGE),
-                            );
-                        }
                         KeysStatus::Invalid => {
-                            ui.label(
-                                RichText::new(format!["Api Keys Invalid",]).color(Color32::RED),
-                            );
+                            ui.label(RichText::new(format!["Api Keys Invalid, Not Added, or Not Unlocked",]).color(Color32::RED));
                         }
                         KeysStatus::Valid => {
                             ui.label(
@@ -3288,7 +3328,13 @@ impl LivePlot {
                 let _res = cli_chan.send(msg);
             };
             if ui.button("Reload chart").clicked() {
-                let msg = ClientInstruct::SendBinInstructs(BinInstructs::Disconnect);
+                let msg = ClientInstruct::StopBinCli;
+                let _res = cli_chan.send(msg);
+                let msg = ClientInstruct::StartBinCli;
+                let _res = cli_chan.send(msg);
+            };
+            if ui.button("Stop chart").clicked() {
+                let msg = ClientInstruct::StopBinCli;
                 let _res = cli_chan.send(msg);
             };
         });
@@ -3404,7 +3450,6 @@ impl Default for HistPlot {
 #[derive(Dbg, Default, Encode, Decode, Clone, Eq, PartialEq, Copy)]
 pub enum KeysStatus {
     #[default]
-    NotAdded,
     Invalid,
     Valid,
 }
@@ -3490,135 +3535,29 @@ impl Settings {
                     );
                 };
                 ui.end_row();
-                if ui.button("Add keys").clicked() {
+            });
+            ui.end_row();
+        egui::Grid::new("Account sss")
+            .min_col_width(30.0)
+            .show(ui, |ui| {
+                if ui.button("Save settings").clicked() {
                     let msg = ClientInstruct::SendBinInstructs(BinInstructs::AddReplaceApiKeys {
                         pub_key: settings.api_key_enter_string.clone(),
                         priv_key: settings.priv_api_key_enter_string.clone(),
                     });
                     let _res = cli_chan.send(msg);
-                    settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
-                    settings.binance_priv_key = Some(settings.priv_api_key_enter_string.clone());
-                    let pass = settings.password_string.clone();
-                    settings.password_string = String::default();
-                    settings.api_key_enter_string = String::default();
-                    settings.priv_api_key_enter_string = String::default();
-                    if settings.enc_api_keys == true {
+                    if settings.enc_api_keys{
+                        let pass = settings.password_string.clone();
                         let _res = settings.encrypt_keys(pass);
+                    }else{
+                        settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
+                        settings.binance_priv_key = Some(settings.priv_api_key_enter_string.clone());
                     };
-                };
-                ui.end_row();
-                if ui.button("Remove keys").clicked() {
+                    settings.password_string = String::default();
                     settings.api_key_enter_string = String::default();
                     settings.priv_api_key_enter_string = String::default();
-                    settings.binance_pub_key = None;
-                    settings.binance_priv_key = None;
-                    settings.enc_binance_pub_key = None;
-                    settings.enc_binance_priv_key = None;
-                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::RemoveApiKeys {});
-                    let _res = cli_chan.send(msg);
-                    tracing::info!["Api removed"];
                 };
                 ui.end_row();
-                if ui.button("Unlock keys").clicked() {
-                    let res = settings.decrypt_keys(settings.password_string.clone());
-                    match res {
-                        Ok(_) => {
-                            tracing::info!["Api keys decrypted"];
-                            if let (Some(pub_key), Some(priv_key)) = (
-                                settings.binance_pub_key.clone(),
-                                settings.binance_priv_key.clone(),
-                            ) {
-                                let msg = ClientInstruct::SendBinInstructs(
-                                    BinInstructs::AddReplaceApiKeys { pub_key, priv_key },
-                                );
-                                let _res = cli_chan.send(msg);
-                            } else {
-                                tracing::error!["API keys none!"]
-                            };
-                        }
-                        Err(e) => {
-                            tracing::error!["Decrypt keys error:{}", e];
-                        }
-                    };
-                };
-                ui.end_row();
-                match settings.key_status {
-                    KeysStatus::NotAdded => {
-                        ui.label(
-                            RichText::new(format!["Add or unlock binance API keys",])
-                                .color(Color32::ORANGE),
-                        );
-                    }
-                    KeysStatus::Invalid => {
-                        ui.label(RichText::new(format!["Api Keys Invalid",]).color(Color32::RED));
-                    }
-                    KeysStatus::Valid => {
-                        ui.label(RichText::new(format!["Api Keys Valid",]).color(Color32::GREEN));
-                    }
-                };
-            });
-        egui::Grid::new("Application settings")
-            .min_col_width(30.0)
-            .show(ui, |ui| {
-                ui.label(RichText::new(format!["APPLICATION SETTINGS",]).color(Color32::YELLOW));
-                ui.end_row();
-                ui.label(RichText::new(format!["Default Symbol",]).color(Color32::WHITE));
-                ui.end_row();
-                ui.add_sized(
-                    egui::vec2(100.0, 20.0),
-                    egui::TextEdit::singleline(&mut settings.default_asset)
-                        .hint_text("Set default symbol"),
-                );
-                ui.end_row();
-                ui.checkbox(
-                    &mut settings.save_api_keys,
-                    "Store api keys in settings file",
-                );
-                ui.checkbox(&mut settings.enc_api_keys, "Encrypt api keys w password");
-                ui.end_row();
-                if ui.button("Save settings").clicked() {
-                    settings.password_string = String::default();
-                    if settings.save_api_keys == true {
-                        let res = if settings.enc_api_keys == true {
-                            settings.binance_pub_key = None;
-                            settings.binance_priv_key = None;
-
-                            settings.api_key_enter_string = String::default();
-                            settings.priv_api_key_enter_string = String::default();
-
-                            settings.save_settings_file(Some(settings.password_string.clone()))
-                        } else {
-                            settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
-                            settings.binance_priv_key =
-                                Some(settings.priv_api_key_enter_string.clone());
-
-                            settings.api_key_enter_string = String::default();
-                            settings.priv_api_key_enter_string = String::default();
-
-                            settings.enc_binance_pub_key = None;
-                            settings.enc_binance_priv_key = None;
-
-                            settings.save_settings_file(None)
-                        };
-                        match res {
-                            Ok(_) => (),
-                            Err(e) => tracing::error!["Save setting ERROR: {}", e],
-                        };
-                    } else {
-                        settings.binance_pub_key = None;
-                        settings.binance_priv_key = None;
-                        settings.enc_binance_pub_key = None;
-                        settings.enc_binance_priv_key = None;
-                        let _ = settings.save_settings_file(None);
-                    };
-                    let mut sett = settings.clone();
-                    sett.binance_pub_key = None;
-                    sett.binance_priv_key = None;
-                    sett.enc_binance_pub_key = None;
-                    sett.enc_binance_priv_key = None;
-                    let msg = ClientInstruct::UpdateSettings(sett);
-                    let _res = cli_chan.send(msg);
-                };
                 if ui.button("Load settings").clicked() {
                     let pass = if settings.password_string.is_empty() {
                         Some(settings.password_string.clone())
@@ -3655,6 +3594,81 @@ impl Settings {
                         _ => {}
                     }
                 };
+                ui.end_row();
+                if ui.button("Remove keys").clicked() {
+
+                    settings.api_key_enter_string = String::default();
+                    settings.priv_api_key_enter_string = String::default();
+                    settings.binance_pub_key = None;
+                    settings.binance_priv_key = None;
+
+                    settings.enc_binance_pub_key = None;
+                    settings.enc_binance_priv_key = None;
+
+                    let _res=settings.save_settings_file(None);
+                    tracing::info!["Api keys removed"];
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::RemoveApiKeys {});
+                    let _res = cli_chan.send(msg);
+                };
+                ui.end_row();
+            });
+        egui::Grid::new("Account s")
+            .min_col_width(30.0)
+            .show(ui, |ui| {
+                ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
+                if settings.enc_api_keys{
+                    if ui.button("Unlock keys").clicked() {
+                        let res = settings.decrypt_keys(settings.password_string.clone());
+                        match res {
+                            Ok(_) => {
+                                tracing::info!["Api keys decrypted"];
+                                if let (Some(pub_key), Some(priv_key)) = (
+                                    settings.binance_pub_key.clone(),
+                                    settings.binance_priv_key.clone(),
+                                ) {
+                                    let msg = ClientInstruct::SendBinInstructs(
+                                        BinInstructs::AddReplaceApiKeys { pub_key, priv_key },
+                                    );
+                                    let _res = cli_chan.send(msg);
+                                } else {
+                                    tracing::error!["API keys none!"]
+                                };
+                            }
+                            Err(e) => {
+                                tracing::error!["Decrypt keys error:{}", e];
+                            }
+                        };
+                    };
+                };
+                ui.end_row();
+                match settings.key_status {
+                    KeysStatus::Invalid => {
+                        ui.label(RichText::new(format!["Api Keys Invalid, Not Added, or Not Unlocked",]).color(Color32::RED));
+                    }
+                    KeysStatus::Valid => {
+                        ui.label(RichText::new(format!["Api Keys Valid",]).color(Color32::GREEN));
+                    }
+                };
+            });
+        egui::Grid::new("Application settings")
+            .min_col_width(30.0)
+            .show(ui, |ui| {
+                ui.label(RichText::new(format!["APPLICATION SETTINGS",]).color(Color32::YELLOW));
+                ui.end_row();
+                ui.label(RichText::new(format!["Default Symbol",]).color(Color32::WHITE));
+                ui.end_row();
+                ui.add_sized(
+                    egui::vec2(100.0, 20.0),
+                    egui::TextEdit::singleline(&mut settings.default_asset)
+                        .hint_text("Set default symbol"),
+                );
+                ui.end_row();
+                ui.checkbox(
+                    &mut settings.save_api_keys,
+                    "Store api keys in settings file",
+                );
+                ui.checkbox(&mut settings.enc_api_keys, "Encrypt api keys w password");
+                ui.end_row();
             });
         egui::Grid::new("Account_balances")
             .min_col_width(30.0)
@@ -3701,7 +3715,7 @@ impl Settings {
                     });
                 })
                 .body(|mut body| {
-                    for (asset, (avail_balance, lock_balance)) in settings.balances.iter() {
+                    for (asset, (avail_balance, lock_balance)) in settings.balances.iter().filter(|(_,n)| **n!=(0.0,0.0)) {
                         let row_height = 18.0;
                         body.row(row_height, |mut row| {
                             row.col(|ui| {
@@ -3775,6 +3789,13 @@ impl Settings {
         }
         let config = config::standard();
         let res = bincode::encode_to_vec(self.clone(), config)?;
+        let mut file = std::fs::File::create(SETTINGS_SAVE_PATH)?;
+        file.write_all(&res)?;
+        Ok(())
+    }
+    pub fn save_default_file()->Result<()>{
+        let config = config::standard();
+        let res = bincode::encode_to_vec(Settings::default(), config)?;
         let mut file = std::fs::File::create(SETTINGS_SAVE_PATH)?;
         file.write_all(&res)?;
         Ok(())
@@ -3891,6 +3912,7 @@ impl DataManager {
                 };
             });
         ui.end_row();
+        /*
         match data_manager.update_success {
             true => {
                 ui.label(
@@ -3913,6 +3935,7 @@ impl DataManager {
                 }
             },
         };
+        */
         if data_manager.asset_list_loaded == false {
             let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadDLAssetList);
             let _res = cli_chan.send(msg);

@@ -7,6 +7,10 @@ use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle as Handle;
 use tokio_util::sync::CancellationToken;
 
+use binance::account::Account;
+use binance::api::Binance;
+use binance::config::Config;
+
 use crate::{
     BinInstructs, BinResponse, ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse,
 };
@@ -20,11 +24,38 @@ use winit::platform::wayland::EventLoopBuilderExtWayland;
 
 use crate::conn::{BinanceClient, SymbolOutput, get_exchange_info};
 use crate::data::{AssetData, Intv, SQLConn};
-use crate::gui::{DesktopApp, LiveInfo, Settings};
+use crate::gui::{DesktopApp, KeysStatus, LiveInfo, Settings};
+
+#[derive(Clone, Debug)]
+pub struct ApiKeys {
+    api: String,
+    api_secret: String,
+}
 
 use anyhow::{Context, Result};
 
 const ERR_CTX: &str = "Main client";
+
+
+async fn check_sleep_channel(mut chan:watch::Receiver<BinInstructs>, bin_client:&mut Account){
+    loop{
+        let _res=chan.changed().await;
+        let msg=chan.borrow_and_update();
+        match *msg{
+            BinInstructs::AddReplaceApiKeys {
+                ref pub_key,
+                ref priv_key,
+            }=>{
+                let cli:Account=Binance::new(Some(pub_key.to_string()),Some(priv_key.to_string()));
+                *bin_client=cli;
+                break
+            }
+            _=>{
+
+            }
+        }
+    }
+}
 
 pub fn load_settings() -> Result<Settings> {
     let r = Settings::load_settings_enc();
@@ -58,8 +89,6 @@ impl Tasks {
         return Ok(Tasks::Task0Cli {});
     }
     fn new_binws(global_settings: &Settings) -> Result<Tasks> {
-        //FIXME API keys stored this way is not good...
-        //block out unencrypted keys
         let (api_key, api_secret) = match (
             global_settings.binance_pub_key.clone(),
             global_settings.binance_priv_key.clone(),
@@ -398,12 +427,17 @@ impl ClientTask {
         }
     }
 
-    pub async fn run_main(&mut self, tasks: Vec<Tasks>, settings: Settings) {
+    pub async fn run_main(
+        &mut self,
+        tasks: Vec<Tasks>,
+        settings: Settings,
+        api_keys: Option<ApiKeys>,
+    ) {
         let mut handles: Vec<Handle<()>> = vec![];
-        let (a_key, a_sec_key) = (
-            settings.binance_pub_key.clone(),
-            settings.binance_priv_key.clone(),
-        );
+        let (a_key, a_sec_key) = match api_keys {
+            Some(a) => (Some(a.api.clone()), Some(a.api_secret.clone())),
+            None => (None, None),
+        };
         for t in tasks {
             match t {
                 Tasks::Task0Cli {} => {
@@ -507,9 +541,35 @@ impl ClientTask {
         let (send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
         loop {
+            let bin_cfg = Config::default(); //.set_recv_window(10_000);
+            let bin: Account =
+                Binance::new_with_config(api_key.clone(), api_secret.clone(), &bin_cfg);
+            let res = bin.get_account().await;
+            let _keys_status = match res {
+                Ok(_) => {
+                    let mut live_i = live_info
+                        .lock()
+                        .expect("Unable to unlock live info mutex- start_binclient");
+                    live_i.keys_status = KeysStatus::Valid;
+                    tracing::info!["API keys valid"];
+                }
+                Err(e) => {
+                    let mut live_i = live_info
+                        .lock()
+                        .expect("Unable to unlock live info mutex- start_binclient");
+                    live_i.keys_status = KeysStatus::Invalid;
+                    tracing::error![
+                        "Unable to get account: ERROR, setting API key status as invalid, ERROR: {}",
+                        e
+                    ];
+                }
+            };
+
+            let recv_from_client2=recv_from_client.clone();
             let mut cli = BinanceClient::new(
                 api_key.clone(),
                 api_secret.clone(),
+                &bin_cfg,
                 live_collect.clone(),
                 live_price.clone(),
                 live_ad.clone(),
@@ -549,28 +609,43 @@ impl ClientTask {
                     _ =BinanceClient::connect_ws(ws_tick, params.clone(), 50) =>{
                     }
                     _ = cc2.cancelled() => {
-                        tracing::info!("Binclient task cancelled");
+                        tracing::trace!("Binclient task cancelled 3");
                     }
                     _ = ss2.notified() => {
-                        tracing::info!("Binclient task put to sleep");
+                        tracing::trace!("Binclient task put to sleep 3");
                     }
                 };
             });
-            let bin = cli.binance_client.clone();
+
             let live_i = live_info.clone();
             let cc = cancel_token.clone();
             let ss = sleep_notify.clone();
+            let an1=awake_notify.clone();
             let _live_info_update_handle = tokio::task::spawn(async move {
-                select! {
-                    _ = BinanceClient::check_live_orders_change(live_i, bin) =>{
-                    }
-                    _ = cc.cancelled() => {
-                        tracing::info!("Binclient task cancelled");
-                    }
-                    _ = ss.notified() => {
-                        tracing::info!("Binclient task put to sleep");
-                    }
-                };
+                let mut bin_client=bin.clone();
+                loop{
+                    loop{
+                        select! {
+                            _ = BinanceClient::check_live_orders_change(live_i.clone(), bin_client.clone()) =>{
+                            }
+                            _ = cc.cancelled() => {
+                                tracing::trace!("Binclient task cancelled 2");
+                                break;
+                            }
+                            _ = ss.notified() => {
+                                tracing::trace!("Binclient task put to sleep 2");
+                                break;
+                            }
+                            _ = check_sleep_channel(recv_from_client2.clone(),&mut bin_client) =>{
+                                tracing::trace!("Api keys changed 2");
+                                break;
+                            }
+                        };
+
+                    };
+                    an1.notified().await;
+                    tracing::info!("Binclient task awake");
+                }
             });
 
             loop {
@@ -716,9 +791,41 @@ pub fn cli_run() -> Result<()> {
         .context("Client unable to build tokio runtime!")
         .context(ERR_CTX)?;
 
-    let settings: Settings = load_settings()
-        .context("Unable to load settings")
-        .context(ERR_CTX)?;
+    let res = load_settings();
+    let (settings, api_keys) = match res {
+        Ok(s) => {
+            if let (Some(api), Some(api_secret)) =
+                (s.binance_pub_key.clone(), s.binance_priv_key.clone())
+            {
+                (
+                    s,
+                    Some(ApiKeys {
+                        api: api.to_string(),
+                        api_secret: api_secret.to_string(),
+                    }),
+                )
+            } else {
+                (s, None)
+            }
+        }
+        Err(e) => {
+            tracing::error![
+                "Unable to load Settings.bin, running with defaults, ERROR: {}",
+                e
+            ];
+            let res=Settings::save_default_file();
+            match res{
+                Ok(_)=>(),
+                Err(e)=>{
+                    tracing::error![
+                        "Unable to save default Settings.bin file, ERROR: {}",
+                        e
+                    ];
+                }
+            }
+            (Settings::default(), None)
+        }
+    };
     let frontend = Frontend::Desktop;
     let tasks: Vec<Tasks> = frontend.init(&settings)?;
     let _res = rt.block_on(async {
@@ -727,7 +834,7 @@ pub fn cli_run() -> Result<()> {
         let mut main_struct = ClientTask::new(frontend);
         let cancel_all_token = main_struct.cancel_all.clone();
         select! {
-            _ = main_struct.run_main(tasks, settings) => {
+            _ = main_struct.run_main(tasks, settings, api_keys) => {
             }
             _  = cancel_all_token.cancelled() => {
             }

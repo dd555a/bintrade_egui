@@ -39,7 +39,7 @@ use chrono::{DateTime, Utc};
 
 const ERR_CTX: &str = "Binance client | websocket:";
 const DEFAULT_BUFFER_SIZE: usize = 50;
-const ORDER_CHECK_INTV_MS: u64 = 1_000;
+const ORDER_CHECK_INTV_MS: u64 = 200;
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug, Clone)]
@@ -755,13 +755,14 @@ impl BinanceClient {
     pub fn new(
         pub_key: Option<String>,
         sec_key: Option<String>,
+        config: &binance::config::Config,
         collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
         live_price_watch: Arc<Mutex<f64>>,
         live_ad: Arc<Mutex<AssetData>>,
         live_info: Arc<Mutex<LiveInfo>>,
     ) -> Self {
         Self {
-            binance_client: Binance::new(pub_key, sec_key),
+            binance_client: Binance::new_with_config(pub_key, sec_key, config),
             current_order_id: 0,
             ws_buffer_size: 15,
             ws_tick: Some(WSTick::new(collect, live_price_watch)),
@@ -807,18 +808,20 @@ impl BinanceClient {
     }
     //NOTE this is a horrible way to do this but for now it's fine
     pub async fn check_live_orders_change(live_info: Arc<Mutex<LiveInfo>>, binance: Account) {
+        let mut keys_status = KeysStatus::Invalid;
+
         loop {
             let res = binance.get_all_open_orders().await;
             match res {
                 Ok(orders) => {
-                    let ((a1_string, a2_string), (a1_l_old, a2_l_old)) = {
+                    let ((a1_string, a2_string), (a1_l_old, a2_l_old), keys_status) = {
                         let live_i = live_info.lock().expect("Live info mutex poisoned!");
                         (
                             live_i.current_pair_strings.clone(),
                             (live_i.current_pair_locked_balances),
+                            live_i.keys_status,
                         )
                     };
-
                     let res_a1 = binance.get_balance(&a1_string).await;
                     let a1_locked = match res_a1 {
                         Ok(balance) => balance.free,
@@ -856,6 +859,7 @@ impl BinanceClient {
                 }
                 Err(e) => {
                     tracing::error!["check_live_orders_change {}", e];
+                    sleep(Duration::from_millis(60_000)).await;
                 }
             }
             sleep(Duration::from_millis(ORDER_CHECK_INTV_MS)).await;

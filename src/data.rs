@@ -8,8 +8,8 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use core::pin::pin;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 
 use anyhow::{Context, Result, anyhow};
 
@@ -19,14 +19,14 @@ use sqlx::{
     Pool, QueryBuilder, Sqlite, SqlitePool, migrate::MigrateDatabase, sqlite::SqliteConnectOptions,
 };
 
-use binance2::api::Binance;
-use binance2::market::Market;
-use binance2::model::{KlineSummaries, KlineSummary};
+use binance::api::Binance;
+use binance::market::Market;
+use binance::rest_model::{KlineSummaries, KlineSummary};
 
 const ERR_CTX: &str = "SQL Data loader";
-const SINGLE_ASSET_DL_TASKS_MAX:usize=16;
+const SINGLE_ASSET_DL_TASKS_MAX: usize = 16;
 const METADATA_DB_PATH: &str = "./databases/metadata.db";
-const BIN_TIMESTAMP:i64=1577836800000;
+const BIN_TIMESTAMP: i64 = 1577836800000;
 
 use bincode::{Decode, Encode};
 use linya::{Bar, Progress};
@@ -192,9 +192,7 @@ async fn append_kline(
     )],
 ) -> Result<()> {
     let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!["
-        BEGIN TRANSACTION;
-        INSERT OR REPLACE INTO {}( [Timestamp MS], [Open Time], Open, High, Low, Close, Volume, [Close Timestamp MS], [Close Time], [Quote Asset Volume], [Number of Trades], [Taker Buy Base Asset Volume], [Taker Buy Quote Asset Volume] ) 
-        COMMIT;
+        INSERT OR REPLACE INTO {} ( [Timestamp MS], [Open Time], Open, High, Low, Close, Volume, [Close Timestamp MS], [Close Time], [Quote Asset Volume], [Number of Trades], [Taker Buy Base Asset Volume], [Taker Buy Quote Asset Volume] )
         ",
         table
     ]);
@@ -463,27 +461,6 @@ impl std::fmt::Debug for FatKline {
         Ok(())
     }
 }
-impl FatKline {
-    fn new(
-        kline: Vec<(
-            i64,
-            DateTime<Utc>,
-            f64,
-            f64,
-            f64,
-            f64,
-            f64,
-            i64,
-            DateTime<Utc>,
-            f64,
-            u64,
-            f64,
-            f64,
-        )>,
-    ) -> Self {
-        Self { kline }
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Kline {
@@ -749,19 +726,20 @@ fn kline_conv(
     f64,
 )> {
     let based_time = input.open_time;
-    let time = DateTime::<Utc>::from_timestamp_millis(input.open_time).unwrap();
-    let open = input.open.parse()?;
-    let high = input.high.parse()?;
-    let low = input.low.parse()?;
-    let close = input.close.parse()?;
-    let volume = input.volume.parse()?;
+    let time = DateTime::<Utc>::from_timestamp_millis(input.open_time)
+        .ok_or(anyhow!["Unable to parse ctime"])?;
+    let open = input.open;
+    let high = input.high;
+    let low = input.low;
+    let close = input.close;
+    let volume = input.volume;
     let based_ctime = input.close_time;
     let ctime = DateTime::<Utc>::from_timestamp_millis(input.close_time)
         .ok_or(anyhow!["Unable to parse ctime"])?;
-    let qav = input.quote_asset_volume.parse()?;
+    let qav = input.quote_asset_volume;
     let no = input.number_of_trades as u64;
-    let tbbav = input.taker_buy_base_asset_volume.parse()?;
-    let tbqav = input.taker_buy_quote_asset_volume.parse()?;
+    let tbbav = input.taker_buy_base_asset_volume;
+    let tbqav = input.taker_buy_quote_asset_volume;
 
     Ok((
         based_time,
@@ -780,35 +758,41 @@ fn kline_conv(
     ))
 }
 async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
-    let end_time= SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
-    let timestamp_intv=(start_time-end_time)/(SINGLE_ASSET_DL_TASKS_MAX as i64);
-    let times:Vec<(i64,i64)> = (0..=SINGLE_ASSET_DL_TASKS_MAX).map(|n|{
-      if n==0{
-           (start_time, start_time+timestamp_intv)
-      } else{
-          if n==SINGLE_ASSET_DL_TASKS_MAX{
-            (((n as i64-1)*timestamp_intv + start_time) , end_time)
-          }else {
-              (((n as i64)*timestamp_intv + start_time) , ((n as i64+1)*timestamp_intv + start_time))
-          }
-      }
-    }).collect();
+    let end_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
+    let timestamp_intv = (start_time - end_time) / (SINGLE_ASSET_DL_TASKS_MAX as i64);
+    let times: Vec<(i64, i64)> = (0..=SINGLE_ASSET_DL_TASKS_MAX)
+        .map(|n| {
+            if n == 0 {
+                (start_time, start_time + timestamp_intv)
+            } else {
+                if n == SINGLE_ASSET_DL_TASKS_MAX {
+                    (((n as i64 - 1) * timestamp_intv + start_time), end_time)
+                } else {
+                    (
+                        ((n as i64) * timestamp_intv + start_time),
+                        ((n as i64 + 1) * timestamp_intv + start_time),
+                    )
+                }
+            }
+        })
+        .collect();
 
-    let mut progress_bar=Progress::new();
-    let no_iterations=Intv::iter().len()*times.len();
-    let mut n:usize=0;
-    for i in Intv::iter(){
-        let ss=symbol.to_string();
-        let klines_unordered = times.iter()
-            .map( |(st,et)| {
+    let mut progress_bar = Progress::new();
+    let no_iterations = Intv::iter().len() * times.len();
+    let mut n: usize = 0;
+    for i in Intv::iter() {
+        let ss = symbol.to_string();
+        let klines_unordered = times
+            .iter()
+            .map(|(st, et)| {
                 let s = ss.clone();
-                let i= i.clone();
+                let i = i.clone();
                 let client: Market = Binance::new(None, None);
-                let st=st.clone();
-                let et=et.clone();
+                let st = st.clone();
+                let et = et.clone();
 
                 let bar: Bar = progress_bar.bar(
-                    n,
+                    no_iterations,
                     format!(
                         "Downloading data for {} {} between: {} and: {}: {}/{}",
                         &s,
@@ -819,18 +803,18 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                         no_iterations
                     ),
                 );
-                let res=tokio::task::spawn(async move {
-                    let res= connect_sqlite(format!["./databases/Asset{}.db", &s])
+                let res = tokio::task::spawn(async move {
+                    let res = connect_sqlite(format!["./databases/Asset{}.db", &s])
                         .await
                         .context("SQL : unable to connect to asset db");
-                    let asset_pool=match res{
-                        Ok(ap)=>ap,
-                        Err(e)=>return Err(e),
+                    let asset_pool = match res {
+                        Ok(ap) => ap,
+                        Err(e) => return Err(e),
                     };
-                    get_data_binance2(&client, &s, i,&asset_pool , st,et).await
+                    get_data_binance2(&client, &s, i, &asset_pool, st, et).await
                 });
                 progress_bar.inc_and_draw(&bar, n as usize);
-                n+=1;
+                n += 1;
                 res
             })
             .collect::<FuturesUnordered<_>>();
@@ -852,8 +836,8 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                     tracing::error!["Kline download JoinError:{}", e];
                 }
             }
-        };
-    };
+        }
+    }
     Ok(())
 }
 
@@ -861,22 +845,23 @@ pub async fn get_data_binance2(
     client: &Market,
     symbol: &str,
     intv: Intv,
-    asset_pool:&Pool<Sqlite>,
+    asset_pool: &Pool<Sqlite>,
     st: i64,
     et: i64,
-
-)->Result<()>{
-    let no_datapoints = (st-et) / intv.to_ms();
+) -> Result<()> {
+    let no_datapoints = (st - et) / intv.to_ms();
     let no_iterations = no_datapoints / 500;
     let no_it = if no_iterations <= 1 { 1 } else { no_iterations };
     for n in 0..no_it {
-        let res = client.get_klines(
-            symbol,
-            intv.to_bin_str(),
-            None,
-            Some((st+ intv.to_ms() * n * 500) as u64 + 1),
-            Some((st+ intv.to_ms() * (n + 1) * 500) as u64),
-        );
+        let res = client
+            .get_klines(
+                symbol,
+                intv.to_bin_str(),
+                None,
+                Some((st + intv.to_ms() * n * 500) as u64 + 1),
+                Some((st + intv.to_ms() * (n + 1) * 500) as u64),
+            )
+            .await;
         let kk: Result<KlineSummaries> = match res {
             Ok(k) => Ok(k),
             Err(err) => Err(anyhow!("Binance error:{:?}", err)),
@@ -885,93 +870,35 @@ pub async fn get_data_binance2(
         let klines = match k {
             KlineSummaries::AllKlineSummaries(a) => a,
         };
-        let kl = klines.iter().map(|k| kline_conv(&k)).collect::<Result<Vec<(i64,DateTime<Utc>,f64,f64,f64,f64,f64,i64,DateTime<Utc>,f64,u64,f64,f64,)>>>();
+        let kl = klines.iter().map(|k| kline_conv(&k)).collect::<Result<
+            Vec<(
+                i64,
+                DateTime<Utc>,
+                f64,
+                f64,
+                f64,
+                f64,
+                f64,
+                i64,
+                DateTime<Utc>,
+                f64,
+                u64,
+                f64,
+                f64,
+            )>,
+        >>();
         let kline_chunk = kl?;
 
-        //FIXME might have to reduce chunks to 100
-        let _res=append_kline(
-            asset_pool, 
-            &format!["kline_{}",intv.to_str()],
-            &kline_chunk
-        ).await?;
-    };
-    Ok(())
-}
-
-pub fn get_data_binance(
-    client: &Market,
-    symbol: &str,
-    intv: Intv,
-    start_time: Option<i64>,
-) -> Result<FatKline> {
-    let timestamp = match start_time {
-        Some(start_time) => start_time,
-        None => 0,
-    };
-    tracing::trace!["INTV DL Timestamp: {}", timestamp];
-
-    //+1 to avoid duplicates)
-    let curr_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
-    let no_datapoints = (curr_timestamp - timestamp) / intv.to_ms();
-    //Ceil division is default s + 1 iterations if fin
-    let no_iterations = no_datapoints / 500;
-    //500 is the hard limit for non API key downloads... i think
-    //
-    let mut kline: Vec<(
-        i64,
-        DateTime<Utc>,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        i64,
-        DateTime<Utc>,
-        f64,
-        u64,
-        f64,
-        f64,
-    )> = vec![];
-    let mut progress_bar = Progress::new();
-    let no_it = if no_iterations <= 1 { 1 } else { no_iterations };
-    for n in 0..no_it {
-        let res = client.get_klines(
-            symbol,
-            intv.to_bin_str(),
-            None,
-            Some((timestamp + intv.to_ms() * n * 500) as u64 + 1),
-            Some((timestamp + intv.to_ms() * (n + 1) * 500) as u64),
-        );
-        let kk: Result<KlineSummaries> = match res {
-            Ok(k) => Ok(k),
-            Err(err) => Err(anyhow!("Binance error:{:?}", err)),
+        if !kline_chunk.is_empty() {
+            let _res = append_kline(
+                asset_pool,
+                &format!["kline_{}", intv.to_str()],
+                &kline_chunk,
+            )
+            .await?;
         };
-        let k = kk?;
-        let klines = match k {
-            KlineSummaries::AllKlineSummaries(a) => a,
-        };
-        let kl = klines.iter().map(|k| kline_conv(&k)).collect::<Result<Vec<(i64,DateTime<Utc>,f64,f64,f64,f64,f64,i64,DateTime<Utc>,f64,u64,f64,f64,)>>>();
-        let mut kline_chunk = kl?;
-        kline.append(&mut kline_chunk);
-        let current_timestamp_naive = DateTime::<Utc>::from_timestamp_millis(curr_timestamp)
-            .ok_or(anyhow!["current timestamp couldn't be formatted"])?;
-        let timestamp_naive = DateTime::<Utc>::from_timestamp_millis(timestamp)
-            .ok_or(anyhow!["timestamp couldn't be formatted"])?;
-        let bar: Bar = progress_bar.bar(
-            no_it as usize,
-            format!(
-                "Downloading data for {} {} between: {} and: {}: {}/{}",
-                &symbol,
-                &intv.to_str(),
-                timestamp_naive,
-                current_timestamp_naive,
-                n,
-                no_iterations
-            ),
-        );
-        progress_bar.inc_and_draw(&bar, n as usize);
     }
-    return Ok(FatKline::new(kline));
+    Ok(())
 }
 
 async fn create_metadata_db() -> Result<()> {
@@ -1042,9 +969,7 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
     for symbol_info in symbol_inf {
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
             "
-            BEGIN TRANSACTION;
             INSERT OR REPLACE INTO assets(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset])
-            COMMIT;
             "
         ));
         query_builder.push_values(symbol_info.iter(), |mut b, si| {
@@ -1061,9 +986,7 @@ async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
     for fut_symbol_info in fut_symbol_inf {
         let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(format!(
             "
-            BEGIN TRANSACTION;
             INSERT OR REPLACE INTO assets_fut(  [Asset] , [Exchange] , [Status] , [BaseAsset] , [QouteAsset] , [onboardDate], [deliveryDate])
-            COMMIT;
             "
         ));
         query_builder.push_values(fut_symbol_info.iter(), |mut b, si| {
@@ -1132,21 +1055,9 @@ impl From<&str> for Exchange {
     }
 }
 
-async fn download_asset_data(
-    symbol: &str,
-    exchange: &Exchange,
-    start_time: i64,
-) -> Result<()> {
+async fn download_asset_data(symbol: &str, exchange: &Exchange, start_time: i64) -> Result<()> {
     match exchange {
-        Exchange::Binance => {
-            tracing::debug![
-                "Downloading kline data for: {} from timestamp {:?}",
-                symbol,
-                start_time
-            ];
-            //intv_dl_klines(symbol, start_time).await
-            single_asset_dl(symbol, start_time).await
-        }
+        Exchange::Binance => single_asset_dl(symbol, start_time).await,
         Exchange::Yahoo => {
             todo!()
         }
@@ -1337,7 +1248,7 @@ async fn get_asset_timestamps(
         sqlx::query_as(q).fetch_one(metadata_db).await?;
     match timestamps_meta.0 {
         Some(_) => {
-            tracing::error!["Timestamps meta called!"];
+            tracing::trace!["Timestamps meta called!"];
             return Ok((timestamps_meta.0, timestamps_meta.1));
         }
         None => (),
@@ -1542,38 +1453,36 @@ impl SQLConn {
     ) -> Result<()> {
         let db_path = format!["./databases/Asset{}.db", asset_symbol];
         let exch = Exchange::from(exchange);
-        let (start_time, _) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
-        let start_time= match start_time {
-            Some(st) => st,
-            None => {
-                tracing::error!["START TIME SHOULD NO BE NONE!"];
-                BIN_TIMESTAMP//1st jan 2020 00:00
-            }
-        };
 
         let start_time = if Sqlite::database_exists(&db_path).await? == false {
+            let (start_time, _) = get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+            let init_time=match start_time{
+                Some(st)=>st,
+                None=>BIN_TIMESTAMP
+
+            };
+            tracing::debug!["download_single_asset initial_time {}",init_time];
             create_db(&db_path).await?;
             let apool = connect_sqlite(&db_path).await?;
             cr_kl_tables(&apool).await?;
-            tracing::trace!["Created database {} and created tables", &db_path];
-
+            tracing::debug!["Created database {} and created tables", &db_path];
             apool.close().await;
-            let _res = download_asset_data(&asset_symbol, &exch, start_time).await?;
-            start_time
+            let _res = download_asset_data(&asset_symbol, &exch, init_time).await?;
+            init_time
         } else {
             let (start_time_ms, end_time_ms) =
                 get_asset_timestamps(&asset_symbol, &meta_pool).await?;
-            let start_time=match start_time_ms{
-                Some(st)=>st,
-                None=>BIN_TIMESTAMP,
+            let start_time = match start_time_ms {
+                Some(st) => st,
+                None => BIN_TIMESTAMP,
             };
-            let end_time=match end_time_ms{
-                Some(et)=>et,
-                None=> current_timestamp,
+            let get_from_time = match end_time_ms {
+                Some(et) => et,
+                None => BIN_TIMESTAMP,
             };
-            let _res=download_asset_data(&asset_symbol, &exch, end_time).await?;
+            tracing::debug!["download_single_asset_ get_from_time {}", get_from_time];
+            let _res = download_asset_data(&asset_symbol, &exch, get_from_time).await?;
             start_time
-
         };
 
         let apool = connect_sqlite(&db_path).await?;
@@ -1597,7 +1506,7 @@ impl SQLConn {
         Ok(())
     }
     pub async fn update_data(&self) -> Result<()> {
-        tracing::trace!["Update_data called"];
+        tracing::info!["Update data called!"];
         if Sqlite::database_exists(&METADATA_DB_PATH).await? == false {
             create_metadata_db().await?;
             tracing::info!["Metadata DB created"];
@@ -1606,9 +1515,9 @@ impl SQLConn {
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
 
-        download_asset_list_binance(&meta_pool).await?;
+        let _res = download_asset_list_binance(&meta_pool).await?;
 
-        tracing::info!["Asset list updated"];
+        tracing::trace!["Asset list updated"];
         let asset_list = dl_load_asset_list(&meta_pool).await?;
         tracing::trace!["DL asset list loaded"];
         let current_timestamp_ms: i64 = match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -1639,9 +1548,9 @@ impl SQLConn {
                 .download_single_asset(&asset_symbol, &exchange, &meta_pool, current_timestamp_ms)
                 .await;
         }
+        tracing::info!["Data update ran successfully!"];
         Ok(())
     }
-    #[instrument(level = "trace")]
     async fn unload_data(&mut self, symbol: &str) -> Result<()> {
         let ad_a = Arc::clone(&mut self.hist_asset_data);
         let mut ad = ad_a.lock().expect("Posioned AD mutex! (DATA)");
@@ -1665,6 +1574,7 @@ impl SQLConn {
         Ok(())
     }
     async fn insert_dl_asset(&self, symbol: &str, exchange: &str) -> Result<()> {
+        tracing::debug!["Insert DL asset called!"];
         let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
             .await
             .context(anyhow!("SQL::Unable to metadata connect to db"))?;
@@ -1672,7 +1582,7 @@ impl SQLConn {
         let validate = self
             .validate_asset_binance(&meta_pool, symbol, exchange)
             .await?;
-        tracing::trace!["Asset validated! {:?}", validate];
+        tracing::debug!["Asset validated! {:?}", validate];
         match validate {
             true => (),
             false => {
