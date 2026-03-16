@@ -3937,22 +3937,20 @@ impl DataManager {
         };
         */
         if data_manager.asset_list_loaded == false {
-            let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadDLAssetList);
-            let _res = cli_chan.send(msg);
-            //problem here is timing... this repeats the signal several times... but it works so
-            //wtf...
             let ad = data_manager
                 .hist_asset_data
                 .lock()
                 .expect("Unable to unlock mutex: DATA MANAGER");
             if ad.downloaded_assets.is_empty() == true {
             } else {
-                data_manager.asset_list = ad.downloaded_assets.clone();
+            data_manager.asset_list = ad.downloaded_assets.clone();
                 data_manager.asset_list_loaded = true;
             }
         };
         if ui.button("Reload asset list").clicked() {
-            data_manager.asset_list_loaded = false;
+            let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadDLAssetList);
+            let _res = cli_chan.send(msg);
+            data_manager.asset_list_loaded=false;
         };
         //NOTE add this but not clickable toggle_ui_compact(ui,&mut data_manager.update_success);
         ui.end_row();

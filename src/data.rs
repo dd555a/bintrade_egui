@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Datelike, Utc };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
 
@@ -757,10 +757,13 @@ fn kline_conv(
         tbqav,
     ))
 }
+
+#[allow(unused)]
 async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
     let end_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
-    let timestamp_intv = (start_time - end_time) / (SINGLE_ASSET_DL_TASKS_MAX as i64);
-    let times: Vec<(i64, i64)> = (0..=SINGLE_ASSET_DL_TASKS_MAX)
+    tracing::debug!["single_asset_dl {}", DateTime::<Utc>::from_timestamp_millis(start_time).unwrap()];
+    let timestamp_intv = (end_time-start_time) / (SINGLE_ASSET_DL_TASKS_MAX as i64);
+    let times: Vec<(i64, i64)> = (0..SINGLE_ASSET_DL_TASKS_MAX)
         .map(|n| {
             if n == 0 {
                 (start_time, start_time + timestamp_intv)
@@ -776,10 +779,11 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
             }
         })
         .collect();
-
+    tracing::debug!["single_asset_dl times {:?}", times.iter().map(|(st,et)|{ (DateTime::<Utc>::from_timestamp_millis(*st).unwrap(),DateTime::<Utc>::from_timestamp_millis(*et).unwrap()) }).collect::<Vec<(DateTime::<Utc>,DateTime::<Utc>)>>()];
     let mut progress_bar = Progress::new();
     let no_iterations = Intv::iter().len() * times.len();
     let mut n: usize = 0;
+    let mut errors:Vec<(Intv,Vec<(u64,u64)>)>=vec![];
     for i in Intv::iter() {
         let ss = symbol.to_string();
         let klines_unordered = times
@@ -791,14 +795,22 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                 let st = st.clone();
                 let et = et.clone();
 
+                let st_disp=match DateTime::<Utc>::from_timestamp_millis(st){
+                    Some(s)=>s,
+                    None=>DateTime::<Utc>::default(),
+                };
+                let et_disp=match DateTime::<Utc>::from_timestamp_millis(et){
+                    Some(e)=>e,
+                    None=>DateTime::<Utc>::default(),
+                };
                 let bar: Bar = progress_bar.bar(
                     no_iterations,
                     format!(
                         "Downloading data for {} {} between: {} and: {}: {}/{}",
                         &s,
                         &i.to_str(),
-                        st,
-                        et,
+                        st_disp ,
+                        et_disp,
                         n,
                         no_iterations
                     ),
@@ -811,7 +823,7 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                         Ok(ap) => ap,
                         Err(e) => return Err(e),
                     };
-                    get_data_binance2(&client, &s, i, &asset_pool, st, et).await
+                    get_data_binance2(&client, &s, i, &asset_pool, st, et, true).await
                 });
                 progress_bar.inc_and_draw(&bar, n as usize);
                 n += 1;
@@ -822,10 +834,12 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
         while let Some(res) = ku.next().await {
             match res {
                 Ok(res2) => {
-                    //tracing::trace!["kline inserted for Symbol:{} Interval:{:?}", &symbol, intv];
                     match res2 {
-                        Ok(_) => {
-                            //tracing::trace!["kline inserted for Symbol:{} Interval:{:?}", &symbol, intv];
+                        Ok(r) => {
+                            match r{
+                                Some(err_vec)=>errors.push((i,err_vec)),
+                                None=>{}
+                            }
                         }
                         Err(e) => {
                             tracing::error!["Kline download error:{}", e];
@@ -837,8 +851,39 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                 }
             }
         }
-    }
+    };
+    if !errors.is_empty(){
+        let e=errors.iter().map(|(intv,evec)|{
+            evec.iter().map(|(st,et)|{
+                tracing::error!["Download Errors: Intv: {}  chunk from to {} to {}",intv.to_str(),st,et];
+            }).collect::<Vec<_>>();
+        }).collect::<Vec<_>>();
+        /* FIXME - implement resume downloads ad 
+        let mut retries=0;
+        while retries <=10{
+            let res=iterate_over_remaining_errors(errors, symbol).await?;
+            match res{
+                Some(e)=>{
+                    errors=e;
+                    retries+=1;
+                }
+                None=>{
+                    return Ok(())
+                }
+            }
+        };
+        //dump missing chunk report as binfile...
+        */
+    };
     Ok(())
+}
+#[allow(unused)]
+pub async fn iterate_over_remaining_errors(errors:Vec<(Intv,Vec<(u64,u64)>)>, symbol:&str)->Result<Option<Vec<(Intv,Vec<(u64,u64)>)>>>{
+    let asset_pool= connect_sqlite(format!["./databases/Asset{}.db", &symbol])
+        .await?;
+    let client: Market = Binance::new(None, None);
+            //get_data_binance2(&client, &symbol, *intv, &asset_pool, *st as i64, *et as i64, false).await
+    todo!()
 }
 
 pub async fn get_data_binance2(
@@ -848,57 +893,104 @@ pub async fn get_data_binance2(
     asset_pool: &Pool<Sqlite>,
     st: i64,
     et: i64,
-) -> Result<()> {
-    let no_datapoints = (st - et) / intv.to_ms();
+    pb:bool,
+) -> Result<Option<Vec<(u64,u64)>>> {
+    let no_datapoints = (et-st) / intv.to_ms();
     let no_iterations = no_datapoints / 500;
     let no_it = if no_iterations <= 1 { 1 } else { no_iterations };
+    let mut progress_bar = Progress::new();
+    let mut error_timestamps:Vec<(u64,u64)>=vec![];
+    let kline_table=format!["kline_{}", intv.to_str()];
     for n in 0..no_it {
+        let t1=(st + intv.to_ms() * n * 500) as u64 + 1;
+        let t2=(st + intv.to_ms() * (n + 1) * 500) as u64;
+
         let res = client
             .get_klines(
                 symbol,
                 intv.to_bin_str(),
                 None,
-                Some((st + intv.to_ms() * n * 500) as u64 + 1),
-                Some((st + intv.to_ms() * (n + 1) * 500) as u64),
+                Some(t1),
+                Some(t2),
             )
             .await;
-        let kk: Result<KlineSummaries> = match res {
-            Ok(k) => Ok(k),
-            Err(err) => Err(anyhow!("Binance error:{:?}", err)),
+        let kk: Option<KlineSummaries> = match res {
+            Ok(k) => Some(k),
+            Err(err) => {
+                let st_disp=match DateTime::<Utc>::from_timestamp_millis(st){
+                    Some(s)=>s,
+                    None=>DateTime::<Utc>::default(),
+                };
+                let et_disp=match DateTime::<Utc>::from_timestamp_millis(et){
+                    Some(e)=>e,
+                    None=>DateTime::<Utc>::default(),
+                };
+                tracing::error!["Binance error ERROR: {} for chunk: {} to {}",st_disp,et_disp, err];
+                error_timestamps.push((t1,t2));
+                None
+            }
         };
-        let k = kk?;
-        let klines = match k {
-            KlineSummaries::AllKlineSummaries(a) => a,
-        };
-        let kl = klines.iter().map(|k| kline_conv(&k)).collect::<Result<
-            Vec<(
-                i64,
-                DateTime<Utc>,
-                f64,
-                f64,
-                f64,
-                f64,
-                f64,
-                i64,
-                DateTime<Utc>,
-                f64,
-                u64,
-                f64,
-                f64,
-            )>,
-        >>();
-        let kline_chunk = kl?;
+        if let Some(k)= kk{
+            let klines = match k {
+                KlineSummaries::AllKlineSummaries(a) => a,
+            };
+            let kl = klines.iter().map(|k| kline_conv(&k)).collect::<Result<
+                Vec<(
+                    i64,
+                    DateTime<Utc>,
+                    f64,
+                    f64,
+                    f64,
+                    f64,
+                    f64,
+                    i64,
+                    DateTime<Utc>,
+                    f64,
+                    u64,
+                    f64,
+                    f64,
+                )>,
+            >>();
+            let kline_chunk = kl?;
 
-        if !kline_chunk.is_empty() {
-            let _res = append_kline(
-                asset_pool,
-                &format!["kline_{}", intv.to_str()],
-                &kline_chunk,
-            )
-            .await?;
+            if !kline_chunk.is_empty() {
+                let _res = append_kline(
+                    asset_pool,
+                    &kline_table,
+                    &kline_chunk,
+                )
+                .await?;
+            };
+        };
+        if pb{
+            let st_disp=match DateTime::<Utc>::from_timestamp_millis(st){
+                Some(s)=>s,
+                None=>DateTime::<Utc>::default(),
+            };
+            let et_disp=match DateTime::<Utc>::from_timestamp_millis(et){
+                Some(e)=>e,
+                None=>DateTime::<Utc>::default(),
+            };
+            let bar: Bar = progress_bar.bar(
+                no_it as usize,
+                format!(
+                    "Downloading data for {} {} between: {} and: {}: {}/{}",
+                    &symbol,
+                    &intv.to_str(),
+                    st_disp ,
+                    et_disp,
+                    n,
+                    no_it
+                ),
+            );
+            progress_bar.inc_and_draw(&bar, n as usize);
         };
     }
-    Ok(())
+    if error_timestamps.is_empty(){
+        return Ok(None);
+    }else{
+        return Ok(Some(error_timestamps))
+    };
 }
 
 async fn create_metadata_db() -> Result<()> {
@@ -1419,7 +1511,13 @@ impl SQLConn {
         exec_query(&meta_pool, &q).await?;
         let db_path = format!["./databases/Asset{}.db", asset_symbol];
         let file_path = std::path::Path::new(&db_path);
+        let fs_path=format!["{}-shm",&db_path];
+        let ws_path=format!["{}-wal",&db_path];
+        let file_path_shm= std::path::Path::new(&fs_path);
+        let file_path_wal= std::path::Path::new(&ws_path);
         std::fs::remove_file(file_path)?;
+        let _res=std::fs::remove_file(file_path_shm);
+        let _res=std::fs::remove_file(file_path_wal);
         Ok(())
     }
     pub async fn del_all_assets(&self) -> Result<()> {
@@ -1461,7 +1559,7 @@ impl SQLConn {
                 None=>BIN_TIMESTAMP
 
             };
-            tracing::debug!["download_single_asset initial_time {}",init_time];
+            tracing::debug!["download_single_asset initial_time {}", DateTime::<Utc>::from_timestamp_millis(init_time).unwrap()];
             create_db(&db_path).await?;
             let apool = connect_sqlite(&db_path).await?;
             cr_kl_tables(&apool).await?;
@@ -1472,12 +1570,19 @@ impl SQLConn {
         } else {
             let (start_time_ms, end_time_ms) =
                 get_asset_timestamps(&asset_symbol, &meta_pool).await?;
+            tracing::debug!["start_time_ms {:?} end_time_ms {:?} ", start_time_ms, end_time_ms];
             let start_time = match start_time_ms {
                 Some(st) => st,
                 None => BIN_TIMESTAMP,
             };
             let get_from_time = match end_time_ms {
-                Some(et) => et,
+                Some(et) => {
+                    if et <= current_timestamp{
+                        et
+                    }else{
+                        BIN_TIMESTAMP
+                    }
+                },
                 None => BIN_TIMESTAMP,
             };
             tracing::debug!["download_single_asset_ get_from_time {}", get_from_time];
