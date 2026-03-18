@@ -920,6 +920,21 @@ impl BinanceClient {
                 tracing::error!["Get balances error! {}", e];
             }
         };
+
+        let res = get_asset_bases_binance(&symbol).await;
+        match res{
+            Ok(res2) => {
+                match res2 {
+                    Some((base, qoute)) => {
+                        self.current_symbol_bases = (base, qoute);
+                    }
+                    None => (),
+                };
+            },
+            Err(e) => {
+                tracing::error!["get asset_bases ERROR: {}", e];
+            }
+        };
         let mut live_b = live_ad
             .lock()
             .expect("Poisoned live AD mutex at get_initial_data");
@@ -1245,11 +1260,7 @@ impl BinanceClient {
                         let string_error = format!["{}", e];
                         tracing::error!(
                             "{}",
-                            anyhow![
-                                "{:?} Unable to connect to ws  e:{}",
-                                i.clone(),
-                                e.context(ERR_CTX)
-                            ]
+                                e
                         );
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
@@ -1299,17 +1310,16 @@ impl BinanceClient {
                 ref priv_key,
             } => {
                 let res = self.add_replace_api_keys(pub_key, priv_key).await;
+                let ad_d = self.live_ad.clone();
+                let symbol = self.current_symbol.clone();
+                let _res=self.refresh_balances(&symbol, ad_d).await;
                 let resp: BinResponse = match res {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
                         tracing::error!(
                             "{}",
-                            anyhow![
-                                "{:?} Unable to replace api keys: {}",
-                                i.clone(),
-                                e.context(ERR_CTX)
-                            ]
+                                e
                         );
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }

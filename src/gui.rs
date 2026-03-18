@@ -3489,7 +3489,6 @@ pub struct Settings {
 
     pub balances: HashMap<String, (f64, f64)>,
 }
-
 impl Settings {
     pub fn new() -> Self {
         Settings {
@@ -3556,11 +3555,13 @@ impl Settings {
                     let _res = cli_chan.send(msg);
                     if settings.enc_api_keys {
                         let pass = settings.password_string.clone();
-                        let _res = settings.encrypt_keys(pass);
+                        let _res = settings.encrypt_keys(pass.clone());
+                        let _res = settings.save_settings_file(Some(pass));
                     } else {
                         settings.binance_pub_key = Some(settings.api_key_enter_string.clone());
                         settings.binance_priv_key =
                             Some(settings.priv_api_key_enter_string.clone());
+                        let _res = settings.save_settings_file(None);
                     };
                     settings.password_string = String::default();
                     settings.api_key_enter_string = String::default();
@@ -3638,6 +3639,8 @@ impl Settings {
                                         BinInstructs::AddReplaceApiKeys { pub_key, priv_key },
                                     );
                                     let _res = cli_chan.send(msg);
+                                    settings.binance_pub_key=None;
+                                    settings.binance_priv_key=None;
                                 } else {
                                     tracing::error!["API keys none!"]
                                 };
@@ -3750,7 +3753,7 @@ impl Settings {
         match res {
             true => {}
             false => {
-                tracing::error!["Password invalid"];
+                tracing::error!["Password too short - 16 characters or more"];
                 return Ok(());
             }
         };
@@ -3787,6 +3790,8 @@ impl Settings {
     }
     pub fn save_settings_file(&mut self, password: Option<String>) -> Result<()> {
         self.password_string = String::default();
+        self.api_key_enter_string= String::default();
+        self.priv_api_key_enter_string= String::default();
         match password {
             Some(pass) => {
                 let _ = self.encrypt_keys(pass);
@@ -3808,7 +3813,9 @@ impl Settings {
     }
     pub fn save_default_file() -> Result<()> {
         let config = config::standard();
-        let res = bincode::encode_to_vec(Settings::default(), config)?;
+        let s=Settings::new();
+        tracing::debug!["{:?}",s];
+        let res = bincode::encode_to_vec(s, config)?;
         let mut file = std::fs::File::create(SETTINGS_SAVE_PATH)?;
         file.write_all(&res)?;
         Ok(())
@@ -3818,8 +3825,8 @@ impl Settings {
         let res = std::fs::File::open(SETTINGS_SAVE_PATH);
         let mut file = match res {
             Ok(file) => file,
-            Err(e) => {
-                tracing::error!["Load settings error: {}", e];
+            Err(_e) => {
+                //tracing::error!["Load settings error: {}", e];
                 return Ok(None);
             }
         };

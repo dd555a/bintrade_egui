@@ -50,6 +50,13 @@ async fn check_sleep_channel(mut chan: watch::Receiver<BinInstructs>, bin_client
                 *bin_client = cli;
                 break;
             }
+            BinInstructs::RemoveApiKeys 
+             => {
+                let cli: Account =
+                    Binance::new(None, None);
+                *bin_client = cli;
+                break;
+            }
             _ => {}
         }
     }
@@ -59,14 +66,31 @@ pub fn load_settings() -> Result<Settings> {
     let r = Settings::load_settings_enc();
     let res = match r {
         Ok(s) => s,
-        Err(e) => {
-            tracing::error!["{}", e];
+        Err(_) => {
+            let res=Settings::save_default_file();
+            tracing::info!["Settings.bin file not found, saving default"];
+            match res{
+                Ok(_)=>(),
+                Err(e)=>{
+                    tracing::error!["Create default settings file ERROR: {}",e];
+                }
+            };
             None
         }
     };
     let sett = match res {
         Some(settings) => settings,
-        None => Settings::new(),
+        None => {
+            let res=Settings::save_default_file();
+            tracing::info!["Settings.bin file not found, saving default"];
+            match res{
+                Ok(_)=>(),
+                Err(e)=>{
+                    tracing::error!["Create default settings file ERROR: {}",e];
+                }
+            };
+            Settings::new()
+        }
     };
     Ok(sett)
 }
@@ -555,8 +579,8 @@ impl ClientTask {
                         .lock()
                         .expect("Unable to unlock live info mutex- start_binclient");
                     live_i.keys_status = KeysStatus::Invalid;
-                    tracing::error![
-                        "Unable to get account: ERROR, setting API key status as invalid, ERROR: {}",
+                    tracing::info![
+                        "Unable to get account info, setting API key status as invalid, ERROR: {}",
                         e
                     ];
                 }
@@ -648,8 +672,7 @@ impl ClientTask {
                                 break;
                             }
                             _ = check_sleep_channel(recv_from_client2.clone(),&mut bin_client) =>{
-                                tracing::trace!("Api keys changed 2");
-                                tracing::trace!["check_sleep_channel break called"];
+                                tracing::debug!("Api keys changed 2");
                                 break;
                             }
                         };
@@ -832,7 +855,7 @@ pub fn cli_run() -> Result<()> {
                     tracing::error!["Unable to save default Settings.bin file, ERROR: {}", e];
                 }
             }
-            (Settings::default(), None)
+            (Settings::new(), None)
         }
     };
     let frontend = Frontend::Desktop;
