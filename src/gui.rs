@@ -148,6 +148,9 @@ impl KlinePlot {
         let ad = live_ad.lock().expect("Live AD mutex locked");
         if let Some(live_inf) = live_info {
             live_inf.live_asset_symbol_changed = ad.live_asset_symbol_changed.clone();
+            if !live_inf.live_asset_symbol_changed.1.is_empty() {
+                self.symbol = live_inf.live_asset_symbol_changed.1.clone()
+            };
             live_inf.acc_balances = ad.acc_balances.clone();
             live_inf.current_pair_strings = ad.current_pair_strings.clone();
             live_inf.current_pair_free_balances = ad.current_pair_free_balances.clone();
@@ -3290,6 +3293,7 @@ impl LivePlot {
         ui: &mut egui::Ui,
         live_info: &mut LiveInfo,
     ) {
+        live_plot.symbol = live_info.live_asset_symbol_changed.1.clone();
         live_plot.kline_plot.show_live(
             ui,
             live_plot.live_asset_data.clone(),
@@ -3332,13 +3336,13 @@ impl LivePlot {
                 let _res = cli_chan.send(msg);
             };
             if ui.button("Reload chart").clicked() {
-                let msg = ClientInstruct::StopBinCli;
-                let _res = cli_chan.send(msg);
-                let msg = ClientInstruct::StartBinCli;
+                let msg = ClientInstruct::SendBinInstructs(BinInstructs::ReConnectWS);
                 let _res = cli_chan.send(msg);
             };
             if ui.button("Stop chart").clicked() {
-                let msg = ClientInstruct::StopBinCli;
+                //let msg = ClientInstruct::StopBinCli;
+                //let _res = cli_chan.send(msg);
+                let msg = ClientInstruct::SendBinInstructs(BinInstructs::Disconnect);
                 let _res = cli_chan.send(msg);
             };
         });

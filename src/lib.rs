@@ -124,6 +124,7 @@ pub enum BinInstructs {
     ConnectWS {
         params: HashMap<String, Vec<String>>,
     },
+    ReConnectWS,
     ConnectUserWS {
         params: Value,
     },
@@ -168,6 +169,7 @@ impl BinInstructs {
             BinInstructs::ConnectWS { params: _ } => "BinInstruct: Connect WS",
             BinInstructs::ConnectUserWS { params: _ } => "BinInstruct: Connect User WS",
             BinInstructs::Disconnect => "BinInstruct: Disconnect",
+            BinInstructs::ReConnectWS => "BinInstruct: Reconnect",
             BinInstructs::UpdateSettings(_) => "BinInstructs: update settings",
             BinInstructs::GetUserData => "BinInstruct: GetUserData",
             BinInstructs::GetAllBalances => "Get all balances Binance",
