@@ -654,8 +654,8 @@ impl HistTrade {
         &mut self,
         trade_slice: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
         eval_mode: &EvalMode,
-        active_orders: Vec<(i32, Order)>,
-    ) -> Vec<(i32, Order)> {
+        active_orders: Vec<(u64, Order)>,
+    ) -> Vec<(u64, Order)> {
         match active_orders.len() {
             0 => return vec![],
             1 => {

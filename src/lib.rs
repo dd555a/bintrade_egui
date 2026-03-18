@@ -114,7 +114,7 @@ pub enum BinResponse {
     None,
     Success,
     Failure((String, GeneralError)),
-    OrderStatus(i32),
+    OrderStatus(u64),
 }
 
 #[derive(PartialEq, EnumIter, Debug, Clone, Default)]
@@ -145,12 +145,12 @@ pub enum BinInstructs {
         o: Order,
     },
     CancelAndReplaceOrder {
-        id: i32,
+        id: u64,
         symbol: String,
         o: Order,
     },
     CancelOrder {
-        id: i32,
+        id: u64,
         symbol: String,
         o: Order,
     },

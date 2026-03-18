@@ -153,8 +153,8 @@ impl KlinePlot {
             };
             live_inf.acc_balances = ad.acc_balances.clone();
             live_inf.current_pair_strings = ad.current_pair_strings.clone();
-            live_inf.current_pair_free_balances = ad.current_pair_free_balances.clone();
-            live_inf.current_pair_locked_balances = ad.current_pair_locked_balances.clone();
+            //live_inf.current_pair_free_balances = ad.current_pair_free_balances.clone();
+            //live_inf.current_pair_locked_balances = ad.current_pair_locked_balances.clone();
         };
         let ret = match return_wicks {
             Some(ret_wicks) => {
@@ -518,9 +518,9 @@ impl KlinePlot {
             self.add_live(k, &div, &width, false);
             self.loading = false;
         } else {
-            //tracing::debug!["max load points separation{:?}",k];
+            //tracing::trace!["max load points separation{:?}",k];
             let kl = &k[(k.len() - max_load_points)..];
-            //tracing::debug!["max load points separation{:?}",kl];
+            //tracing::trace!["max load points separation{:?}",kl];
             self.loading = true;
 
             if hist == true {
@@ -831,7 +831,6 @@ fn get_chart_params(intv: &Intv) -> (f64, f64) {
     }
 }
 
-//FIXME
 #[allow(unused)]
 fn grid_spacer_1min(input: GridInput) -> [f64; 3] {
     [60.0, 60.0, 1.0]
@@ -1431,7 +1430,7 @@ pub struct LiveInfo {
     pub current_pair_strings: (String, String),
     pub current_pair_free_balances: (f64, f64),
     pub current_pair_locked_balances: (f64, f64),
-    pub live_orders: HashMap<i32, (Order, bool)>,
+    pub live_orders: HashMap<u64, (Order, bool)>,
     pub keys_status: KeysStatus,
     pub live_info_changed: bool,
 }
@@ -1770,14 +1769,14 @@ pub struct ManualOrders {
     buy: bool,
     price_string: String,
     stop_price_string: String,
-    orders: HashMap<i32, (Order, bool)>,
+    orders: HashMap<u64, (Order, bool)>,
     asset1: f64,
     asset2: f64,
 
     asset1_locked: f64,
     asset2_locked: f64,
 
-    last_id: i32,
+    last_id: u64,
     asset1_name: String,
     asset2_name: String,
 
@@ -1797,7 +1796,7 @@ pub struct ManualOrders {
 impl Default for ManualOrders {
     fn default() -> Self {
         Self {
-            so_mode: SingleOrderMode::default(),
+            so_mode: SingleOrderMode::new(),
             last_slice_time: DateTime::<Utc>::default(),
             eval_mode: EvalMode::default(),
             man_orders: None,
@@ -1853,7 +1852,7 @@ impl Default for ManualOrders {
 }
 
 #[instrument(level = "trace")]
-fn link_hline_orders(orders: &HashMap<i32, (Order, bool)>, hlines: &mut Vec<HLine>) {
+fn link_hline_orders(orders: &HashMap<u64, (Order, bool)>, hlines: &mut Vec<HLine>) {
     hlines.clear();
     let _ = orders
         .iter()
@@ -1926,15 +1925,11 @@ macro_rules! make_hotkey_shift{
     };
 }
 
-#[allow(unused)]
 const K0: f32 = 1.00;
-#[allow(unused)]
-const K0_INC: f32 = 0.001;
+const K0_INC: f32 = 0.002;
 
-#[allow(unused)]
 const K1: f32 = 1.01;
-#[allow(unused)]
-const K1_INC: f32 = 0.001;
+const K1_INC: f32 = 0.002;
 
 #[allow(unused)]
 #[derive(Clone, Default, Debug)]
@@ -1955,6 +1950,17 @@ pub struct SingleOrderMode {
 
     parse_ks: bool,
     place_order: bool,
+}
+impl SingleOrderMode {
+    fn new() -> Self {
+        Self {
+            k0_i: K0_INC,
+            k1_i: K1_INC,
+            k0_intv_s: "0.002".to_string(),
+            k1_intv_s: "0.002".to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 fn show_hotkeys(ui: &mut egui::Ui) {
@@ -2000,7 +2006,7 @@ impl SingleOrderMode {
         ui: &mut egui::Ui,
         last_price: &f64,
         cli_chan: watch::Sender<ClientInstruct>,
-        hist_orders: Option<&mut HashMap<i32, (Order, bool)>>,
+        hist_orders: Option<&mut HashMap<u64, (Order, bool)>>,
         sym: &str,
     ) {
         let hk_active = &self.hk_active;
@@ -2023,9 +2029,9 @@ impl SingleOrderMode {
 
         let trade_forward = make_hotkey_shift![Key, L, ui, hk_active];
         let delete_all_orders = make_hotkey_alt![Key, D, ui, hk_active];
-        //tracing::debug!["hk_active: {}", hk_active];
+        //tracing::trace!["hk_active: {}", hk_active];
         if delete_all_orders {
-            tracing::debug!["DEl all orders presed"];
+            tracing::trace!["DEl all orders presed"];
             if let Some(ref ho) = hist_orders {
             } else {
                 let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
@@ -2037,7 +2043,7 @@ impl SingleOrderMode {
 
         if self.asset1_held {
             let qoute_asset_now = make_hotkey_ctrl![Key, R, ui, hk_active];
-            tracing::debug!["Qute asset now pressed!"];
+            tracing::trace!["Qute asset now pressed!"];
             if qoute_asset_now && hist_orders.is_none() {
                 let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
                     symbol: sym.to_string(),
@@ -2055,7 +2061,7 @@ impl SingleOrderMode {
             }
         };
         if self.parse_ks {
-            tracing::debug!["parse_ks called"];
+            tracing::trace!["parse_ks called"];
             let res = &self.k0_intv_s.parse::<f32>();
             self.k0_i = match res {
                 Ok(pp) => *pp,
@@ -2556,8 +2562,10 @@ impl ManualOrders {
                     //h_trade.asset1=man_orders.asset1 ;
                     //h_trade.asset2=man_orders.asset2 ;
                 } else {
-                    man_orders.asset1 = h_trade.asset1;
-                    man_orders.asset2 = h_trade.asset2;
+                    if live_info.is_none() {
+                        man_orders.asset1 = h_trade.asset1;
+                        man_orders.asset2 = h_trade.asset2;
+                    };
                 };
                 if let Some(symbol_inf) = symbol_info {
                     man_orders.current_symbol = symbol_inf.0.clone();
@@ -2572,14 +2580,14 @@ impl ManualOrders {
                         tracing::trace!["last_time:{}", last_time];
                         tracing::trace!["last_slice_time:{}", man_orders.last_slice_time];
                         tracing::trace!["last_slice_len:{}", t_slice.len()];
-                        let active_orders: Vec<(i32, Order)> = man_orders
+                        let active_orders: Vec<(u64, Order)> = man_orders
                             .orders
                             .iter()
                             .filter(|(_, (_, active))| *active == true)
                             .map(|(id, (order, _active))| (*id, *order))
                             .collect();
                         tracing::trace!["active_orders:{}", active_orders.len()];
-                        let inactive_orders: Vec<(i32, Order)> = man_orders
+                        let inactive_orders: Vec<(u64, Order)> = man_orders
                             .orders
                             .iter()
                             .filter(|(_, (_, active))| *active == false)
@@ -2592,7 +2600,7 @@ impl ManualOrders {
                             "remaining_active_orders:{}",
                             remaining_active_orders.len()
                         ];
-                        let mut remaining_orders: HashMap<i32, (Order, bool)> = inactive_orders
+                        let mut remaining_orders: HashMap<u64, (Order, bool)> = inactive_orders
                             .iter()
                             .map(|(id, order)| (*id, (*order, false)))
                             .collect();
@@ -2658,7 +2666,7 @@ impl ManualOrders {
                 egui::vec2(50.0, 20.0),
                 egui::Label::new(
                     RichText::new(format![
-                        "{}:{:.2}",
+                        "{}:{:.6}",
                         man_orders.asset1_name, man_orders.asset1
                     ])
                     .color(Color32::from_rgb(255, 207, 38)),
@@ -2668,7 +2676,7 @@ impl ManualOrders {
                 ui.add_sized(
                     egui::vec2(50.0, 20.0),
                     egui::Label::new(
-                        RichText::new(format!["(locked):{:.2}", man_orders.asset1_locked])
+                        RichText::new(format!["(locked):{:.6}", man_orders.asset1_locked])
                             .color(Color32::from_rgb(247, 235, 150)),
                     ),
                 );
@@ -3062,6 +3070,7 @@ impl ManualOrders {
                 };
                 if let Some(live_inf) = live_info {
                     man_orders.orders = live_inf.live_orders.clone();
+                    man_orders.current_symbol = live_inf.live_asset_symbol_changed.1.clone();
 
                     match live_inf.keys_status {
                         KeysStatus::Invalid => {
@@ -3134,7 +3143,7 @@ impl ManualOrders {
                                     ui.label(format!["{}", id]);
                                 });
                                 row.col(|ui| {
-                                    ui.label(format!["{} %", order.get_qnt() * 100.0]);
+                                    ui.label(format!["{:.3} %", order.get_qnt() * 100.0]);
                                 });
                                 row.col(|ui| {
                                     ui.label(format!["{}", order.get_price()]);
@@ -3146,8 +3155,12 @@ impl ManualOrders {
                                     ui.label(order.get_side_str());
                                 });
                                 row.col(|ui| {
-                                    if ui.button("Delete").clicked() {
+                                    if ui.button("Cancel").clicked() {
                                         if let Some(_live_inf) = live_info {
+                                            tracing::trace![
+                                                "man_orders symbols {}",
+                                                man_orders.current_symbol.clone()
+                                            ];
                                             let msg = ClientInstruct::SendBinInstructs(
                                                 BinInstructs::CancelOrder {
                                                     id: *id,
@@ -3639,8 +3652,8 @@ impl Settings {
                                         BinInstructs::AddReplaceApiKeys { pub_key, priv_key },
                                     );
                                     let _res = cli_chan.send(msg);
-                                    settings.binance_pub_key=None;
-                                    settings.binance_priv_key=None;
+                                    settings.binance_pub_key = None;
+                                    settings.binance_priv_key = None;
                                 } else {
                                     tracing::error!["API keys none!"]
                                 };
@@ -3790,8 +3803,8 @@ impl Settings {
     }
     pub fn save_settings_file(&mut self, password: Option<String>) -> Result<()> {
         self.password_string = String::default();
-        self.api_key_enter_string= String::default();
-        self.priv_api_key_enter_string= String::default();
+        self.api_key_enter_string = String::default();
+        self.priv_api_key_enter_string = String::default();
         match password {
             Some(pass) => {
                 let _ = self.encrypt_keys(pass);
@@ -3813,8 +3826,8 @@ impl Settings {
     }
     pub fn save_default_file() -> Result<()> {
         let config = config::standard();
-        let s=Settings::new();
-        tracing::debug!["{:?}",s];
+        let s = Settings::new();
+        tracing::trace!["{:?}", s];
         let res = bincode::encode_to_vec(s, config)?;
         let mut file = std::fs::File::create(SETTINGS_SAVE_PATH)?;
         file.write_all(&res)?;

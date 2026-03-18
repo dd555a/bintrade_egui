@@ -50,10 +50,8 @@ async fn check_sleep_channel(mut chan: watch::Receiver<BinInstructs>, bin_client
                 *bin_client = cli;
                 break;
             }
-            BinInstructs::RemoveApiKeys 
-             => {
-                let cli: Account =
-                    Binance::new(None, None);
+            BinInstructs::RemoveApiKeys => {
+                let cli: Account = Binance::new(None, None);
                 *bin_client = cli;
                 break;
             }
@@ -67,12 +65,12 @@ pub fn load_settings() -> Result<Settings> {
     let res = match r {
         Ok(s) => s,
         Err(_) => {
-            let res=Settings::save_default_file();
+            let res = Settings::save_default_file();
             tracing::info!["Settings.bin file not found, saving default"];
-            match res{
-                Ok(_)=>(),
-                Err(e)=>{
-                    tracing::error!["Create default settings file ERROR: {}",e];
+            match res {
+                Ok(_) => (),
+                Err(e) => {
+                    tracing::error!["Create default settings file ERROR: {}", e];
                 }
             };
             None
@@ -81,12 +79,12 @@ pub fn load_settings() -> Result<Settings> {
     let sett = match res {
         Some(settings) => settings,
         None => {
-            let res=Settings::save_default_file();
+            let res = Settings::save_default_file();
             tracing::info!["Settings.bin file not found, saving default"];
-            match res{
-                Ok(_)=>(),
-                Err(e)=>{
-                    tracing::error!["Create default settings file ERROR: {}",e];
+            match res {
+                Ok(_) => (),
+                Err(e) => {
+                    tracing::error!["Create default settings file ERROR: {}", e];
                 }
             };
             Settings::new()

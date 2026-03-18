@@ -1,7 +1,7 @@
 use binance::account::*;
 use binance::api::Binance;
 use binance::rest_model::{
-    AccountInformation, Order as BinanceOrder, OrderSide, OrderType, TimeInForce,
+    AccountInformation, Order as BinanceOrder, OrderSide, OrderStatus, OrderType, TimeInForce,
 };
 use tokio::time::{Duration, sleep};
 
@@ -29,7 +29,7 @@ use crate::data::{
     AssetData, Intv, Kline as KlineMine, Klines, get_asset_bases_binance, validate_asset_binance,
 };
 use crate::gui::{KeysStatus, LiveInfo, Settings};
-use crate::trade::{LimitStatus, Order, Quant};
+use crate::trade::{LimitStatus, Order, Quant, StopStatus};
 use crate::{BinInstructs, BinResponse, GeneralError};
 
 use chrono::{DateTime, Utc};
@@ -209,6 +209,7 @@ async fn get_latest_wicks(
     };
 }
 
+#[allow(unused)]
 #[allow(non_snake_case)]
 #[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
 struct AggTradeWS {
@@ -660,7 +661,7 @@ pub struct BinanceClient {
     pub qoute_balances: (f64, f64),
     pub balances: HashMap<String, (f64, f64)>,
     pub current_symbol_bases: (String, String),
-    pub live_orders: HashMap<i32, (Order, bool)>,
+    pub live_orders: HashMap<u64, (Order, bool)>,
     pub stop_client: bool,
     pub ws_connect: bool,
 
@@ -756,53 +757,65 @@ impl BinanceClient {
             let res = binance.get_all_open_orders().await;
             match res {
                 Ok(orders) => {
-                    let ((a1_string, a2_string), (a1_l_old, a2_l_old)) = {
+                    let ((a1_string, a2_string), (a1_l_old, a2_l_old), (a1_f_old, a2_f_old)) = {
                         let live_i = live_info.lock().expect("Live info mutex poisoned!");
                         (
                             live_i.current_pair_strings.clone(),
                             (live_i.current_pair_locked_balances),
+                            (live_i.current_pair_free_balances),
                         )
                     };
-                    let a1_locked = if !&a1_string.is_empty() {
+                    let (a1_locked, a1_free) = if !&a1_string.is_empty() {
                         let res_a1 = binance.get_balance(&a1_string).await;
                         match res_a1 {
-                            Ok(balance) => balance.free,
+                            Ok(balance) => (balance.locked, balance.free),
                             Err(e) => {
                                 tracing::error![
                                     "check_live_orders_change ERROR: {} asset: {}",
                                     e,
                                     &a1_string
                                 ];
-                                a1_l_old
+                                (a1_l_old, a1_f_old)
                             }
                         }
                     } else {
-                        a1_l_old
+                        tracing::trace!["Unable to update balance for a1_string empty"];
+                        (a1_l_old, a1_f_old)
                     };
-                    let a2_locked = if !&a2_string.is_empty() {
+                    let (a2_locked, a2_free) = if !&a2_string.is_empty() {
                         let res_a2 = binance.get_balance(&a2_string).await;
                         match res_a2 {
-                            Ok(balance) => balance.free,
+                            Ok(balance) => (balance.locked, balance.free),
                             Err(e) => {
                                 tracing::error![
                                     "check_live_orders_change ERROR: {} asset: {}",
                                     e,
                                     &a2_string
                                 ];
-                                a2_l_old
+                                (a2_l_old, a2_f_old)
                             }
                         }
                     } else {
-                        a2_l_old
+                        tracing::trace!["Unable to update balance for a1_string empty"];
+                        (a2_l_old, a2_f_old)
                     };
+                    tracing::trace!["a1_locked: {}, a2_locked: {}", a1_locked, a2_locked];
+                    tracing::trace!["a1_free: {}, a2_free: {}", a1_free, a2_free];
                     let mut live_orders = HashMap::default();
                     let _res: Vec<_> = orders
                         .iter()
                         .map(|order_binance| {
-                            let res = from_binance_order(&order_binance, &a1_locked, &a2_locked);
+                            let res = from_binance_order(
+                                &order_binance,
+                                &a1_locked,
+                                &a2_locked,
+                                &a1_free,
+                                &a2_free,
+                            );
                             match res {
                                 Ok(o) => {
-                                    live_orders.insert(order_binance.order_id as i32, (o, true));
+                                    tracing::trace!["{:?}", &order_binance];
+                                    live_orders.insert(order_binance.order_id, (o, true));
                                 }
                                 Err(e) => {
                                     tracing::error!["check_live_orders_change {}", e];
@@ -812,6 +825,16 @@ impl BinanceClient {
                         .collect();
                     let mut live_inf = live_info.lock().expect("Live info mutex poisoned!");
                     live_inf.live_orders = live_orders;
+                    live_inf.current_pair_locked_balances = (a1_locked, a2_locked);
+                    live_inf.current_pair_free_balances = (a1_free, a2_free);
+                    tracing::trace![
+                        "live_inf (conn side) {:?}",
+                        &live_inf.current_pair_free_balances
+                    ];
+                    tracing::trace![
+                        "live_inf (conn side)locked {:?}",
+                        &live_inf.current_pair_locked_balances
+                    ];
                 }
                 Err(e) => {
                     tracing::error!["check_live_orders_change {}", e];
@@ -821,10 +844,10 @@ impl BinanceClient {
             sleep(Duration::from_millis(ORDER_CHECK_INTV_MS)).await;
         }
     }
-    async fn cancel_order(&self, sym: &str, id: &i32) -> Result<()> {
+    async fn cancel_order(&self, sym: &str, id: &u64) -> Result<()> {
         let order_cancelation = OrderCancellation {
             symbol: sym.to_string(),
-            order_id: Some(*id as u64),
+            order_id: Some(*id),
             orig_client_order_id: None,
             new_client_order_id: None,
             recv_window: None,
@@ -922,7 +945,7 @@ impl BinanceClient {
         };
 
         let res = get_asset_bases_binance(&symbol).await;
-        match res{
+        match res {
             Ok(res2) => {
                 match res2 {
                     Some((base, qoute)) => {
@@ -930,7 +953,7 @@ impl BinanceClient {
                     }
                     None => (),
                 };
-            },
+            }
             Err(e) => {
                 tracing::error!["get asset_bases ERROR: {}", e];
             }
@@ -1022,11 +1045,12 @@ impl BinanceClient {
                     &order_binance,
                     &self.base_balances.1,
                     &self.qoute_balances.1,
+                    &self.base_balances.0,
+                    &self.qoute_balances.0,
                 );
                 match res {
                     Ok(o) => {
-                        self.live_orders
-                            .insert(order_binance.order_id as i32, (o, true));
+                        self.live_orders.insert(order_binance.order_id, (o, true));
                     }
                     Err(e) => {
                         tracing::error!["{}", e];
@@ -1258,10 +1282,7 @@ impl BinanceClient {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        tracing::error!(
-                            "{}",
-                                e
-                        );
+                        tracing::error!("{}", e);
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
@@ -1312,15 +1333,12 @@ impl BinanceClient {
                 let res = self.add_replace_api_keys(pub_key, priv_key).await;
                 let ad_d = self.live_ad.clone();
                 let symbol = self.current_symbol.clone();
-                let _res=self.refresh_balances(&symbol, ad_d).await;
+                let _res = self.refresh_balances(&symbol, ad_d).await;
                 let resp: BinResponse = match res {
                     Ok(_) => BinResponse::Success,
                     Err(e) => {
                         let string_error = format!["{}", e];
-                        tracing::error!(
-                            "{}",
-                                e
-                        );
+                        tracing::error!("{}", e);
                         BinResponse::Failure((string_error, GeneralError::Generic))
                     }
                 };
@@ -1552,26 +1570,41 @@ impl To6Fig<f32> for f32 {
 }
 
 fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
-    let (side, order_type, quantity, _qoute_qnt, price, stop_price): (
+    let (side, order_type, quantity, quote_order_qty, price, stop_price, time_in_force): (
         OrderSide,
         OrderType,
         Option<f64>,
         Option<f64>,
         Option<f64>,
         Option<f64>,
+        Option<TimeInForce>,
     ) = match o {
         Order::Market { buy: b, quant: q } => {
             let (side, quant) = match b {
                 true => {
-                    let quant = q.get_f64() * a2;
-                    (OrderSide::Buy, quant)
+                    let quant = q.get_f64() * a1;
+                    (OrderSide::Buy, quant.to_6fig())
                 }
                 false => {
-                    let quant = q.get_f64() * a1;
-                    (OrderSide::Sell, quant)
+                    let quant = q.get_f64() * a2;
+                    return OrderRequest {
+                        symbol: sym.to_string(),
+                        side: OrderSide::Sell,
+                        order_type: OrderType::Market,
+                        time_in_force: None,
+                        quantity: Some(quant),
+                        quote_order_qty: None,
+                        price: None,
+                        new_client_order_id: None,
+                        stop_price: None,
+                        iceberg_qty: None,
+                        new_order_resp_type: None,
+                        recv_window: None,
+                    };
+                    //(OrderSide::Sell, quant.to_6fig())
                 }
             };
-            (side, OrderType::Market, Some(quant), None, None, None)
+            (side, OrderType::Market, None, Some(quant), None, None, None)
         }
         Order::Limit {
             buy: b,
@@ -1582,20 +1615,11 @@ fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
             let (side, quant) = match b {
                 true => {
                     let quant = q.get_f64() * a1 / p;
-                    //FIXME find a way to divide this correcrly.... minimum step size
-                    //get lot siz&e, chekc that quantity is correct
-                    /*
-                    eprintln!["Quantity: {}",q.get_f64()];
-                    eprintln!["Price: {}",p];
-                    eprintln!["A2: {}",a2];
-                    eprintln!["A1: {}",a1];
-                    eprintln!["quant: {}",quant];
-                    eprintln!["qq: {}",qq];
-                     * */
                     (OrderSide::Buy, quant.to_6fig())
                 }
                 false => {
-                    let quant = q.get_f64() * a2 * p;
+                    let quant = q.get_f64() * a2;
+                    tracing::debug!["limit_quant {}", quant];
                     (OrderSide::Sell, quant.to_6fig())
                 }
             };
@@ -1606,6 +1630,7 @@ fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
                 None,
                 Some(p.clone()),
                 None,
+                Some(TimeInForce::GTC),
             )
         }
         Order::StopLimit {
@@ -1622,7 +1647,7 @@ fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
                     (OrderSide::Buy, quant.to_6fig())
                 }
                 false => {
-                    let quant = q.get_f64() * a2 * p;
+                    let quant = q.get_f64() * a2;
                     (OrderSide::Sell, quant.to_6fig())
                 }
             };
@@ -1631,8 +1656,9 @@ fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
                 OrderType::StopLossLimit,
                 Some(quant),
                 None,
-                Some(p.clone()),
+                Some(p.to_6fig().clone()),
                 Some(sp.to_6fig().clone() as f64),
+                Some(TimeInForce::GTC),
             )
         }
         Order::StopMarket {
@@ -1647,7 +1673,7 @@ fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
                     (OrderSide::Buy, quant.to_6fig())
                 }
                 false => {
-                    let quant = q.get_f64() * a2 * p;
+                    let quant = q.get_f64() * a2;
                     (OrderSide::Sell, quant.to_6fig())
                 }
             };
@@ -1656,19 +1682,20 @@ fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
                 OrderType::StopLoss,
                 Some(quant),
                 None,
-                Some(p.clone()),
+                None,
+                Some(p.to_6fig().clone() as f64),
                 None,
             )
         }
-        _ => panic!(),
+        _ => panic!("Order type not yet implemented"),
     };
     OrderRequest {
         symbol: sym.to_string(),
         side,
         order_type,
-        time_in_force: Some(TimeInForce::GTC),
+        time_in_force,
         quantity,
-        quote_order_qty: None,
+        quote_order_qty,
         price: price,
         new_client_order_id: None,
         stop_price,
@@ -1678,14 +1705,22 @@ fn parse_to_binance(sym: &str, o: &Order, a1: f64, a2: f64) -> OrderRequest {
     }
 }
 
-fn from_binance_order(bo: &BinanceOrder, locked_a1: &f64, locked_a2: &f64) -> Result<Order> {
+fn from_binance_order(
+    bo: &BinanceOrder,
+    locked_a1: &f64,
+    locked_a2: &f64,
+    free_a1: &f64,
+    free_a2: &f64,
+) -> Result<Order> {
     let (side, quant) = match bo.side {
         OrderSide::Buy => {
-            let quant = Quant::from_f64(bo.orig_qty / locked_a2);
+            let quant = Quant::from_f64(
+                bo.orig_qty * bo.price / (free_a2 + locked_a2), /*locked_a2/(free_a2+locked_a2)*/
+            );
             (true, quant)
         }
         OrderSide::Sell => {
-            let quant = Quant::from_f64(bo.orig_qty / locked_a1);
+            let quant = Quant::from_f64(bo.orig_qty / (locked_a1 + free_a1));
             (false, quant)
         }
     };
@@ -1713,10 +1748,61 @@ fn from_binance_order(bo: &BinanceOrder, locked_a1: &f64, locked_a2: &f64) -> Re
             })
         }
         OrderType::StopLoss => {
-            todo!()
+            let stop_status = {
+                if bo.executed_qty == 0.0 {
+                    StopStatus::Untouched
+                } else {
+                    StopStatus::Triggered
+                }
+            };
+            let (side, quant) = match bo.side {
+                OrderSide::Buy => {
+                    let quant = Quant::from_f64(
+                        bo.orig_qty * bo.stop_price / (free_a2 + locked_a2), /*locked_a2/(free_a2+locked_a2)*/
+                    );
+                    (true, quant)
+                }
+                OrderSide::Sell => {
+                    let quant = Quant::from_f64(bo.orig_qty / (locked_a1 + free_a1));
+                    (false, quant)
+                }
+            };
+            Ok(Order::StopMarket {
+                buy: side,
+                quant,
+                price: bo.stop_price,
+                stop_status,
+            })
         }
-        OrderType::TakeProfit => {
-            todo!()
+        OrderType::StopLossLimit => {
+            let stop_status = {
+                if bo.status != OrderStatus::Trade {
+                    StopStatus::Untouched
+                } else {
+                    StopStatus::Triggered
+                }
+            };
+            let limit_status = {
+                if bo.executed_qty == 0.0 {
+                    LimitStatus::Untouched
+                } else {
+                    if 0.0 <= bo.executed_qty && bo.executed_qty <= bo.orig_qty {
+                        LimitStatus::PartFilled {
+                            percent_fill: (bo.orig_qty / bo.executed_qty) as f32,
+                        }
+                    } else {
+                        LimitStatus::FullyFilled
+                    }
+                }
+            };
+            Ok(Order::StopLimit {
+                buy: side,
+                quant,
+                price: bo.price,
+                limit_status,
+                stop_price: bo.stop_price as f32,
+                stop_status,
+            })
         }
         _ => Err(anyhow!["Unsupporder order type from Binance!"]),
     }
