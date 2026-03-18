@@ -579,10 +579,9 @@ impl ClientTask {
             let params = cli.get_def_ws_params(false).await;
 
             let symbol = cli.current_symbol.clone();
-            let intv = cli.default_intv;
             let ad_c = cli.live_ad.clone();
             let _get_initial_data_handle = tokio::task::spawn(async move {
-                let _a = BinanceClient::get_initial_data2(&symbol, &intv, 2_000, ad_c).await;
+                let _a = BinanceClient::get_initial_data2(&symbol, ad_c).await;
             });
             let s_d = cli.current_symbol.clone();
             let ad_d = cli.live_ad.clone();
