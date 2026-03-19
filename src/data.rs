@@ -706,8 +706,6 @@ impl AssetData {
         Ok(())
     }
 }
-//FIXME - fix the whole downloading data situation... this is some pretty dogshit code, replace to
-//only use 1 binance APi
 fn kline_conv(
     input: &KlineSummary,
 ) -> Result<(
@@ -1661,9 +1659,6 @@ impl SQLConn {
 
         //NOTE the current system uses asset futures to get the onboarding date... why the v3 API
         //doesn't have it... idk
-        //
-        //Asset list loaded here, and operations executed for each asset
-        //FIXME add a vecdeque like queue where downloader dumps data and sql writer takes it
         meta_pool.close().await;
 
         let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
@@ -1764,9 +1759,6 @@ impl SQLConn {
             Some(_) => Ok(true),
             None => Ok(false),
         }
-        //NOTE this return a bug that will need to be fixed later, when addint
-        //YAHOO. bit is fine for now. Maybe make a different asset list for
-        //each exhcange...or simply append yahoo to a differet table
     }
     pub fn update_settings(&mut self, _settings: &Settings) -> Result<()> {
         //TODO

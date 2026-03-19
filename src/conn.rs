@@ -359,7 +359,6 @@ impl BinWSResponse {
                     symbol,
                     BinWSResponse::KlineTick((
                         i,
-                        //NOTE this code makes me want to get aids...
                         KlineTick {
                             t: input2["t"].as_i64().ok_or(anyhow!["Unable to parse t"])?,
                             T: input2["T"].as_i64().ok_or(anyhow!["Unable to parse T"])?,

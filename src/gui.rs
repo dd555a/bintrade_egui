@@ -588,6 +588,7 @@ macro_rules! make_p2{
             axis_hints.clone().placement(HPlacement::Right);
             //TODO - to togle percentage change the x axis formatter
             //TODO - find a way to place the chart labels on the right... the above obviously
+            //doesn't work
             let candle_plot = Plot::new($($name.to_string())*)
                 .legend(Legend::default())
                 .link_cursor(id.clone(), [true,false])
@@ -1529,7 +1530,6 @@ impl DesktopApp {
 impl Default for DesktopApp {
     fn default() -> Self {
         // NOTE this struct should never be initiated this way, all refs need to be passed
-        //
         let lp = Arc::new(Mutex::new(0.0));
         let asset_data = Arc::new(Mutex::new(AssetData::new(6661)));
         let hist_asset_data = Arc::new(Mutex::new(AssetData::new(6662)));
@@ -1628,7 +1628,7 @@ impl DesktopApp {
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            ui.heading("Bintrade_egui 0.1.0");
+            ui.heading("Bintrade_egui 0.1.2");
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Quit").clicked() {
@@ -1673,7 +1673,6 @@ impl eframe::App for DesktopApp {
                             }
                             PaneType::HistTrade => {
                                 self.man_orders
-                                    //FIXME add CTX here
                                     .insert(self.pane_number + 1, ManualOrders::default());
                                 let settings =
                                     self.settings.lock().expect("Unable to unlock settings");
@@ -1749,7 +1748,7 @@ pub struct ManualOrders {
 
     hotkeys: bool,
     single_order_mode: bool,
-    so_mode: SingleOrderMode,
+    so_mode: Option<SingleOrderMode>,
 
     current_symbol: String,
 
@@ -1796,7 +1795,7 @@ pub struct ManualOrders {
 impl Default for ManualOrders {
     fn default() -> Self {
         Self {
-            so_mode: SingleOrderMode::new(),
+            so_mode: Some(SingleOrderMode::new()),
             last_slice_time: DateTime::<Utc>::default(),
             eval_mode: EvalMode::default(),
             man_orders: None,
@@ -1931,12 +1930,12 @@ const K0_INC: f32 = 0.002;
 const K1: f32 = 1.01;
 const K1_INC: f32 = 0.002;
 
-#[allow(unused)]
 #[derive(Clone, Default, Debug)]
 pub struct SingleOrderMode {
     hk_active: bool,
     order: Order,
     order_active: bool,
+    order_id: u64,
     asset1_held: bool,
     order_active_after_change: bool,
     k0_n: usize,
@@ -1950,6 +1949,9 @@ pub struct SingleOrderMode {
 
     parse_ks: bool,
     place_order: bool,
+
+    order_adjusted: bool,
+    live_order_placed: bool,
 }
 impl SingleOrderMode {
     fn new() -> Self {
@@ -1999,16 +2001,17 @@ fn show_hotkeys(ui: &mut egui::Ui) {
     });
 }
 
-#[allow(unused)]
 impl SingleOrderMode {
     fn show(
         &mut self,
         ui: &mut egui::Ui,
         last_price: &f64,
         cli_chan: watch::Sender<ClientInstruct>,
-        hist_orders: Option<&mut HashMap<u64, (Order, bool)>>,
-        sym: &str,
+        trade_slice: Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]>,
+        man_orders: &mut ManualOrders,
+        hist_trade: Option<&mut HistTrade>,
     ) {
+        let symbol = &man_orders.current_symbol;
         let hk_active = &self.hk_active;
         egui::Grid::new("hk grid2").show(ui, |ui| {
             ui.checkbox(
@@ -2028,30 +2031,33 @@ impl SingleOrderMode {
         show_hotkeys(ui);
 
         let trade_forward = make_hotkey_shift![Key, L, ui, hk_active];
+
         let delete_all_orders = make_hotkey_alt![Key, D, ui, hk_active];
-        //tracing::trace!["hk_active: {}", hk_active];
         if delete_all_orders {
             tracing::trace!["DEl all orders presed"];
-            if let Some(ref ho) = hist_orders {
+            if hist_trade.is_some() {
+                man_orders.orders = HashMap::default();
+                self.order = Order::None;
             } else {
                 let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
-                    symbol: sym.to_string(),
+                    symbol: symbol.clone(),
                 });
                 let _res = cli_chan.send(msg);
+                self.order_adjusted = false;
+                self.live_order_placed = false;
             };
         };
 
         if self.asset1_held {
             let qoute_asset_now = make_hotkey_ctrl![Key, R, ui, hk_active];
             tracing::trace!["Qute asset now pressed!"];
-            if qoute_asset_now && hist_orders.is_none() {
+            if qoute_asset_now && hist_trade.is_none() {
                 let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelAllOrders {
-                    symbol: sym.to_string(),
+                    symbol: symbol.clone(),
                 });
                 let _res = cli_chan.send(msg);
-                //FIXME this might brick... test test TEST TEST
                 let msg = ClientInstruct::SendBinInstructs(BinInstructs::PlaceOrder {
-                    symbol: sym.to_string(),
+                    symbol: symbol.clone(),
                     o: Order::Market {
                         buy: false,
                         quant: Quant::Q100,
@@ -2083,21 +2089,76 @@ impl SingleOrderMode {
             self.parse_ks = false;
         };
         if self.place_order {
-            if let Some(ref ho) = hist_orders {
-                //FIXME - place hist orders here
+            if hist_trade.is_some() {
+                man_orders.orders.insert(self.order_id, (self.order, false));
+                self.order_id += 1;
             } else {
                 if self.order_active {
-                    //FIXME - place live orders here
-                    //
-                    //
                     let msg = ClientInstruct::SendBinInstructs(BinInstructs::PlaceOrder {
-                        symbol: sym.to_string(),
+                        symbol: symbol.clone(),
                         o: self.order,
                     });
                     let _res = cli_chan.send(msg);
+                    self.live_order_placed = true;
+                    self.order_adjusted = false;
                 }
             }
             self.place_order = false;
+        };
+        if self.order_adjusted {
+            if self.order_active_after_change {
+                if hist_trade.is_some() {
+                    man_orders.orders.insert(self.order_id, (self.order, true));
+                    self.order_id += 1;
+                } else {
+                    let msg =
+                        ClientInstruct::SendBinInstructs(BinInstructs::CancelAndReplaceOrder {
+                            id: self.order_id,
+                            symbol: symbol.clone(),
+                            o: self.order,
+                        });
+                    let _res = cli_chan.send(msg);
+                    self.live_order_placed = true;
+                };
+            } else {
+                if hist_trade.is_some() {
+                    man_orders.orders.insert(self.order_id, (self.order, false));
+                    self.order_id += 1;
+                } else {
+                    let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelOrder {
+                        id: self.order_id,
+                        symbol: symbol.clone(),
+                        o: self.order,
+                    });
+                    let _res = cli_chan.send(msg);
+                    self.live_order_placed = false;
+                };
+            };
+            self.order_adjusted = false;
+        };
+        if let (Some(t_slice), Some(h_trade)) = (trade_slice, hist_trade) {
+            if !t_slice.is_empty() && trade_forward {
+                let last_time = t_slice[t_slice.len() - 1].0;
+                if man_orders.last_slice_time != last_time {
+                    let res = h_trade.eval_single_order(t_slice, self.order, &man_orders.eval_mode);
+                    match res {
+                        Some(o) => self.order = o,
+                        None => (),
+                    };
+                    let a1 = h_trade.asset1;
+                    let a2 = h_trade.asset2;
+                    let a1_locked = self.order.get_qnt() * a1;
+                    let a2_locked = self.order.get_qnt() * a2;
+                    let a1m = a1 - a1_locked;
+                    let a2m = a2 - a2_locked;
+                    tracing::trace!["a1_locked: {}, a2_locked: {}", a1_locked, a2_locked];
+                    man_orders.asset1 = a1m;
+                    man_orders.asset2 = a2m;
+                    man_orders.asset1_locked = a1_locked;
+                    man_orders.asset2_locked = a2_locked;
+                    man_orders.last_slice_time = t_slice[t_slice.len() - 1].0;
+                };
+            };
         };
         hotkey_order_single(
             last_price,
@@ -2113,11 +2174,11 @@ impl SingleOrderMode {
             &self.k1_i,
             &mut self.parse_ks,
             &mut self.place_order,
+            &mut self.order_adjusted,
         );
     }
 }
 
-#[allow(unused)]
 fn hotkey_order_single(
     last_price: &f64,
     ui: &mut egui::Ui,
@@ -2132,6 +2193,7 @@ fn hotkey_order_single(
     k1_i: &f32,
     parse_ks: &mut bool,
     place_order: &mut bool,
+    order_adjusted: &mut bool,
 ) {
     *order_active = make_hotkey_shift![Key, A, ui, hk_active];
     let quant = Quant::Q100;
@@ -2139,18 +2201,22 @@ fn hotkey_order_single(
     let buy = if *asset1_held == false { true } else { false };
     let delete_order = make_hotkey_shift![Key, D, ui, hk_active];
     if delete_order {
+        *parse_ks = true;
         *order_active = false;
         *order = Order::None;
     };
 
     let add_market = make_hotkey_shift![Key, Num0, ui, hk_active];
     if add_market {
+        *parse_ks = true;
         *order_active = false;
         *order = Order::Market { buy, quant };
+        *place_order = true;
     };
 
     let add_limit = make_hotkey_shift![Key, Num1, ui, hk_active];
     if add_limit {
+        *parse_ks = true;
         *order_active = false;
         *order = Order::Limit {
             buy,
@@ -2158,10 +2224,12 @@ fn hotkey_order_single(
             price: *last_price,
             limit_status: LimitStatus::default(),
         };
+        *place_order = true;
     };
 
     let add_stop_limit = make_hotkey_shift![Key, Num2, ui, hk_active];
     if add_stop_limit {
+        *parse_ks = true;
         *order_active = false;
         if buy {
             *order = Order::StopLimit {
@@ -2182,9 +2250,11 @@ fn hotkey_order_single(
                 stop_status: StopStatus::default(),
             };
         };
+        *place_order = true;
     };
     let add_stop_market = make_hotkey_shift![Key, Num3, ui, hk_active];
     if add_stop_market {
+        *parse_ks = true;
         *order_active = false;
         *order = Order::StopMarket {
             buy,
@@ -2192,10 +2262,12 @@ fn hotkey_order_single(
             price: *last_price,
             stop_status: StopStatus::default(),
         };
+        *place_order = true;
     };
 
     let inc_up_price = make_hotkey_shift![Key, J, ui, hk_active];
     if inc_up_price {
+        *parse_ks = true;
         *order_active = if *order_active_after_change {
             *order_active
         } else {
@@ -2227,18 +2299,18 @@ fn hotkey_order_single(
                 stop_price: sp,
             } => {
                 *k0_n += 1;
-                let kk = (K1 as f64 + *k0_i as f64 * (*k1_n as f64));
-                let k1_computed = match b {
-                    true => *p / kk,
-                    false => *p * kk,
+                let k0_k = *p * (K0 as f64 + *k0_i as f64 * (*k0_n as f64));
+                let k0_comp = match b {
+                    true => *p / k0_k,
+                    false => *p * k0_k,
                 };
                 Order::StopLimit {
                     buy: *b,
                     quant: *q,
-                    price: *p * (K0 as f64 + *k0_i as f64 * (*k0_n as f64)),
+                    price: k0_comp,
                     limit_status: *sl,
                     stop_status: *ll,
-                    stop_price: kk as f32,
+                    stop_price: *sp,
                 }
             }
             Order::StopMarket {
@@ -2256,9 +2328,11 @@ fn hotkey_order_single(
                 }
             }
         };
+        *order_adjusted = true;
     };
     let inc_up_2 = make_hotkey_alt![Key, J, ui, hk_active];
     if inc_up_2 {
+        *parse_ks = true;
         *order_active = if *order_active_after_change {
             *order_active
         } else {
@@ -2267,12 +2341,7 @@ fn hotkey_order_single(
         *order = match order {
             Order::None => *order,
             Order::Market { .. } => *order,
-            Order::Limit {
-                buy: b,
-                quant: q,
-                price: p,
-                limit_status: ll,
-            } => *order,
+            Order::Limit { .. } => *order,
             Order::StopLimit {
                 buy: b,
                 quant: q,
@@ -2291,17 +2360,14 @@ fn hotkey_order_single(
                     stop_price: *sp * (K1 as f32 + *k1_i * (*k1_n as f32)),
                 }
             }
-            Order::StopMarket {
-                buy: b,
-                quant: q,
-                price: p,
-                stop_status: ll,
-            } => *order,
+            Order::StopMarket { .. } => *order,
         };
+        *order_adjusted = true;
     };
 
     let inc_down_price = make_hotkey_shift![Key, J, ui, hk_active];
     if inc_down_price {
+        *parse_ks = true;
         *order_active = if *order_active_after_change {
             *order_active
         } else {
@@ -2357,9 +2423,11 @@ fn hotkey_order_single(
                 }
             }
         };
+        *order_adjusted = true;
     };
     let inc_down_2 = make_hotkey_alt![Key, J, ui, hk_active];
     if inc_down_2 {
+        *parse_ks = true;
         *order_active = if *order_active_after_change {
             *order_active
         } else {
@@ -2368,12 +2436,7 @@ fn hotkey_order_single(
         *order = match order {
             Order::None => *order,
             Order::Market { .. } => *order,
-            Order::Limit {
-                buy: b,
-                quant: q,
-                price: p,
-                limit_status: ll,
-            } => *order,
+            Order::Limit { .. } => *order,
             Order::StopLimit {
                 buy: b,
                 quant: q,
@@ -2392,13 +2455,9 @@ fn hotkey_order_single(
                     stop_price: *sp / (K1 as f32 + K1_INC * (*k1_n as f32)),
                 }
             }
-            Order::StopMarket {
-                buy: b,
-                quant: q,
-                price: p,
-                stop_status: ll,
-            } => *order,
+            Order::StopMarket { .. } => *order,
         };
+        *order_adjusted = true;
     };
 }
 
@@ -2708,53 +2767,19 @@ impl ManualOrders {
                 ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
                 ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
                 if man_orders.single_order_mode {
-                    man_orders.so_mode.hk_active = true;
+                    man_orders
+                        .so_mode
+                        .as_mut()
+                        .expect("Should always be SOME")
+                        .hk_active = true;
                 };
                 ui.label(
                     RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
                 );
-                /*NOTE the bellow doesn't work, FIXME
-                ui.end_row();
-                man_orders.last_price_s = *last_price;
-                man_orders.last_price_buffer.push(last_price);
-                let n = man_orders.last_price_buffer.len();
-                if n < man_orders.last_price_buffer_size {
-                    ui.label(
-                        RichText::new(format!["Last price: {}", last_price]).color(Color32::WHITE),
-                    );
-                } else {
-                    let sum: f64 = man_orders.last_price_buffer.iter().sum();
-                    if sum / (n as f64) <= *last_price {
-                        ui.label(
-                            RichText::new(format!["Last price: {}", last_price])
-                                .color(Color32::GREEN),
-                        );
-                    } else {
-                        ui.label(
-                            RichText::new(format!["Last price: {}", last_price])
-                                .color(Color32::RED),
-                        );
-                    }
-                }
-                */
             });
         });
         ui.end_row();
         ui.ctx().request_repaint();
-        if man_orders.hotkeys == true {
-            /*
-            if ui.ctx().input(|i| i.key_pressed(egui::Key::A)) {
-                println!("\n A Pressed");
-            }
-            if ui.ctx().input(|i| i.key_down(egui::Key::A)) {
-                println!("\n A Held");
-                ui.ctx().request_repaint(); // make sure we note the holding.
-            }
-            if ui.ctx().input(|i| i.key_released(egui::Key::A)) {
-                println!("\n A Released");
-            }
-            */
-        };
         ui.end_row();
 
         egui::Grid::new("parent grid").show(ui, |ui| {
@@ -2970,9 +2995,6 @@ impl ManualOrders {
                             0.0
                         }
                     };
-                    ///////////////
-                    //FIXME neaten this up somehow
-                    //
                     let bb = man_orders.buy;
                     let qq = man_orders.quant;
                     let sp = man_orders.stop_price;
@@ -3089,11 +3111,6 @@ impl ManualOrders {
                     };
                 };
 
-                /*
-                if ui.button("Replace").clicked() {
-                };
-                */
-                //FIXME find a way to non-duplicate above code
                 ui.separator();
                 ui.end_row();
             });
@@ -3192,25 +3209,27 @@ impl ManualOrders {
             });
         });
     }
-    #[allow(unused)]
     fn show_singleorder(
-        mut man_orders: &mut ManualOrders,
+        man_orders: &mut ManualOrders,
         last_price: &f64,
-        mut hist_trade: Option<&mut HistTrade>,
+        hist_trade: Option<&mut HistTrade>,
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
-        hlines: Option<&mut Vec<HLine>>,
-        live_info: Option<&LiveInfo>,
+        _hlines: Option<&mut Vec<HLine>>,
+        _live_info: Option<&LiveInfo>,
         trade_slice: Option<&[(DateTime<Utc>, f64, f64, f64, f64, f64)]>,
-        symbol_info: Option<&(String, String, String)>,
+        _symbol_info: Option<&(String, String, String)>,
     ) {
+        //FIXME symbol_info and live_info
         ui.checkbox(&mut man_orders.single_order_mode, "Single Order Mode");
-        man_orders.so_mode.show(
+        let mut so_mode = man_orders.so_mode.take().expect("Should always be SOME");
+        so_mode.show(
             ui,
             last_price,
             cli_chan,
-            Some(&mut man_orders.orders),
-            &man_orders.current_symbol,
+            trade_slice,
+            man_orders,
+            hist_trade,
         );
     }
     fn show(
@@ -3514,11 +3533,7 @@ impl Settings {
         }
     }
     pub fn verify_password_req(password: &str) -> bool {
-        if password.len() < 17 {
-            return false;
-        };
-        //FIXME add more requirements
-        true
+        if password.len() < 17 { false } else { true }
     }
     fn show(
         settings: &mut Settings,
@@ -4341,7 +4356,6 @@ impl HistPlot {
                 hist_plot.trade_time = trade_time;
                 let _res = cli_chan.send(msg);
             };
-            //ui.end_row();
             if ui.button("Trade N wicks >>").clicked() {
                 let res: Result<u16, ParseIntError> = hist_plot.trade_wicks_s.parse();
                 let n_wicks = match res {
@@ -4370,11 +4384,6 @@ impl HistPlot {
                 let _res = cli_chan.send(msg);
                 hist_plot.trade_time = new_trade_time;
                 hist_plot.trade_slice_loaded = true;
-                //FIXME click here
-                //
-                //
-                //
-                //
             }
             ui.add(
                 egui::TextEdit::singleline(&mut hist_plot.trade_wicks_s).hint_text("Trade N wicks"),
