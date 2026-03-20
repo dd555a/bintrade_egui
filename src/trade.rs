@@ -579,10 +579,18 @@ pub struct HistTrade {
     pub current_data_end_index: usize,
 
     pub current_index: usize,
+    pub buy_points:Vec<(i64,f64)>,
+    pub sell_points:Vec<(i64,f64)>,
+
+    pub last_completed_order_price_side:Option<(f64,f64,bool)>
 }
 impl Default for HistTrade {
     fn default() -> Self {
         Self {
+            last_completed_order_price_side:None,
+            buy_points:vec![],
+            sell_points:vec![],
+
             asset_pair: "BTCUSDT".to_string(),
             start_time: 0,
 
@@ -629,6 +637,20 @@ impl HistTrade {
                     asset2,
                     order
                 ];
+                if order.is_none(){
+                    let order_price=*o.get_price();
+                    let order_side=o.get_side();
+                    if order_side{
+                        self.buy_points.push((transaction_time.timestamp_millis(), order_price));
+                        self.last_completed_order_price_side=Some((order_price,(order_price*(1.0+M_FEE)),order_side));
+                        //NOTE For buy orders sell at this line or aboce to BEAT THE FEEES 
+                    }else{
+                        self.sell_points.push((transaction_time.timestamp_millis(), order_price));
+                        self.last_completed_order_price_side=Some((order_price,(order_price*(1.0-T_FEE)),order_side));
+                        //NOTE FEE line is simply the price at which profit can be calculated
+                    };
+
+                };
                 self.calculate_change();
                 let tr = TradeRecord {
                     asset_pair: self.asset_pair.clone(),

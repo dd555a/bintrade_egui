@@ -21,7 +21,7 @@ use egui::{Color32, ComboBox, KeyboardShortcut, Modifiers, RichText, epaint};
 use egui_extras::{Column, TableBuilder};
 use egui_plot_bintrade::{
     AxisHints, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, GridInput, GridMark, HLine, HPlacement,
-    Legend, LineStyle as LineStyleEgui, Plot,
+    Legend, LineStyle as LineStyleEgui, Plot, Points, MarkerShape,
 };
 use egui_tiles::{Tile, TileId, Tiles};
 use epaint::Stroke;
@@ -44,6 +44,60 @@ const BACKLOAD_WICKS: i64 = 720;
 
 const SETTINGS_SAVE_PATH: &str = "./Settings.bin";
 
+
+#[derive(Dbg, Default,Clone)]
+pub struct OrderMarkers{
+    buy_markers:Vec<(i64,f64)>,
+    sell_markers:Vec<(i64,f64)>,
+    marker_size:f32,
+    percent_offset:f64,
+}
+impl OrderMarkers{
+    fn new()->Self{
+        Self{
+            marker_size:5.0,
+            percent_offset:0.002,
+            ..Default::default()
+        }
+    }
+    fn to_points(&self)->(Points<'_>,Points<'_>){
+        let buy_points=Points::new("Buy",
+            self.buy_markers.iter().map(|(x,y)|{
+                [*x as f64,*y*(1.0-self.percent_offset)]
+            }).collect::<Vec<[f64;2]>>()
+        )
+            .color(Color32::from_rgb(0,255,0))
+            .filled(true)
+            .shape(MarkerShape::Up)
+            .radius(self.marker_size);
+        let sell_points=Points::new("Buy",
+            self.buy_markers.iter().map(|(x,y)|{
+                [*x as f64,*y*(1.0+self.percent_offset)]
+            }).collect::<Vec<[f64;2]>>()
+        )
+            .color(Color32::from_rgb(255,0,0))
+            .filled(true)
+            .shape(MarkerShape::Down)
+            .radius(self.marker_size);
+        (buy_points, sell_points)
+    }
+    /*
+    fn empty_points(&mut self){
+        self.buy_markers.clear();
+        self.sell_markers.clear();
+    }
+    fn add_point(&mut self, x:i64,y:f64, buy:bool){
+        if buy{
+            self.buy_markers.push((x,y))
+        }else{
+            self.sell_markers.push((x,y))
+
+        };
+    }
+    */
+}
+
+
 #[derive(Dbg, Clone)]
 pub struct KlinePlot {
     l_boxplot: Vec<BoxElem>,
@@ -53,6 +107,9 @@ pub struct KlinePlot {
     l_tick_barchart: Vec<Bar>,
 
     tick_kline: Option<(DateTime<Utc>, f64, f64, f64, f64, f64)>,
+    markers:bool,
+
+    points:OrderMarkers,
 
     intv: Intv,
     name: String,
@@ -86,6 +143,8 @@ pub struct KlinePlot {
 impl Default for KlinePlot {
     fn default() -> Self {
         Self {
+            markers:true,
+            points:OrderMarkers::new(),
             l_boxplot: vec![],
             l_barchart: vec![],
             l_tick_boxplot: vec![],
@@ -410,6 +469,11 @@ impl KlinePlot {
                     //plot_ui.bar_chart(bc);
                     plot_ui.box_plot(bp_tick);
                     plot_ui.box_plot(bp_tick2);
+                    if self.markers{
+                        let (buy,sell)=self.points.to_points();
+                        plot_ui.points(buy);
+                        plot_ui.points(sell);
+                    };
                     //plot_ui.bar_chart(bc_tick);
                 });
                 plot_volume.show(ui, |plot_ui| {
@@ -434,6 +498,11 @@ impl KlinePlot {
                     };
                     plot_ui.box_plot(bp);
                     plot_ui.box_plot(bp_tick2);
+                    if self.markers{
+                        let (buy,sell)=self.points.to_points();
+                        plot_ui.points(buy);
+                        plot_ui.points(sell);
+                    };
                     //plot_ui.bar_chart(bc);
                 });
                 plot_volume.show(ui, |plot_ui| {
@@ -4272,6 +4341,9 @@ impl HistPlot {
         if hist_plot.intv != hist_plot.last_intv {
             hist_plot.last_intv = hist_plot.intv;
             hist_plot.kline_plot.intv = hist_plot.intv;
+            //FIXME test dis..
+            hist_plot.kline_plot.points.buy_markers= hist_plot.hist_trade.buy_points.clone();
+            hist_plot.kline_plot.points.sell_markers= hist_plot.hist_trade.sell_points.clone();
         };
 
         ui.end_row();
