@@ -28,8 +28,9 @@ const SINGLE_ASSET_DL_TASKS_MAX: usize = 16;
 const METADATA_DB_PATH: &str = "./databases/metadata.db";
 const BIN_TIMESTAMP: i64 = 1577836800000;
 
-use bincode::{Decode, Encode};
+use bincode::{Decode, Encode, config};
 use linya::{Bar, Progress};
+use std::io::{Read, Write};
 use std::time::Instant;
 use tracing::instrument;
 
@@ -756,7 +757,6 @@ fn kline_conv(
     ))
 }
 
-#[allow(unused)]
 async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
     let end_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
     tracing::debug![
@@ -861,10 +861,11 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
         }
     }
     if !errors.is_empty() {
-        let e = errors
+        let _e = errors
             .iter()
             .map(|(intv, evec)| {
-                evec.iter()
+                let _ = evec
+                    .iter()
                     .map(|(st, et)| {
                         tracing::error![
                             "Download Errors: Intv: {}  chunk from to {} to {}",
@@ -876,34 +877,108 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                     .collect::<Vec<_>>();
             })
             .collect::<Vec<_>>();
-        /* FIXME - implement resume downloads ad
-        let mut retries=0;
-        while retries <=10{
-            let res=iterate_over_remaining_errors(errors, symbol).await?;
-            match res{
-                Some(e)=>{
-                    errors=e;
-                    retries+=1;
+        let mut retries = 0;
+        while retries <= 10 {
+            let res = iterate_over_remaining_errors(errors, symbol).await?;
+            match res {
+                Some(e) => {
+                    tracing::error![
+                        "NO of ERRORS timestamps: {}, retrying ... {}/10",
+                        e.len(),
+                        retries
+                    ];
+                    errors = e;
+                    retries += 1;
                 }
-                None=>{
-                    return Ok(())
-                }
+                None => return Ok(()),
             }
-        };
-        //dump missing chunk report as binfile...
-        */
+        }
+        let rem_errors = RemErrors::new(symbol);
+        rem_errors.save_to_file(&format!["./databases/{}_dl_errors.bin", symbol])?;
+        //FIXME dump missing chunk report as binfile...
     };
     Ok(())
 }
-#[allow(unused)]
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Decode, Encode)]
+struct RemErrors {
+    symbol: String,
+    errors: Vec<(Intv, Vec<(u64, u64)>)>,
+}
+impl RemErrors {
+    fn new(sym: &str) -> Self {
+        Self {
+            symbol: sym.to_string(),
+            errors: vec![],
+        }
+    }
+    fn save_to_file(&self, path: &str) -> Result<()> {
+        let config = config::standard();
+        let res = bincode::encode_to_vec(self.clone(), config)?;
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(&res)?;
+        Ok(())
+    }
+    #[allow(unused)]
+    fn load_from_file(path: &str) -> Result<Self> {
+        let config = config::standard();
+        let mut file = std::fs::File::open(path)?;
+        let mut data: Vec<u8> = vec![];
+        file.read_to_end(&mut data)?;
+        let (rem_errs, _): (Self, usize) = bincode::decode_from_slice(&data, config)?;
+        Ok(rem_errs)
+    }
+}
+
 pub async fn iterate_over_remaining_errors(
     errors: Vec<(Intv, Vec<(u64, u64)>)>,
     symbol: &str,
 ) -> Result<Option<Vec<(Intv, Vec<(u64, u64)>)>>> {
     let asset_pool = connect_sqlite(format!["./databases/Asset{}.db", &symbol]).await?;
     let client: Market = Binance::new(None, None);
-    //get_data_binance2(&client, &symbol, *intv, &asset_pool, *st as i64, *et as i64, false).await
-    todo!()
+    let new_err_vec = Arc::new(Mutex::new(vec![]));
+    let _res: Vec<_> = errors
+        .iter()
+        .map(|(intv, errs)| async {
+            let _res: Vec<_> = errs
+                .iter()
+                .map(|(st, et)| async {
+                    let res = get_data_binance2(
+                        &client,
+                        &symbol,
+                        *intv,
+                        &asset_pool,
+                        *st as i64,
+                        *et as i64,
+                        false,
+                    )
+                    .await;
+                    match res {
+                        Ok(err_opt) => {
+                            if let Some(err_vec) = err_opt {
+                                let nev_mut = new_err_vec.clone();
+                                let mut nev_ref = nev_mut.lock().expect(
+                                    "Unable to unlock errors mutex iterate_over_remaining_errors",
+                                );
+                                nev_ref.push((*intv, err_vec));
+                            };
+                        }
+                        Err(e) => {
+                            tracing::error!["iterate_over_remaining_errors {}", e];
+                        }
+                    };
+                })
+                .collect();
+        })
+        .collect();
+    let nev = new_err_vec
+        .lock()
+        .expect("Unable to unlock errors mutex iterate_over_remaining_errors");
+    if nev.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(nev.to_vec()))
+    }
 }
 
 pub async fn get_data_binance2(

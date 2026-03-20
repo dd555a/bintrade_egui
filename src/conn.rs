@@ -756,84 +756,97 @@ impl BinanceClient {
             let res = binance.get_all_open_orders().await;
             match res {
                 Ok(orders) => {
-                    let ((a1_string, a2_string), (a1_l_old, a2_l_old), (a1_f_old, a2_f_old)) = {
+                    let (
+                        (a1_string, a2_string),
+                        (a1_l_old, a2_l_old),
+                        (a1_f_old, a2_f_old),
+                        keys_status,
+                    ) = {
                         let live_i = live_info.lock().expect("Live info mutex poisoned!");
                         (
                             live_i.current_pair_strings.clone(),
                             (live_i.current_pair_locked_balances),
                             (live_i.current_pair_free_balances),
+                            live_i.keys_status,
                         )
                     };
-                    let (a1_locked, a1_free) = if !&a1_string.is_empty() {
-                        let res_a1 = binance.get_balance(&a1_string).await;
-                        match res_a1 {
-                            Ok(balance) => (balance.locked, balance.free),
-                            Err(e) => {
-                                tracing::error![
-                                    "check_live_orders_change ERROR: {} asset: {}",
-                                    e,
-                                    &a1_string
-                                ];
+                    match keys_status {
+                        KeysStatus::Valid => {
+                            let (a1_locked, a1_free) = if !&a1_string.is_empty() {
+                                let res_a1 = binance.get_balance(&a1_string).await;
+                                match res_a1 {
+                                    Ok(balance) => (balance.locked, balance.free),
+                                    Err(e) => {
+                                        tracing::error![
+                                            "check_live_orders_change ERROR: {} asset: {}",
+                                            e,
+                                            &a1_string
+                                        ];
+                                        (a1_l_old, a1_f_old)
+                                    }
+                                }
+                            } else {
+                                tracing::trace!["Unable to update balance for a1_string empty"];
                                 (a1_l_old, a1_f_old)
-                            }
-                        }
-                    } else {
-                        tracing::trace!["Unable to update balance for a1_string empty"];
-                        (a1_l_old, a1_f_old)
-                    };
-                    let (a2_locked, a2_free) = if !&a2_string.is_empty() {
-                        let res_a2 = binance.get_balance(&a2_string).await;
-                        match res_a2 {
-                            Ok(balance) => (balance.locked, balance.free),
-                            Err(e) => {
-                                tracing::error![
-                                    "check_live_orders_change ERROR: {} asset: {}",
-                                    e,
-                                    &a2_string
-                                ];
-                                (a2_l_old, a2_f_old)
-                            }
-                        }
-                    } else {
-                        tracing::trace!["Unable to update balance for a1_string empty"];
-                        (a2_l_old, a2_f_old)
-                    };
-                    tracing::trace!["a1_locked: {}, a2_locked: {}", a1_locked, a2_locked];
-                    tracing::trace!["a1_free: {}, a2_free: {}", a1_free, a2_free];
-                    let mut live_orders = HashMap::default();
-                    let _res: Vec<_> = orders
-                        .iter()
-                        .map(|order_binance| {
-                            let res = from_binance_order(
-                                &order_binance,
-                                &a1_locked,
-                                &a2_locked,
-                                &a1_free,
-                                &a2_free,
-                            );
-                            match res {
-                                Ok(o) => {
-                                    tracing::trace!["{:?}", &order_binance];
-                                    live_orders.insert(order_binance.order_id, (o, true));
-                                }
-                                Err(e) => {
-                                    tracing::error!["check_live_orders_change {}", e];
-                                }
                             };
-                        })
-                        .collect();
-                    let mut live_inf = live_info.lock().expect("Live info mutex poisoned!");
-                    live_inf.live_orders = live_orders;
-                    live_inf.current_pair_locked_balances = (a1_locked, a2_locked);
-                    live_inf.current_pair_free_balances = (a1_free, a2_free);
-                    tracing::trace![
-                        "live_inf (conn side) {:?}",
-                        &live_inf.current_pair_free_balances
-                    ];
-                    tracing::trace![
-                        "live_inf (conn side)locked {:?}",
-                        &live_inf.current_pair_locked_balances
-                    ];
+                            let (a2_locked, a2_free) = if !&a2_string.is_empty() {
+                                let res_a2 = binance.get_balance(&a2_string).await;
+                                match res_a2 {
+                                    Ok(balance) => (balance.locked, balance.free),
+                                    Err(e) => {
+                                        tracing::error![
+                                            "check_live_orders_change ERROR: {} asset: {}",
+                                            e,
+                                            &a2_string
+                                        ];
+                                        (a2_l_old, a2_f_old)
+                                    }
+                                }
+                            } else {
+                                tracing::trace!["Unable to update balance for a1_string empty"];
+                                (a2_l_old, a2_f_old)
+                            };
+                            tracing::trace!["a1_locked: {}, a2_locked: {}", a1_locked, a2_locked];
+                            tracing::trace!["a1_free: {}, a2_free: {}", a1_free, a2_free];
+                            let mut live_orders = HashMap::default();
+                            let _res: Vec<_> = orders
+                                .iter()
+                                .map(|order_binance| {
+                                    let res = from_binance_order(
+                                        &order_binance,
+                                        &a1_locked,
+                                        &a2_locked,
+                                        &a1_free,
+                                        &a2_free,
+                                    );
+                                    match res {
+                                        Ok(o) => {
+                                            tracing::trace!["{:?}", &order_binance];
+                                            live_orders.insert(order_binance.order_id, (o, true));
+                                        }
+                                        Err(e) => {
+                                            tracing::error!["check_live_orders_change {}", e];
+                                        }
+                                    };
+                                })
+                                .collect();
+                            let mut live_inf = live_info.lock().expect("Live info mutex poisoned!");
+                            live_inf.live_orders = live_orders;
+                            live_inf.current_pair_locked_balances = (a1_locked, a2_locked);
+                            live_inf.current_pair_free_balances = (a1_free, a2_free);
+                            tracing::trace![
+                                "live_inf (conn side) {:?}",
+                                &live_inf.current_pair_free_balances
+                            ];
+                            tracing::trace![
+                                "live_inf (conn side)locked {:?}",
+                                &live_inf.current_pair_locked_balances
+                            ];
+                        }
+                        KeysStatus::Invalid => {
+                            sleep(Duration::from_millis(5_000)).await;
+                        }
+                    };
                 }
                 Err(e) => {
                     tracing::error!["check_live_orders_change {}", e];
