@@ -910,6 +910,7 @@ impl BinanceClient {
             }
         };
         let ss = symbol.to_string();
+        //FIXME try to get rid of the task spawning... this is kind of unnecessary
         let klines_unordered = Intv::iter()
             .map(move |i| {
                 let s = ss.clone();

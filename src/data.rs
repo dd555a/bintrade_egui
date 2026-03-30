@@ -24,7 +24,7 @@ use binance::market::Market;
 use binance::rest_model::{KlineSummaries, KlineSummary};
 
 const ERR_CTX: &str = "SQL Data loader";
-const SINGLE_ASSET_DL_TASKS_MAX: usize = 16;
+const SINGLE_ASSET_DL_TASKS_MAX: usize = 8;
 const METADATA_DB_PATH: &str = "./databases/metadata.db";
 const BIN_TIMESTAMP: i64 = 1577836800000;
 
@@ -867,7 +867,7 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                 let _ = evec
                     .iter()
                     .map(|(st, et)| {
-                        tracing::error![
+                        tracing::info![
                             "Download Errors: Intv: {}  chunk from to {} to {}",
                             intv.to_str(),
                             st,
@@ -877,8 +877,9 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                     .collect::<Vec<_>>();
             })
             .collect::<Vec<_>>();
-        let mut retries = 0;
+        let mut retries:usize = 0;
         while retries <= 10 {
+            tracing::debug!["Running iterate over remaining errors"];
             let res = iterate_over_remaining_errors(errors, symbol).await?;
             match res {
                 Some(e) => {
@@ -937,40 +938,35 @@ pub async fn iterate_over_remaining_errors(
     let asset_pool = connect_sqlite(format!["./databases/Asset{}.db", &symbol]).await?;
     let client: Market = Binance::new(None, None);
     let new_err_vec = Arc::new(Mutex::new(vec![]));
-    let _res: Vec<_> = errors
-        .iter()
-        .map(|(intv, errs)| async {
-            let _res: Vec<_> = errs
-                .iter()
-                .map(|(st, et)| async {
-                    let res = get_data_binance2(
-                        &client,
-                        &symbol,
-                        *intv,
-                        &asset_pool,
-                        *st as i64,
-                        *et as i64,
-                        false,
-                    )
-                    .await;
-                    match res {
-                        Ok(err_opt) => {
-                            if let Some(err_vec) = err_opt {
-                                let nev_mut = new_err_vec.clone();
-                                let mut nev_ref = nev_mut.lock().expect(
-                                    "Unable to unlock errors mutex iterate_over_remaining_errors",
-                                );
-                                nev_ref.push((*intv, err_vec));
-                            };
-                        }
-                        Err(e) => {
-                            tracing::error!["iterate_over_remaining_errors {}", e];
-                        }
-                    };
-                })
-                .collect();
-        })
-        .collect();
+    for (intv,errs) in errors{
+        for (st,et) in errs{
+                tracing::debug!["iterate_over_remaining_errors Downloading data for: {} to: {}", st,et];
+                let res = get_data_binance2(
+                    &client,
+                    &symbol,
+                    intv,
+                    &asset_pool,
+                    st as i64,
+                    et as i64,
+                    false,
+                )
+                .await;
+                match res {
+                    Ok(err_opt) => {
+                        if let Some(err_vec) = err_opt {
+                            let nev_mut = new_err_vec.clone();
+                            let mut nev_ref = nev_mut.lock().expect(
+                                "Unable to unlock errors mutex iterate_over_remaining_errors",
+                            );
+                            nev_ref.push((intv, err_vec));
+                        };
+                    }
+                    Err(e) => {
+                        tracing::error!["iterate_over_remaining_errors {}", e];
+                    }
+                };
+            };
+    };
     let nev = new_err_vec
         .lock()
         .expect("Unable to unlock errors mutex iterate_over_remaining_errors");

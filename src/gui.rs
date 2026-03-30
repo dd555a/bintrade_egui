@@ -11,7 +11,6 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use anyhow::{Result, anyhow};
-use tracing::instrument;
 
 use tokio::sync::watch;
 
@@ -621,7 +620,7 @@ fn box_element(
         .whisker_width(0.0)
         .fill(red)
         .stroke(Stroke::new(2.0, red))
-        .name(format!["{}", time])
+        .name(format!["{}", DateTime::<Local>::from(time)])
         .box_width(*width);
         let b = Bar::new(time.timestamp() as f64 / divider, volume)
             .fill(red)
@@ -637,7 +636,7 @@ fn box_element(
         .whisker_width(0.0)
         .fill(green)
         .stroke(Stroke::new(2.0, green))
-        .name(format!["{}", time])
+        .name(format!["{}", DateTime::<Local>::from(time)])
         .box_width(*width);
         let b = Bar::new(time.timestamp() as f64 / divider, volume)
             .fill(green)
@@ -1909,7 +1908,6 @@ impl Default for ManualOrders {
     }
 }
 
-#[instrument(level = "trace")]
 fn link_hline_orders(orders: &HashMap<u64, (Order, bool)>, hlines: &mut Vec<HLine>) {
     hlines.clear();
     let _ = orders
@@ -2761,7 +2759,6 @@ impl ManualOrders {
         ui.end_row();
         ui.ctx().request_repaint();
         ui.end_row();
-
         egui::Grid::new("parent grid").show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.end_row();
@@ -3638,8 +3635,8 @@ impl Settings {
             .show(ui, |ui| {
                 if ui.button("Save settings").clicked() {
                     let msg = ClientInstruct::SendBinInstructs(BinInstructs::AddReplaceApiKeys {
-                        pub_key: settings.api_key_enter_string.clone(),
-                        priv_key: settings.priv_api_key_enter_string.clone(),
+                        pub_key: settings.api_key_enter_string.trim().to_string(),
+                        priv_key: settings.priv_api_key_enter_string.trim().to_string(),
                     });
                     let _res = cli_chan.send(msg);
                     if settings.enc_api_keys {
@@ -4018,6 +4015,7 @@ impl DataManager {
                     data_manager.update_success = true;
                     //TODO connect proper error handling...
                     data_manager.update_status = "Ran".to_string();
+                    data_manager.asset_list_loaded=false;
                 };
             });
         ui.end_row();
@@ -4051,6 +4049,9 @@ impl DataManager {
                 .lock()
                 .expect("Unable to unlock mutex: DATA MANAGER");
             if ad.downloaded_assets.is_empty() == true {
+                let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::LoadDLAssetList);
+                let _res = cli_chan.send(msg);
+
             } else {
                 data_manager.asset_list = ad.downloaded_assets.clone();
                 data_manager.asset_list_loaded = true;
@@ -4106,18 +4107,26 @@ impl DataManager {
                                 });
                                 row.col(|ui| {
                                     if let Some(start_time) =
-                                        DateTime::<Utc>::from_timestamp_millis(asset.dat_start_t)
+                                        time_conversion(asset.dat_start_t)
                                     {
-                                        ui.label(format!["{}", start_time]);
+                                        if asset.dat_start_t !=0{
+                                            ui.label(format!["{}", start_time]);
+                                        }else{
+                                            ui.label(format!["NaN"]);
+                                        };
                                     } else {
                                         ui.label(format!["NaN"]);
                                     };
                                 });
                                 row.col(|ui| {
                                     if let Some(end_time) =
-                                        DateTime::<Utc>::from_timestamp_millis(asset.dat_end_t)
+                                        time_conversion(asset.dat_end_t)
                                     {
-                                        ui.label(format!["{}", end_time]);
+                                        if asset.dat_end_t !=0{
+                                            ui.label(format!["{}", end_time]);
+                                        }else{
+                                            ui.label(format!["NaN"]);
+                                        };
                                     } else {
                                         ui.label(format!["NaN"]);
                                     };
@@ -4139,6 +4148,15 @@ impl DataManager {
                 });
         });
     }
+}
+fn time_conversion(timestamp:i64)->Option<DateTime<Local>>{
+    let utc=DateTime::<Utc>::from_timestamp_millis(timestamp);
+    if let Some(utc_time)=utc{
+        let t:DateTime<Local>=utc_time.into();
+        return Some(t);
+    }else{
+        return None;
+    };
 }
 
 enum LineStyle {
