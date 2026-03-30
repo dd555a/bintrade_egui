@@ -431,6 +431,7 @@ pub struct WSTick {
             bool,
             bool,
             HashMap<String, Vec<String>>,
+            Option<String>
         )>,
     >,
     watch_price_ty: BinWSResponse,
@@ -439,6 +440,8 @@ pub struct WSTick {
     live_price1: Arc<Mutex<f64>>,
     disconnect: bool,
     reconnect: bool,
+    change_symbol:Option<String>,
+    symbol:String,
 }
 impl WSTick {
     fn new(
@@ -530,24 +533,28 @@ impl WSTick {
         }
         Ok(())
     }
-    async fn append_tick(&mut self, input: Value) -> Result<(bool, bool)> {
+    async fn append_tick(&mut self, input: Value) -> Result<(bool, bool, Option<String>)> {
         tracing::trace!["\x1b[93m Raw ws output\x1b[93m : {:?}", input];
         let (symbol, sorted) =
             BinWSResponse::parse_into_by_str(input).context("Failed to parse into str")?;
         match (sorted, self.watch_price_ty) {
             (BinWSResponse::AggTrade(val), BinWSResponse::AggTrade(_)) => {
-                let mut lp1 = self
-                    .live_price1
-                    .lock()
-                    .expect("Unable to unlock mutex: binance::append_tick()");
-                *lp1 = val.p;
+                if self.symbol==symbol || self.symbol.is_empty(){
+                    let mut lp1 = self
+                        .live_price1
+                        .lock()
+                        .expect("Unable to unlock mutex: binance::append_tick()");
+                    *lp1 = val.p;
+                };
             }
             (BinWSResponse::KlineTick((_, val)), BinWSResponse::KlineTick((_, _))) => {
-                let mut lp1 = self
-                    .live_price1
-                    .lock()
-                    .expect("Unable to unlock mutex: binance::append_tick()");
-                *lp1 = val.c;
+                if self.symbol==symbol || self.symbol.is_empty(){
+                    let mut lp1 = self
+                        .live_price1
+                        .lock()
+                        .expect("Unable to unlock mutex: binance::append_tick()");
+                    *lp1 = val.c;
+                };
             }
             _ => (),
         }
@@ -558,7 +565,12 @@ impl WSTick {
         tracing::trace!["Placing ws output"];
         uo.0.push((symbol, sorted));
         tracing::trace!["Raw ws successfully placed"];
-        Ok((uo.1, uo.2))
+        let change_symbol=if uo.4.is_some(){
+            uo.4.take()
+        }else{
+            None
+        };
+        Ok((uo.1, uo.2, change_symbol))
     }
     async fn connect(&self) -> Result<WebSocket> {
         let mut p = self.sub_params.clone();
@@ -577,7 +589,7 @@ impl WSTick {
         let sub_message = json!({
             "method": "SUBSCRIBE",
             "id": 1,
-            "params":ovec.as_slice(), //NOTE press x to doubt...
+            "params":ovec.as_slice(), 
         });
         tracing::trace!["\x1b[93m Subscribe message\x1b[0m :  {:?}", sub_message];
         let mut conn = WebSocket::connect(socket).await?;
@@ -585,6 +597,7 @@ impl WSTick {
         tracing::trace!["Web socket connected with message:{:?}", sub_message];
         Ok(conn)
     }
+    //NOTE this is horrible... refactor after changing API again
     async fn collect_output(&mut self, buffer_size: usize, conn: &mut WebSocket) -> Result<()> {
         let mut n = 0;
         tracing::trace![
@@ -593,6 +606,20 @@ impl WSTick {
         ];
         while !self.disconnect {
             while n < buffer_size {
+                if let Some(ref new_symbol)=self.change_symbol{
+                    tracing::debug!["Change symbol 2 called!"];
+                    self.symbol=new_symbol.to_string();
+                    let new_params=get_ws_params2(new_symbol);
+                    let mut h=HashMap::default();
+                    h.insert(new_symbol.to_string(),new_params.clone());
+                    self.sub_params=h;
+                    let sub_message = json!({
+                        "method": "SUBSCRIBE",
+                        "id": 1,
+                        "params":new_params.as_slice(), 
+                    });
+                    conn.send_text(sub_message.to_string()).await?;
+                };
                 let msg = conn.receive().await?;
                 tracing::trace!["\x1b[93m WS raw output: \x1b[0m {:?}", msg];
                 if let Some((m, _, _)) = msg.clone().into_text() {
@@ -601,7 +628,7 @@ impl WSTick {
                         tracing::trace!["\x1b[93m WS output (NOT APPEND): \x1b[0m {:?}", msg];
                     } else {
                         tracing::trace!["\x1b[93m WS output (APPEND): \x1b[0m {:?}", msg];
-                        (self.disconnect, self.reconnect) =
+                        (self.disconnect, self.reconnect, self.change_symbol) =
                             self.append_tick(v).await.context("Failed to append tick")?;
                         n += 1;
                     }
@@ -1516,6 +1543,49 @@ impl BinanceClient {
                 self.live_orders = live_i.live_orders.clone();
                 resp
             }
+            BinInstructs::ChangeLiveAsset2 {
+                symbol: ref s,
+            } => {
+                let res = validate_asset_binance(s).await;
+                self.current_symbol = s.clone();
+                match res {
+                    Ok(ans) => match ans {
+                        true => (),
+                        false => {
+                            tracing::error!["Cannot find asset on binance:{}", s];
+                            return BinResponse::Failure((
+                                format!["Cannot find asset on binance:{}", s],
+                                GeneralError::Generic,
+                            ));
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!["Validate binance asset error:{}", e];
+                        return BinResponse::Failure((format!["{}", e], GeneralError::Generic));
+                    }
+                };
+                let res = self.ws_tick.as_mut();
+                match res {
+                    Some(ws_tick) => {
+                        let mut w = ws_tick
+                            .unsorted_output
+                            .lock()
+                            .expect("ChangeLiveAsset unable to unlock mutex uo");
+                        w.4 = Some(s.to_string());
+                    }
+                    None => {
+                        tracing::error!["WS tick should be SOME here, CHANGE LIVE ASSET"];
+                    }
+                };
+                let ad_c = self.live_ad.clone();
+                let ss = s.clone();
+                let _get_initial_data_handle = tokio::task::spawn(async move {
+                    let _a = BinanceClient::get_initial_data2(&ss, ad_c).await;
+                });
+                let ad_d = self.live_ad.clone();
+                self.refresh_balances(s, ad_d).await;
+                BinResponse::Success
+            }
             BinInstructs::ChangeLiveAsset {
                 symbol: ref s,
                 defualt_symbol: _s,
@@ -1822,6 +1892,17 @@ fn from_binance_order(
         }
         _ => Err(anyhow!["Unsupporder order type from Binance!"]),
     }
+}
+fn get_ws_params2(symbol:&str)->Vec<String>{
+    let mut sub_params = vec![format!["{}@aggTrade", symbol.to_lowercase()]];
+    for i in Intv::iter() {
+        sub_params.push(format![
+            "{}@kline_{}",
+            symbol.to_lowercase(),
+            i.to_bin_str()
+        ])
+    };
+    sub_params
 }
 
 #[allow(unused)]

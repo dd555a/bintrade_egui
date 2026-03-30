@@ -161,6 +161,9 @@ pub enum BinInstructs {
         symbol: String,
         defualt_symbol: String,
     },
+    ChangeLiveAsset2 {
+        symbol: String,
+    },
 }
 impl BinInstructs {
     pub fn to_str(&self) -> &str {
@@ -195,6 +198,9 @@ impl BinInstructs {
                 symbol: _,
                 defualt_symbol: _,
             } => "BinInstruct: Change symbol",
+            BinInstructs::ChangeLiveAsset2 {
+                symbol: _,
+            } => "BinInstruct: Change symbol2",
         }
     }
 }

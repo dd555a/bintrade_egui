@@ -3438,9 +3438,9 @@ impl LivePlot {
                     .hint_text("Search for asset"),
             );
             if ui.button("Search").clicked() {
-                let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset {
+                let msg = ClientInstruct::SendBinInstructs(BinInstructs::ChangeLiveAsset2 {
                     symbol: live_plot.search_string.clone(),
-                    defualt_symbol: live_plot.default_symbol.clone(),
+                    //defualt_symbol: live_plot.default_symbol.clone(),
                 });
                 let _res = cli_chan.send(msg);
             };
