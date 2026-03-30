@@ -941,6 +941,7 @@ pub async fn iterate_over_remaining_errors(
     for (intv,errs) in errors{
         for (st,et) in errs{
                 tracing::debug!["iterate_over_remaining_errors Downloading data for: {} to: {}", st,et];
+
                 let res = get_data_binance2(
                     &client,
                     &symbol,

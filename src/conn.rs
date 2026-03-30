@@ -7,7 +7,10 @@ use tokio::time::{Duration, sleep};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+#[cfg(debug_assertions)]
 use std::time::{SystemTime, UNIX_EPOCH};
+
 use strum::IntoEnumIterator;
 
 use serde::Deserialize;

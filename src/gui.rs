@@ -660,7 +660,7 @@ macro_rules! make_p2{
                 .legend(Legend::default())
                 .link_cursor(id.clone(), [true,false])
                 .link_axis(id.clone(), [true,false])
-                .width(560.0)
+                //.width(560.0)
                 .height(250.0)
                 .custom_x_axes(vec![])
                 .custom_y_axes(vec![])
@@ -671,7 +671,7 @@ macro_rules! make_p2{
                 .legend(Legend::default())
                 .link_cursor(id.clone(), [true,false])
                 .link_axis(id.clone(), [true,false])
-                .width(560.0)
+                //.width(560.0)
                 .height(80.0)
                 .default_y_bounds(0.0,$($v_higher)*)
                 .custom_y_axes(vec![])
@@ -1286,7 +1286,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
     ) -> egui_tiles::UiResponse {
         let response: egui_tiles::UiResponse;
         if ui
-            .add(egui::Button::new("").sense(egui::Sense::drag()))
+            .add(egui::Button::new("Drag").sense(egui::Sense::drag()))
             .drag_started()
         {
             response = egui_tiles::UiResponse::DragStarted
@@ -1294,7 +1294,8 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
             response = egui_tiles::UiResponse::None
         }
         let color = egui::epaint::Hsva::new(0.0, 0.0, 0.0, 0.0);
-        ui.painter().rect_filled(ui.max_rect(), 0.0, color);
+        let drag_rect=ui.ctx().available_rect();
+        ui.painter().rect_filled(drag_rect, 0.0, color);
         match pane.ty {
             PaneType::None => {}
             PaneType::LiveTrade => {
@@ -1310,7 +1311,16 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                 let p_extras: PlotExtras = PlotExtras::None;
                 let mut live_plot = live_plot_l.lock().expect("Live plot mutex posoned!");
                 let mut live_info = live_info_l.lock().expect("Live plot mutex posoned!");
-
+                /*
+                egui::Window::new("LiveTradeWindow")
+                    //.movable(false)
+                    .fixed_rect(drag_rect)
+                    .collapsible(false)
+                    .title_bar(false)
+                    .default_open(true)
+                    .show(ui.ctx(), |ui| {
+                });
+                 * */
                 LivePlot::show(&mut live_plot, chan, &c_data, ui, &mut live_info);
                 let mut man_orders = self
                     .man_orders
@@ -1320,6 +1330,7 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     man_orders.plot_extras = Some(p_extras);
                 };
                 let chan = self.send_to_cli.clone().expect("Cli comm channel none!");
+
                 let _res = ManualOrders::show(
                     &mut man_orders,
                     &live_price,
@@ -1331,6 +1342,8 @@ impl egui_tiles::Behavior<Pane> for DesktopApp {
                     None,
                     None,
                 );
+
+
             }
             PaneType::HistTrade => {
                 match self.resp_buff.as_ref() {
@@ -1686,7 +1699,7 @@ impl DesktopApp {
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            ui.heading("Bintrade_egui 0.1.2");
+            ui.heading("Bintrade Egui 0.1.2");
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Quit").clicked() {
@@ -1776,7 +1789,7 @@ impl eframe::App for DesktopApp {
                     }
                 }
                 ui.add_space(16.0);
-                egui::widgets::global_theme_preference_buttons(ui);
+                //egui::widgets::global_theme_preference_buttons(ui);
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -3091,6 +3104,7 @@ impl ManualOrders {
                 ui.separator();
                 ui.end_row();
             });
+
             ui.vertical(|ui| {
                 let available_height = ui.available_height();
 
@@ -3322,9 +3336,14 @@ impl ManualOrders {
 
         ui.end_row();
         if man_orders.single_order_mode == true {
-            ManualOrders::show_singleorder(man_orders, last_price, hh, cli_chan, ui);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ManualOrders::show_singleorder(man_orders, last_price, hh, cli_chan, ui);
+            });
         } else {
-            ManualOrders::show_multiorder(man_orders, last_price, cli_chan, ui, live_info);
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ManualOrders::show_multiorder(man_orders, last_price, cli_chan, ui, live_info);
+            });
         };
     }
 }
