@@ -12,15 +12,15 @@ const fn exec_order(
     _quant: f64,
     buy_sell: bool,
     fee: f64,
-    locked_qnt:f64
+    locked_qnt: f64,
 ) -> (f64, f64) {
     if buy_sell == true {
-        let asset1 =asset1 + (locked_qnt / p) * (1.0 - fee);
-        let asset2 = asset2- locked_qnt;
+        let asset1 = asset1 + (locked_qnt / p) * (1.0 - fee);
+        let asset2 = asset2 - locked_qnt;
         (asset1, asset2)
     } else {
-        let asset2 =asset2 + (locked_qnt * p) * (1.0 - fee);
-        let asset1 = asset1- locked_qnt;
+        let asset2 = asset2 + (locked_qnt * p) * (1.0 - fee);
+        let asset1 = asset1 - locked_qnt;
         (asset1, asset2)
     }
 }
@@ -130,14 +130,15 @@ pub const fn eval_order_basic(
     asset2: f64,
     order: Order,
     eval_mode: &EvalMode,
-    locked_qnt:f64
+    locked_qnt: f64,
 ) -> Option<(OrderCondition, f64, f64, f64)> {
     let last_order_price;
     match order {
         Order::Market { buy: b, quant: q } => {
             let quant = q.get_f64();
             let buy_sell = b;
-            let (asset1, asset2) = exec_order(asset1, asset2, o, quant, buy_sell, T_FEE, locked_qnt);
+            let (asset1, asset2) =
+                exec_order(asset1, asset2, o, quant, buy_sell, T_FEE, locked_qnt);
             let condition = OrderCondition::Filled;
             last_order_price = o;
             Some((condition, asset1, asset2, last_order_price))
@@ -186,8 +187,9 @@ pub const fn eval_order_basic(
                     let limit_order = eval_limit(limit, h, o, c, l, buy_sell, eval_mode);
                     match limit_order {
                         Some(price) => {
-                            let (asset1, asset2) =
-                                exec_order(asset1, asset2, price, quant, buy_sell, M_FEE, locked_qnt);
+                            let (asset1, asset2) = exec_order(
+                                asset1, asset2, price, quant, buy_sell, M_FEE, locked_qnt,
+                            );
                             let condition = OrderCondition::Filled;
                             last_order_price = o;
                             Some((condition, asset1, asset2, last_order_price))
@@ -557,7 +559,7 @@ fn hist_eval_kline(
     asset1: f64,
     asset2: f64,
     eval_mode: &EvalMode,
-    locked_qnt:f64,
+    locked_qnt: f64,
 ) -> Option<(DateTime<Utc>, f64, f64, Option<Order>)> {
     for k in kline.iter() {
         let (t, o, h, l, c, _) = *k;
@@ -650,12 +652,19 @@ impl HistTrade {
         trade_slice: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
         o: Order,
         eval_mode: &EvalMode,
-        locked_qnt:f64,
+        locked_qnt: f64,
     ) -> Option<Order> {
-        let result = hist_eval_kline(trade_slice, o, self.asset1, self.asset2, eval_mode, locked_qnt);
+        let result = hist_eval_kline(
+            trade_slice,
+            o,
+            self.asset1,
+            self.asset2,
+            eval_mode,
+            locked_qnt,
+        );
         match result {
             Some((transaction_time, asset1, asset2, order)) => {
-                tracing::debug![
+                tracing::trace![
                     "Hist_Trade_Forward. Transaction Time: {}\n Asset1: {}\n Asset2: {} \n Order: {:?}",
                     transaction_time,
                     asset1,
@@ -706,6 +715,7 @@ impl HistTrade {
         eval_mode: &EvalMode,
         active_orders: Vec<(u64, Order, f64)>,
     ) -> Vec<(u64, Order, f64)> {
+        tracing::trace!["Active orders{:?}", active_orders];
         match active_orders.len() {
             0 => return vec![],
             1 => {
@@ -719,7 +729,8 @@ impl HistTrade {
             _ => {
                 let mut remaining_active_orders = vec![];
                 for (id, order, locked_qnt) in active_orders.iter() {
-                    let result = self.eval_single_order(trade_slice, *order, eval_mode, *locked_qnt);
+                    let result =
+                        self.eval_single_order(trade_slice, *order, eval_mode, *locked_qnt);
                     match result {
                         Some(o) => remaining_active_orders.push((*id, o, *locked_qnt)),
                         None => (),
@@ -737,10 +748,10 @@ impl HistTrade {
                     0.0 => {}
                     _ => {
                         let c = (self.asset2 / self.last_asset2) - 1.0;
-                        tracing::debug!["{:?}", c];
+                        tracing::trace!["{:?}", c];
                         self.ch2 = 100.0 * c;
                         self.last_asset2 = self.asset2;
-                        tracing::debug!["C:{:?}, CH1:{:?}, Asset1:{:?}", c, self.ch2, self.asset2];
+                        tracing::trace!["C:{:?}, CH1:{:?}, Asset1:{:?}", c, self.ch2, self.asset2];
                     }
                 }
             } else {
@@ -750,7 +761,7 @@ impl HistTrade {
                         let c = (self.asset1 / self.last_asset1) - 1.0;
                         self.ch2 = 100.0 * c;
                         self.last_asset1 = self.asset1;
-                        tracing::debug!["C:{:?}, CH2:{:?}, Asset1:{:?}", c, self.ch1, self.asset1];
+                        tracing::trace!["C:{:?}, CH2:{:?}, Asset1:{:?}", c, self.ch1, self.asset1];
                     }
                 }
             }

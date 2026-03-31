@@ -40,7 +40,7 @@ const NAVI_WICKS_DEFAULT: u16 = 30;
 const CHART_FORWARD: u16 = 40;
 const DEFAULT_TRADE_WICKS: u16 = 30;
 const BACKLOAD_WICKS: i64 = 720;
-const MAX_PLOT_WIDTH:f32=800.0;
+const MAX_PLOT_WIDTH: f32 = 800.0;
 
 const SETTINGS_SAVE_PATH: &str = "./Settings.bin";
 
@@ -447,14 +447,14 @@ impl KlinePlot {
         };
     }
     fn show(&mut self, ui: &mut egui::Ui) -> Result<()> {
-        let (plot_k,plot_v) = self.mk_plt();
-        let plot_width=if ui.available_width()>MAX_PLOT_WIDTH{
-                MAX_PLOT_WIDTH
-                //ui.available_width()*0.5
-        }else{
+        let (plot_k, plot_v) = self.mk_plt();
+        let plot_width = if ui.available_width() > MAX_PLOT_WIDTH {
+            MAX_PLOT_WIDTH
+            //ui.available_width()*0.5
+        } else {
             ui.available_width()
         };
-        let (plot_candles,plot_volume)=(plot_k.width(plot_width), plot_v.width(plot_width));
+        let (plot_candles, plot_volume) = (plot_k.width(plot_width), plot_v.width(plot_width));
         let bp = BoxPlot::new(&self.name, self.l_boxplot.clone())
             .element_formatter(Box::new(time_format));
         let bc = BarChart::new(&self.name, self.l_barchart.clone());
@@ -1888,7 +1888,7 @@ impl Default for ManualOrders {
             single_order_mode: false,
             trade_slice_loaded: false,
 
-            locked_qnt:0.0,
+            locked_qnt: 0.0,
 
             single_order: None,
 
@@ -1941,13 +1941,13 @@ fn link_hline_orders(orders: &HashMap<u64, (Order, bool, f64)>, hlines: &mut Vec
     hlines.clear();
     let _ = orders
         .iter()
-        .map(|(_, (order, active,_))| {
+        .map(|(_, (order, active, _))| {
             let mut hh = HlineType::hline_order(order, *active);
             hlines.append(&mut hh);
         })
         .collect::<Vec<_>>();
 }
-macro_rules! make_hotkey_ctrl{
+macro_rules! _make_hotkey_ctrl{
     ( $($k:ident,$key:ident, $ui:ident, $hk_active:ident),* ) => {
         {
             if *$($hk_active)* {
@@ -2039,7 +2039,7 @@ pub struct SingleOrderMode {
     place_order: bool,
     delete_order: bool,
 
-    locked_qnt:f64,
+    locked_qnt: f64,
 
     order_adjusted: bool,
     live_order_placed: bool,
@@ -2067,7 +2067,7 @@ fn show_hotkeys(ui: &mut egui::Ui) {
         ui.label(
             "
         Shift+A - toggle order activate \n
-        Shift+Num1 - place market order\n
+        Shift + L - Hist only - trade forward\n
         Shift+Num2 - place limit order\n
         ",
         );
@@ -2086,13 +2086,6 @@ fn show_hotkeys(ui: &mut egui::Ui) {
         Shift + D  del all open orders\n
         ",
         );
-        ui.label(
-            "
-        Shift + R qoute asset now\n
-        Shift + L - Hist only - trade forward\n
-        Shift + H - undo last tradingle
-        ",
-        );
         ui.end_row();
     });
 }
@@ -2107,7 +2100,6 @@ impl SingleOrderMode {
         hist_trade: bool,
     ) {
         let symbol = &man_orders.current_symbol;
-        let hk_active = &self.hk_active;
         if man_orders.asset1 > man_orders.asset2 {
             self.asset1_held = true;
         };
@@ -2149,13 +2141,23 @@ impl SingleOrderMode {
             self.order_placed = false;
         };
         if self.order_active {
+            let buy=self.order.get_side();
+            if buy{
+                self.locked_qnt=man_orders.asset2;
+            }else{
+                self.locked_qnt=man_orders.asset1;
+            };
             if hist_trade {
                 man_orders.orders = HashMap::default();
                 if self.order_prev_active {
-                    man_orders.orders.insert(self.order_id, (self.order, true, 0.0));
+                    man_orders
+                        .orders
+                        .insert(self.order_id, (self.order, true, self.locked_qnt));
                     self.order_prev_active = false;
                 } else {
-                    man_orders.orders.insert(self.order_id, (self.order, false, 0.0));
+                    man_orders
+                        .orders
+                        .insert(self.order_id, (self.order, false, self.locked_qnt));
                     self.order_prev_active = true;
                 };
             } else {
@@ -2180,6 +2182,7 @@ impl SingleOrderMode {
         }
 
         if self.asset1_held {
+            /* FIXME fix this later....
             let qoute_asset_now = make_hotkey_ctrl![Key, R, ui, hk_active];
             tracing::trace!["Qute asset now pressed!"];
             if qoute_asset_now && !hist_trade {
@@ -2196,6 +2199,7 @@ impl SingleOrderMode {
                 });
                 let _res = cli_chan.send(msg);
             }
+            */
         };
         if self.parse_ks {
             tracing::trace!["parse_ks called"];
@@ -2221,8 +2225,17 @@ impl SingleOrderMode {
         };
         if self.place_order {
             tracing::trace!["hotkeys place_order called"];
+            let buy=self.order.get_side();
+            if buy{
+                self.locked_qnt=man_orders.asset2;
+            }else{
+                self.locked_qnt=man_orders.asset1;
+            };
+            tracing::trace!["Locked QNT:{}",self.locked_qnt];
             if hist_trade {
-                man_orders.orders.insert(self.order_id, (self.order, false, self.locked_qnt));
+                man_orders
+                    .orders
+                    .insert(self.order_id, (self.order, false, self.locked_qnt));
                 tracing::trace!["hotkeys place_order called ORDER: {:?}", self.order];
                 self.order_id += 1;
             } else {
@@ -2240,11 +2253,20 @@ impl SingleOrderMode {
             self.order_placed = true;
         };
         if self.order_adjusted && self.order_placed {
+            let buy=self.order.get_side();
+            if buy{
+                self.locked_qnt=man_orders.asset2;
+            }else{
+                self.locked_qnt=man_orders.asset1;
+            };
+            tracing::trace!["Locked QNT adjust order:{}",self.locked_qnt];
             if self.order_active_after_change {
                 if hist_trade {
                     man_orders.orders = HashMap::default();
                     self.order_id += 1;
-                    man_orders.orders.insert(self.order_id, (self.order, true, self.locked_qnt));
+                    man_orders
+                        .orders
+                        .insert(self.order_id, (self.order, true, self.locked_qnt));
                 } else {
                     let msg =
                         ClientInstruct::SendBinInstructs(BinInstructs::CancelAndReplaceOrder {
@@ -2259,7 +2281,9 @@ impl SingleOrderMode {
                 if hist_trade {
                     man_orders.orders = HashMap::default();
                     self.order_id += 1;
-                    man_orders.orders.insert(self.order_id, (self.order, false, self.locked_qnt));
+                    man_orders
+                        .orders
+                        .insert(self.order_id, (self.order, false, self.locked_qnt));
                 } else {
                     let msg = ClientInstruct::SendBinInstructs(BinInstructs::CancelOrder {
                         id: self.order_id,
@@ -2325,6 +2349,7 @@ fn hotkey_order_single(
         *k1_n = 0;
     };
 
+    /*FIXME debug this later
     let add_market = make_hotkey_shift![Key, Num1, ui, hk_active];
     if add_market {
         tracing::trace!["add_market order called"];
@@ -2334,6 +2359,7 @@ fn hotkey_order_single(
         *place_order = true;
         *last_order_price = *last_price;
     };
+    */
 
     let add_limit = make_hotkey_shift![Key, Num2, ui, hk_active];
     if add_limit {
@@ -2593,32 +2619,30 @@ impl ManualOrders {
         asset2_locked: &f64,
         asset1: &f64,
         asset2: &f64,
-        locked_qnt:&f64
+        locked_qnt: &f64,
     ) -> (f64, f64, f64, f64) {
-        let buy=o.get_side();
-        tracing::debug!["LOCKED QNT:{}", locked_qnt];
+        let buy = o.get_side();
+        tracing::trace!["LOCKED QNT:{}", locked_qnt];
         let (unlocked_a1, unlocked_a2) = if buy {
-            (0.0,*locked_qnt)
+            (0.0, *locked_qnt)
         } else {
-            (*locked_qnt,0.0)
+            (*locked_qnt, 0.0)
         };
-        tracing::debug!["Unlocked A1:{}, Unlocked A2:{}", unlocked_a1, unlocked_a2];
+        tracing::trace!["Unlocked A1:{}, Unlocked A2:{}", unlocked_a1, unlocked_a2];
 
-        let (a1, a2) = (
-            asset1 + unlocked_a1,
-            asset2 + unlocked_a2,
-        );
-        tracing::debug!["Locked A1:{}, Locked A2:{}", asset1_locked, asset2_locked];
-        let (a1_l,a2_l)={
-            (
-            asset1_locked - unlocked_a1,
-            asset2_locked - unlocked_a2,
-            )
-        };
-        tracing::debug!["Unlocked A1:{}, Unlocked A2:{}", unlocked_a1, unlocked_a2];
+        let (a1, a2) = (asset1 + unlocked_a1, asset2 + unlocked_a2);
+        tracing::trace!["Locked A1:{}, Locked A2:{}", asset1_locked, asset2_locked];
+        let (a1_l, a2_l) = { (asset1_locked - unlocked_a1, asset2_locked - unlocked_a2) };
+        tracing::trace!["Unlocked A1:{}, Unlocked A2:{}", unlocked_a1, unlocked_a2];
         (a1, a2, a1_l, a2_l)
     }
-    fn hist_validate_order(o: &Order, asset1: &f64, asset2: &f64, asset_1_locked:&f64, asset_2_locked:&f64) -> Option<(f64, f64, f64, f64, f64)> {
+    fn hist_validate_order(
+        o: &Order,
+        asset1: &f64,
+        asset2: &f64,
+        asset_1_locked: &f64,
+        asset_2_locked: &f64,
+    ) -> Option<(f64, f64, f64, f64, f64)> {
         let price = o.get_price();
         if *price <= 0.0 {
             tracing::error!["Order price less than or equal to 0"];
@@ -2628,13 +2652,15 @@ impl ManualOrders {
         let side = o.get_side();
         match side {
             true => {
-                if *asset2 <= 0.0 { //Qoute asset
+                if *asset2 <= 0.0 {
+                    //Qoute asset
                     tracing::error!["Order error: insufficient free balance"];
                     return None;
                 };
             }
             false => {
-                if *asset1 <= 0.0 { //Base asset
+                if *asset1 <= 0.0 {
+                    //Base asset
                     tracing::error!["Order error: insufficient free balance"];
                     return None;
                 };
@@ -2675,40 +2701,36 @@ impl ManualOrders {
                 }
             }
         };
-        let locked_qnt=if buy{
-            locked_a2
-        }else{
-            locked_a1
-        };
+        let locked_qnt = if buy { locked_a2 } else { locked_a1 };
         let (a1, a2) = (asset1 - locked_a1, asset2 - locked_a2);
-        tracing::debug!["hit_order_valiate Asset1:{} Asset2:{}", asset1, asset2];
-        tracing::debug![
+        tracing::trace!["hit_order_valiate Asset1:{} Asset2:{}", asset1, asset2];
+        tracing::trace![
             "hit_order_valiate locked_asset1:{} locked_asset2:{}",
             locked_a1,
             locked_a2
         ];
-        tracing::debug!["hit_order_valiate A1:{} A2:{}", a1, a2];
+        tracing::trace!["hit_order_valiate A1:{} A2:{}", a1, a2];
         if buy == true {
             if a1 < 0.0 {
                 None
             } else {
-                let locked_a1=locked_a1+asset_1_locked;
-                let locked_a2=locked_a2+asset_2_locked;
+                let locked_a1 = locked_a1 + asset_1_locked;
+                let locked_a2 = locked_a2 + asset_2_locked;
                 Some((a1, a2, locked_a1, locked_a2, locked_qnt))
             }
         } else {
             if a2 < 0.0 {
                 None
             } else {
-                let locked_a1=locked_a1+asset_1_locked;
-                let locked_a2=locked_a2+asset_2_locked;
+                let locked_a1 = locked_a1 + asset_1_locked;
+                let locked_a2 = locked_a2 + asset_2_locked;
                 Some((a1, a2, locked_a1, locked_a2, locked_qnt))
             }
         }
     }
     fn show_multiorder(
         man_orders: &mut ManualOrders,
-        last_price: &f64,
+        _last_price: &f64,
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
         live_info: Option<&LiveInfo>,
@@ -3095,7 +3117,7 @@ impl ManualOrders {
                                     ui.label(format!["{}", id]);
                                 });
                                 row.col(|ui| {
-                                    ui.label(format!["{:.3} %", order.get_qnt() * 100.0]);
+                                    ui.label(format!["{:.3}", locked_qnt]);
                                 });
                                 row.col(|ui| {
                                     ui.label(format!["{}", order.get_price()]);
@@ -3128,9 +3150,9 @@ impl ManualOrders {
                                                 &man_orders.asset2_locked,
                                                 &man_orders.asset1,
                                                 &man_orders.asset2,
-                                                &locked_qnt
+                                                &locked_qnt,
                                             );
-                                            tracing::debug!["A1 {},A2 {}",a1,a2];
+                                            tracing::trace!["A1 {},A2 {}", a1, a2];
                                             man_orders.order_set = false;
                                             man_orders.asset1_locked = a1_l;
                                             man_orders.asset2_locked = a2_l;
@@ -3178,11 +3200,11 @@ impl ManualOrders {
                     //h_trade.asset1=man_orders.asset1 ;
                     //h_trade.asset2=man_orders.asset2 ;
                 } else {
-                    if live_info.is_none() && man_orders.refresh_hist_balance{
+                    if live_info.is_none() && man_orders.refresh_hist_balance {
                         //FIXME only run if this is updated
                         man_orders.asset1 = h_trade.asset1;
                         man_orders.asset2 = h_trade.asset2;
-                        man_orders.refresh_hist_balance=false;
+                        man_orders.refresh_hist_balance = false;
                     };
                 };
                 if let Some(symbol_inf) = symbol_info {
@@ -3200,14 +3222,14 @@ impl ManualOrders {
                         let active_orders: Vec<(u64, Order, f64)> = man_orders
                             .orders
                             .iter()
-                            .filter(|(_, (_, active,_))| *active == true)
+                            .filter(|(_, (_, active, _))| *active == true)
                             .map(|(id, (order, _active, locked_qnt))| (*id, *order, *locked_qnt))
                             .collect();
                         tracing::trace!["active_orders:{}", active_orders.len()];
                         let inactive_orders: Vec<(u64, Order, f64)> = man_orders
                             .orders
                             .iter()
-                            .filter(|(_, (_, active,_))| *active == false)
+                            .filter(|(_, (_, active, _))| *active == false)
                             .map(|(id, (order, _active, locked_qnt))| (*id, *order, *locked_qnt))
                             .collect();
                         tracing::trace!["inactive_orders:{}", inactive_orders.len()];
@@ -3217,10 +3239,11 @@ impl ManualOrders {
                             "remaining_active_orders:{}",
                             remaining_active_orders.len()
                         ];
-                        let mut remaining_orders: HashMap<u64, (Order, bool, f64)> = inactive_orders
-                            .iter()
-                            .map(|(id, order, locked_qnt)| (*id, (*order, false, *locked_qnt)))
-                            .collect();
+                        let mut remaining_orders: HashMap<u64, (Order, bool, f64)> =
+                            inactive_orders
+                                .iter()
+                                .map(|(id, order, locked_qnt)| (*id, (*order, false, *locked_qnt)))
+                                .collect();
                         let _res: Vec<_> = remaining_active_orders
                             .iter()
                             .map(|(id, order, locked_qnt)| {
@@ -3238,21 +3261,21 @@ impl ManualOrders {
                             .abs();
                         let a2_locked = remaining_active_orders
                             .iter()
-                            .filter(|(_, o,_)| o.get_side() == true)
-                            .map(|(_, order,_)| order.get_qnt() * a2)
+                            .filter(|(_, o, _)| o.get_side() == true)
+                            .map(|(_, order, _)| order.get_qnt() * a2)
                             .sum::<f64>()
                             .abs();
                         //FIXME .... hmhmmm.....
                         let a1m = a1 - a1_locked;
                         let a2m = a2 - a2_locked;
 
-                        tracing::debug!["a1_locked: {}, a2_locked: {}", a1_locked, a2_locked];
+                        tracing::trace!["a1_locked: {}, a2_locked: {}", a1_locked, a2_locked];
                         man_orders.asset1 = a1m;
                         man_orders.asset2 = a2m;
                         man_orders.asset1_locked = a1_locked;
                         man_orders.asset2_locked = a2_locked;
                         man_orders.last_slice_time = t_slice[t_slice.len() - 1].0;
-                        man_orders.refresh_hist_balance=true;
+                        man_orders.refresh_hist_balance = true;
                     };
                 };
 
@@ -3330,10 +3353,13 @@ impl ManualOrders {
         ui.end_row();
         egui::Grid::new("Last price:").show(ui, |ui| {
             ui.horizontal(|ui| {
+                /*
                 ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
-                if man_orders.hotkeys{
+                if man_orders.hotkeys {
                     //FIXME add orders here
                 };
+                */
+
                 ui.checkbox(&mut man_orders.single_order_mode, "Hotkeys only mode");
                 if man_orders.single_order_mode {
                     let res = man_orders.so_mode.as_mut();
@@ -3737,7 +3763,7 @@ impl Settings {
                     settings.enc_binance_priv_key = None;
 
                     let _res = settings.save_settings_file(None);
-                    tracing::info!["Api keys removed"];
+                    tracing::trace!["Api keys removed"];
                     let msg = ClientInstruct::SendBinInstructs(BinInstructs::RemoveApiKeys {});
                     let _res = cli_chan.send(msg);
                 };
@@ -3752,7 +3778,7 @@ impl Settings {
                         let res = settings.decrypt_keys(settings.password_string.clone());
                         match res {
                             Ok(_) => {
-                                tracing::info!["Api keys decrypted"];
+                                tracing::trace!["Api keys decrypted"];
                                 if let (Some(pub_key), Some(priv_key)) = (
                                     settings.binance_pub_key.clone(),
                                     settings.binance_priv_key.clone(),
@@ -4390,7 +4416,7 @@ impl HistPlot {
         if hist_plot.intv != hist_plot.last_intv {
             hist_plot.last_intv = hist_plot.intv;
             hist_plot.kline_plot.intv = hist_plot.intv;
-            //FIXME test dis..
+            //FIXME test dis..FIXME... not working....
             hist_plot.kline_plot.points.buy_markers = hist_plot.hist_trade.buy_points.clone();
             hist_plot.kline_plot.points.sell_markers = hist_plot.hist_trade.sell_points.clone();
         };

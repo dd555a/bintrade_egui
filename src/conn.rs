@@ -850,7 +850,8 @@ impl BinanceClient {
                                     match res {
                                         Ok(o) => {
                                             tracing::trace!["{:?}", &order_binance];
-                                            live_orders.insert(order_binance.order_id, (o, true, 0.0));
+                                            live_orders
+                                                .insert(order_binance.order_id, (o, true, 0.0));
                                         }
                                         Err(e) => {
                                             tracing::error!["check_live_orders_change {}", e];
@@ -1091,7 +1092,8 @@ impl BinanceClient {
                 );
                 match res {
                     Ok(o) => {
-                        self.live_orders.insert(order_binance.order_id, (o, true, 0.0));
+                        self.live_orders
+                            .insert(order_binance.order_id, (o, true, 0.0));
                     }
                     Err(e) => {
                         tracing::error!["{}", e];

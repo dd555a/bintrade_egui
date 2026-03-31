@@ -526,7 +526,6 @@ pub struct AssetData {
     pub current_pair_strings: (String, String),
     pub current_pair_free_balances: (f64, f64),
     pub current_pair_locked_balances: (f64, f64),
-
 }
 
 impl AssetData {
@@ -567,12 +566,12 @@ impl AssetData {
         Ok(&kline.kline)
     }
     pub fn show_all_loaded(&self) {
-        tracing::info!["All loaded symbols:"];
+        tracing::trace!["All loaded symbols:"];
         let _: Vec<_> = self
             .kline_data
             .iter()
             .map(|(symbol, _)| {
-                tracing::info!["{}", &symbol];
+                tracing::trace!["{}", &symbol];
             })
             .collect();
     }
@@ -868,7 +867,7 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                 let _ = evec
                     .iter()
                     .map(|(st, et)| {
-                        tracing::info![
+                        tracing::trace![
                             "Download Errors: Intv: {}  chunk from to {} to {}",
                             intv.to_str(),
                             st,
@@ -1139,9 +1138,9 @@ async fn create_metadata_db() -> Result<()> {
 }
 
 async fn download_asset_list_binance(metadata_db: &Pool<Sqlite>) -> Result<()> {
-    tracing::info!["Fetching exchange info"];
+    tracing::trace!["Fetching exchange info"];
     let symbol_info_full = get_exchange_info().await?;
-    tracing::info!["Fetching futures exchange info"];
+    tracing::trace!["Fetching futures exchange info"];
     let fut_symbol_info_full = fut_get_exchange_info().await?;
 
     let symbol_inf = symbol_info_full.chunks(100);
@@ -1267,12 +1266,12 @@ async fn create_db(db_path: &str) -> Result<()> {
     if !Sqlite::database_exists(&db_path).await.unwrap_or(false) {
         let result = Sqlite::create_database(&db_path).await?;
         let pool = connect_sqlite(&db_path).await?;
-        tracing::info!("Creating database {:?}", result);
+        tracing::trace!("Creating database {:?}", result);
         let q = format!("PRAGMA foreign_keys=ON");
         exec_query(&pool, &q).await?;
         Ok(())
     } else {
-        tracing::info!("Database already exists");
+        tracing::trace!("Database already exists");
         Ok(())
     }
 }
@@ -1483,7 +1482,7 @@ impl SQLConn {
         let bases = get_asset_bases_binance2(symbol, &meta_pool).await?;
 
         let elapsed = now.elapsed();
-        tracing::info!("load_part_data2 Elapsed pool connect: {:?}", elapsed);
+        tracing::trace!("load_part_data2 Elapsed pool connect: {:?}", elapsed);
 
         let mut klines = Klines::new_empty();
         for intv in Intv::iter() {
@@ -1527,7 +1526,7 @@ impl SQLConn {
         };
         ad.kline_data.insert(symbol.to_string(), klines);
         let elapsed = now.elapsed();
-        tracing::info!("load_part_data2 Elapsed total: {:?}", elapsed);
+        tracing::trace!("load_part_data2 Elapsed total: {:?}", elapsed);
         Ok(())
     }
     async fn load_part_data(
@@ -1708,10 +1707,10 @@ impl SQLConn {
         Ok(())
     }
     pub async fn update_data(&mut self) -> Result<()> {
-        tracing::info!["Update data called!"];
+        tracing::trace!["Update data called!"];
         if Sqlite::database_exists(&METADATA_DB_PATH).await? == false {
             create_metadata_db().await?;
-            tracing::info!["Metadata DB created"];
+            tracing::trace!["Metadata DB created"];
         };
         let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
             .await
@@ -1748,7 +1747,7 @@ impl SQLConn {
                 .await;
         }
         self.load_asset_list().await?;
-        tracing::info!["Data update ran successfully!"];
+        tracing::trace!["Data update ran successfully!"];
         Ok(())
     }
     async fn unload_data(&mut self, symbol: &str) -> Result<()> {
@@ -1858,7 +1857,7 @@ impl SQLConn {
                 resp
             }
             SQLInstructs::LoadHistData { symbol: ref s } => {
-                tracing::info!("Loading historical data for:{}", s);
+                tracing::trace!("Loading historical data for:{}", s);
                 let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
                     .await
                     .context(anyhow!("SQL::Unable to metadata connect to db"));
@@ -1904,7 +1903,7 @@ impl SQLConn {
                 backload_wicks: ref st,
                 trade_time: ref et,
             } => {
-                tracing::info!("Loading historical data for:{}", s);
+                tracing::trace!("Loading historical data for:{}", s);
 
                 let meta_pool = SqlitePool::connect(&METADATA_DB_PATH)
                     .await
@@ -2021,7 +2020,7 @@ impl SQLConn {
                     }
                 };
                 let res = self.del_single_asset(symbol, &meta_pool).await;
-                tracing::info!["Deleted asset historical data for: {}", symbol];
+                tracing::trace!["Deleted asset historical data for: {}", symbol];
                 meta_pool.close().await;
                 //TODO - clean this up and turn bellow into a macro
                 let resp = match res {
