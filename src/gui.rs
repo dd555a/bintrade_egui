@@ -1828,6 +1828,7 @@ pub struct ManualOrders {
     hotkeys: bool,
     single_order_mode: bool,
     so_mode: Option<SingleOrderMode>,
+    mode_switched:bool,
 
     current_symbol: String,
 
@@ -1909,6 +1910,8 @@ impl Default for ManualOrders {
             scalar: 100.0,
             scalar_set: false,
             buy: true,
+
+            mode_switched:false,
 
             refresh_hist_balance: true,
 
@@ -2139,13 +2142,14 @@ impl SingleOrderMode {
                 self.live_order_placed = false;
             };
             self.order_placed = false;
+            self.order=Order::None;
         };
-        if self.order_active {
-            let buy=self.order.get_side();
-            if buy{
-                self.locked_qnt=man_orders.asset2;
-            }else{
-                self.locked_qnt=man_orders.asset1;
+        if self.order_active && self.order != Order::None{
+            let buy = self.order.get_side();
+            if buy {
+                self.locked_qnt = man_orders.asset2;
+            } else {
+                self.locked_qnt = man_orders.asset1;
             };
             if hist_trade {
                 man_orders.orders = HashMap::default();
@@ -2223,15 +2227,15 @@ impl SingleOrderMode {
             };
             self.parse_ks = false;
         };
-        if self.place_order {
+        if self.place_order && self.order != Order::None {
             tracing::trace!["hotkeys place_order called"];
-            let buy=self.order.get_side();
-            if buy{
-                self.locked_qnt=man_orders.asset2;
-            }else{
-                self.locked_qnt=man_orders.asset1;
+            let buy = self.order.get_side();
+            if buy {
+                self.locked_qnt = man_orders.asset2;
+            } else {
+                self.locked_qnt = man_orders.asset1;
             };
-            tracing::trace!["Locked QNT:{}",self.locked_qnt];
+            tracing::trace!["Locked QNT:{}", self.locked_qnt];
             if hist_trade {
                 man_orders
                     .orders
@@ -2252,14 +2256,14 @@ impl SingleOrderMode {
             self.place_order = false;
             self.order_placed = true;
         };
-        if self.order_adjusted && self.order_placed {
-            let buy=self.order.get_side();
-            if buy{
-                self.locked_qnt=man_orders.asset2;
-            }else{
-                self.locked_qnt=man_orders.asset1;
+        if self.order_adjusted && self.order_placed && self.order != Order::None {
+            let buy = self.order.get_side();
+            if buy {
+                self.locked_qnt = man_orders.asset2;
+            } else {
+                self.locked_qnt = man_orders.asset1;
             };
-            tracing::trace!["Locked QNT adjust order:{}",self.locked_qnt];
+            tracing::trace!["Locked QNT adjust order:{}", self.locked_qnt];
             if self.order_active_after_change {
                 if hist_trade {
                     man_orders.orders = HashMap::default();
@@ -3110,7 +3114,7 @@ impl ManualOrders {
                     })
                     .body(|mut body| {
                         let orders = man_orders.orders.clone();
-                        for (id, (order, _active, locked_qnt)) in orders.iter() {
+                        for (id, (order, active, locked_qnt)) in orders.iter() {
                             let row_height = 18.0;
                             body.row(row_height, |mut row| {
                                 row.col(|ui| {
@@ -3144,21 +3148,24 @@ impl ManualOrders {
                                             );
                                             let _res = cli_chan.send(msg);
                                         } else {
-                                            let (a1, a2, a1_l, a2_l) = ManualOrders::hist_del_order(
-                                                &order,
-                                                &man_orders.asset1_locked,
-                                                &man_orders.asset2_locked,
-                                                &man_orders.asset1,
-                                                &man_orders.asset2,
-                                                &locked_qnt,
-                                            );
-                                            tracing::trace!["A1 {},A2 {}", a1, a2];
-                                            man_orders.order_set = false;
-                                            man_orders.asset1_locked = a1_l;
-                                            man_orders.asset2_locked = a2_l;
-                                            man_orders.asset1 = a1;
-                                            man_orders.asset2 = a2;
-                                            man_orders.orders.remove(id);
+                                            if *active{
+                                                let (a1, a2, a1_l, a2_l) = ManualOrders::hist_del_order(
+                                                    &order,
+                                                    &man_orders.asset1_locked,
+                                                    &man_orders.asset2_locked,
+                                                    &man_orders.asset1,
+                                                    &man_orders.asset2,
+                                                    &locked_qnt,
+                                                );
+                                                tracing::trace!["A1 {},A2 {}", a1, a2];
+                                                man_orders.order_set = false;
+                                                man_orders.asset1_locked = a1_l;
+                                                man_orders.asset2_locked = a2_l;
+                                                man_orders.asset1 = a1;
+                                                man_orders.asset2 = a2;
+                                                man_orders.orders.remove(id);
+
+                                            };
                                         };
                                     };
                                 });
@@ -3357,19 +3364,36 @@ impl ManualOrders {
                 ui.checkbox(&mut man_orders.hotkeys, "Hotkeys");
                 if man_orders.hotkeys {
                     //FIXME add orders here
+                    //FIXME add hotkeys only mode for live orders later...
                 };
                 */
 
-                ui.checkbox(&mut man_orders.single_order_mode, "Hotkeys only mode");
-                if man_orders.single_order_mode {
-                    let res = man_orders.so_mode.as_mut();
-                    match res {
-                        Some(so_mode) => {
-                            so_mode.hk_active = true;
-                        }
-                        None => {
-                            tracing::error!["hotkeys_active get mut should be some here!"];
-                        }
+                if live_info.is_none(){
+                    ui.checkbox(&mut man_orders.single_order_mode, "Hotkeys only mode");
+                    if man_orders.single_order_mode {
+                        man_orders.mode_switched=!man_orders.mode_switched;
+                        let res = man_orders.so_mode.as_mut();
+                        match res {
+                            Some(so_mode) => {
+                                so_mode.hk_active = true;
+                            }
+                            None => {
+                                tracing::error!["hotkeys_active get mut should be some here!"];
+                            }
+                        };
+                    }else{
+                        if man_orders.mode_switched{
+                            let res = man_orders.so_mode.as_mut();
+                            match res {
+                                Some(so_mode) => {
+                                    *so_mode= SingleOrderMode::new();
+                                }
+                                None => {
+                                    tracing::error!["hotkeys_active get mut should be some here!"];
+                                }
+                            };
+                            man_orders.mode_switched=false;
+                        };
                     };
                 };
                 ui.label(
