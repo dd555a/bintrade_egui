@@ -40,6 +40,8 @@ use chrono::{DateTime, Utc};
 const ERR_CTX: &str = "Binance client | websocket:";
 const DEFAULT_BUFFER_SIZE: usize = 50;
 const ORDER_CHECK_INTV_MS: u64 = 500;
+//TODO api needs to be replaced, start ws user stream needs to be done, and it needs to be
+//refactored for easier debuging
 
 #[allow(non_snake_case)]
 #[derive(Deserialize, Debug, Clone)]
@@ -431,7 +433,7 @@ pub struct WSTick {
             bool,
             bool,
             HashMap<String, Vec<String>>,
-            Option<String>
+            Option<String>,
         )>,
     >,
     watch_price_ty: BinWSResponse,
@@ -440,8 +442,8 @@ pub struct WSTick {
     live_price1: Arc<Mutex<f64>>,
     disconnect: bool,
     reconnect: bool,
-    change_symbol:Option<String>,
-    symbol:String,
+    change_symbol: Option<String>,
+    symbol: String,
 }
 impl WSTick {
     fn new(
@@ -539,7 +541,7 @@ impl WSTick {
             BinWSResponse::parse_into_by_str(input).context("Failed to parse into str")?;
         match (sorted, self.watch_price_ty) {
             (BinWSResponse::AggTrade(val), BinWSResponse::AggTrade(_)) => {
-                if self.symbol==symbol || self.symbol.is_empty(){
+                if self.symbol == symbol || self.symbol.is_empty() {
                     let mut lp1 = self
                         .live_price1
                         .lock()
@@ -548,7 +550,7 @@ impl WSTick {
                 };
             }
             (BinWSResponse::KlineTick((_, val)), BinWSResponse::KlineTick((_, _))) => {
-                if self.symbol==symbol || self.symbol.is_empty(){
+                if self.symbol == symbol || self.symbol.is_empty() {
                     let mut lp1 = self
                         .live_price1
                         .lock()
@@ -565,11 +567,7 @@ impl WSTick {
         tracing::trace!["Placing ws output"];
         uo.0.push((symbol, sorted));
         tracing::trace!["Raw ws successfully placed"];
-        let change_symbol=if uo.4.is_some(){
-            uo.4.take()
-        }else{
-            None
-        };
+        let change_symbol = if uo.4.is_some() { uo.4.take() } else { None };
         Ok((uo.1, uo.2, change_symbol))
     }
     async fn connect(&self) -> Result<WebSocket> {
@@ -589,7 +587,7 @@ impl WSTick {
         let sub_message = json!({
             "method": "SUBSCRIBE",
             "id": 1,
-            "params":ovec.as_slice(), 
+            "params":ovec.as_slice(),
         });
         tracing::trace!["\x1b[93m Subscribe message\x1b[0m :  {:?}", sub_message];
         let mut conn = WebSocket::connect(socket).await?;
@@ -606,17 +604,17 @@ impl WSTick {
         ];
         while !self.disconnect {
             while n < buffer_size {
-                if let Some(ref new_symbol)=self.change_symbol{
+                if let Some(ref new_symbol) = self.change_symbol {
                     tracing::debug!["Change symbol 2 called!"];
-                    self.symbol=new_symbol.to_string();
-                    let new_params=get_ws_params2(new_symbol);
-                    let mut h=HashMap::default();
-                    h.insert(new_symbol.to_string(),new_params.clone());
-                    self.sub_params=h;
+                    self.symbol = new_symbol.to_string();
+                    let new_params = get_ws_params2(new_symbol);
+                    let mut h = HashMap::default();
+                    h.insert(new_symbol.to_string(), new_params.clone());
+                    self.sub_params = h;
                     let sub_message = json!({
                         "method": "SUBSCRIBE",
                         "id": 1,
-                        "params":new_params.as_slice(), 
+                        "params":new_params.as_slice(),
                     });
                     conn.send_text(sub_message.to_string()).await?;
                 };
@@ -690,7 +688,7 @@ pub struct BinanceClient {
     pub qoute_balances: (f64, f64),
     pub balances: HashMap<String, (f64, f64)>,
     pub current_symbol_bases: (String, String),
-    pub live_orders: HashMap<u64, (Order, bool)>,
+    pub live_orders: HashMap<u64, (Order, bool, f64)>,
     pub stop_client: bool,
     pub ws_connect: bool,
 
@@ -852,7 +850,7 @@ impl BinanceClient {
                                     match res {
                                         Ok(o) => {
                                             tracing::trace!["{:?}", &order_binance];
-                                            live_orders.insert(order_binance.order_id, (o, true));
+                                            live_orders.insert(order_binance.order_id, (o, true, 0.0));
                                         }
                                         Err(e) => {
                                             tracing::error!["check_live_orders_change {}", e];
@@ -1093,7 +1091,7 @@ impl BinanceClient {
                 );
                 match res {
                     Ok(o) => {
-                        self.live_orders.insert(order_binance.order_id, (o, true));
+                        self.live_orders.insert(order_binance.order_id, (o, true, 0.0));
                     }
                     Err(e) => {
                         tracing::error!["{}", e];
@@ -1543,9 +1541,7 @@ impl BinanceClient {
                 self.live_orders = live_i.live_orders.clone();
                 resp
             }
-            BinInstructs::ChangeLiveAsset2 {
-                symbol: ref s,
-            } => {
+            BinInstructs::ChangeLiveAsset2 { symbol: ref s } => {
                 let res = validate_asset_binance(s).await;
                 self.current_symbol = s.clone();
                 match res {
@@ -1893,7 +1889,7 @@ fn from_binance_order(
         _ => Err(anyhow!["Unsupporder order type from Binance!"]),
     }
 }
-fn get_ws_params2(symbol:&str)->Vec<String>{
+fn get_ws_params2(symbol: &str) -> Vec<String> {
     let mut sub_params = vec![format!["{}@aggTrade", symbol.to_lowercase()]];
     for i in Intv::iter() {
         sub_params.push(format![
@@ -1901,7 +1897,7 @@ fn get_ws_params2(symbol:&str)->Vec<String>{
             symbol.to_lowercase(),
             i.to_bin_str()
         ])
-    };
+    }
     sub_params
 }
 
@@ -1921,7 +1917,6 @@ pub struct AggTrade {
     q: f64,
     s: String,
 }
-//TODO - fix this derive
 
 #[cfg(test)]
 mod tests {

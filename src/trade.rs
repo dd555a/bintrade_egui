@@ -9,9 +9,30 @@ const fn exec_order(
     asset1: f64,
     asset2: f64,
     p: f64,
+    _quant: f64,
+    buy_sell: bool,
+    fee: f64,
+    locked_qnt:f64
+) -> (f64, f64) {
+    if buy_sell == true {
+        let asset1 =asset1 + (locked_qnt / p) * (1.0 - fee);
+        let asset2 = asset2- locked_qnt;
+        (asset1, asset2)
+    } else {
+        let asset2 =asset2 + (locked_qnt * p) * (1.0 - fee);
+        let asset1 = asset1- locked_qnt;
+        (asset1, asset2)
+    }
+}
+/*
+const fn exec_order(
+    asset1: f64,
+    asset2: f64,
+    p: f64,
     quant: f64,
     buy_sell: bool,
     fee: f64,
+    locked_qnt:f64
 ) -> (f64, f64) {
     if buy_sell == true {
         let asset1 = (asset2 / p) * quant * (1.0 - fee);
@@ -23,6 +44,7 @@ const fn exec_order(
         (asset1, asset2)
     }
 }
+*/
 
 const fn eval_stop(stop: f64, h: f64, o: f64, _c: f64, l: f64) -> Option<f64> {
     if o > stop {
@@ -108,13 +130,14 @@ pub const fn eval_order_basic(
     asset2: f64,
     order: Order,
     eval_mode: &EvalMode,
+    locked_qnt:f64
 ) -> Option<(OrderCondition, f64, f64, f64)> {
     let last_order_price;
     match order {
         Order::Market { buy: b, quant: q } => {
             let quant = q.get_f64();
             let buy_sell = b;
-            let (asset1, asset2) = exec_order(asset1, asset2, o, quant, buy_sell, T_FEE);
+            let (asset1, asset2) = exec_order(asset1, asset2, o, quant, buy_sell, T_FEE, locked_qnt);
             let condition = OrderCondition::Filled;
             last_order_price = o;
             Some((condition, asset1, asset2, last_order_price))
@@ -132,7 +155,7 @@ pub const fn eval_order_basic(
             match order {
                 Some(price) => {
                     let (asset1, asset2) =
-                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE);
+                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE, locked_qnt);
                     let condition = OrderCondition::Filled;
                     last_order_price = o;
                     Some((condition, asset1, asset2, last_order_price))
@@ -158,13 +181,13 @@ pub const fn eval_order_basic(
             match order {
                 Some(price) => {
                     let (asset1, asset2) =
-                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE);
+                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE, locked_qnt);
                     let condition = OrderCondition::StopTriggered;
                     let limit_order = eval_limit(limit, h, o, c, l, buy_sell, eval_mode);
                     match limit_order {
                         Some(price) => {
                             let (asset1, asset2) =
-                                exec_order(asset1, asset2, price, quant, buy_sell, M_FEE);
+                                exec_order(asset1, asset2, price, quant, buy_sell, M_FEE, locked_qnt);
                             let condition = OrderCondition::Filled;
                             last_order_price = o;
                             Some((condition, asset1, asset2, last_order_price))
@@ -191,7 +214,7 @@ pub const fn eval_order_basic(
             match order {
                 Some(price) => {
                     let (asset1, asset2) =
-                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE);
+                        exec_order(asset1, asset2, price, quant, buy_sell, M_FEE, locked_qnt);
                     let condition = OrderCondition::Filled;
                     last_order_price = o;
                     Some((condition, asset1, asset2, last_order_price))
@@ -534,10 +557,11 @@ fn hist_eval_kline(
     asset1: f64,
     asset2: f64,
     eval_mode: &EvalMode,
+    locked_qnt:f64,
 ) -> Option<(DateTime<Utc>, f64, f64, Option<Order>)> {
     for k in kline.iter() {
         let (t, o, h, l, c, _) = *k;
-        let result = eval_order_basic(h, o, c, l, asset1, asset2, order, eval_mode);
+        let result = eval_order_basic(h, o, c, l, asset1, asset2, order, eval_mode, locked_qnt);
         match result {
             Some((order_cond, asset1, asset2, _last_price)) => {
                 let (order_cond, order) = eval_basic_condition(order_cond, order);
@@ -579,17 +603,17 @@ pub struct HistTrade {
     pub current_data_end_index: usize,
 
     pub current_index: usize,
-    pub buy_points:Vec<(i64,f64)>,
-    pub sell_points:Vec<(i64,f64)>,
+    pub buy_points: Vec<(i64, f64)>,
+    pub sell_points: Vec<(i64, f64)>,
 
-    pub last_completed_order_price_side:Option<(f64,f64,bool)>
+    pub last_completed_order_price_side: Option<(f64, f64, bool)>,
 }
 impl Default for HistTrade {
     fn default() -> Self {
         Self {
-            last_completed_order_price_side:None,
-            buy_points:vec![],
-            sell_points:vec![],
+            last_completed_order_price_side: None,
+            buy_points: vec![],
+            sell_points: vec![],
 
             asset_pair: "BTCUSDT".to_string(),
             start_time: 0,
@@ -626,8 +650,9 @@ impl HistTrade {
         trade_slice: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
         o: Order,
         eval_mode: &EvalMode,
+        locked_qnt:f64,
     ) -> Option<Order> {
-        let result = hist_eval_kline(trade_slice, o, self.asset1, self.asset2, eval_mode);
+        let result = hist_eval_kline(trade_slice, o, self.asset1, self.asset2, eval_mode, locked_qnt);
         match result {
             Some((transaction_time, asset1, asset2, order)) => {
                 tracing::debug![
@@ -637,19 +662,22 @@ impl HistTrade {
                     asset2,
                     order
                 ];
-                if order.is_none(){
-                    let order_price=*o.get_price();
-                    let order_side=o.get_side();
-                    if order_side{
-                        self.buy_points.push((transaction_time.timestamp_millis(), order_price));
-                        self.last_completed_order_price_side=Some((order_price,(order_price*(1.0+M_FEE)),order_side));
-                        //NOTE For buy orders sell at this line or aboce to BEAT THE FEEES 
-                    }else{
-                        self.sell_points.push((transaction_time.timestamp_millis(), order_price));
-                        self.last_completed_order_price_side=Some((order_price,(order_price*(1.0-T_FEE)),order_side));
+                if order.is_none() {
+                    let order_price = *o.get_price();
+                    let order_side = o.get_side();
+                    if order_side {
+                        self.buy_points
+                            .push((transaction_time.timestamp_millis(), order_price));
+                        self.last_completed_order_price_side =
+                            Some((order_price, (order_price * (1.0 + M_FEE)), order_side));
+                        //NOTE For buy orders sell at this line or aboce to BEAT THE FEEES
+                    } else {
+                        self.sell_points
+                            .push((transaction_time.timestamp_millis(), order_price));
+                        self.last_completed_order_price_side =
+                            Some((order_price, (order_price * (1.0 - T_FEE)), order_side));
                         //NOTE FEE line is simply the price at which profit can be calculated
                     };
-
                 };
                 self.calculate_change();
                 let tr = TradeRecord {
@@ -676,24 +704,24 @@ impl HistTrade {
         &mut self,
         trade_slice: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
         eval_mode: &EvalMode,
-        active_orders: Vec<(u64, Order)>,
-    ) -> Vec<(u64, Order)> {
+        active_orders: Vec<(u64, Order, f64)>,
+    ) -> Vec<(u64, Order, f64)> {
         match active_orders.len() {
             0 => return vec![],
             1 => {
-                let (id, o) = active_orders[0];
-                let result = self.eval_single_order(trade_slice, o, eval_mode);
+                let (id, o, locked_qnt) = active_orders[0];
+                let result = self.eval_single_order(trade_slice, o, eval_mode, locked_qnt);
                 match result {
-                    Some(o) => return vec![(id, o)],
+                    Some(o) => return vec![(id, o, locked_qnt)],
                     None => return vec![],
                 }
             }
             _ => {
                 let mut remaining_active_orders = vec![];
-                for (id, order) in active_orders.iter() {
-                    let result = self.eval_single_order(trade_slice, *order, eval_mode);
+                for (id, order, locked_qnt) in active_orders.iter() {
+                    let result = self.eval_single_order(trade_slice, *order, eval_mode, *locked_qnt);
                     match result {
-                        Some(o) => remaining_active_orders.push((*id, o)),
+                        Some(o) => remaining_active_orders.push((*id, o, *locked_qnt)),
                         None => (),
                     }
                 }

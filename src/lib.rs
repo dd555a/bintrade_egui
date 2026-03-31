@@ -198,9 +198,7 @@ impl BinInstructs {
                 symbol: _,
                 defualt_symbol: _,
             } => "BinInstruct: Change symbol",
-            BinInstructs::ChangeLiveAsset2 {
-                symbol: _,
-            } => "BinInstruct: Change symbol2",
+            BinInstructs::ChangeLiveAsset2 { symbol: _ } => "BinInstruct: Change symbol2",
         }
     }
 }

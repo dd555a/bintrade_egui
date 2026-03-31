@@ -526,6 +526,7 @@ pub struct AssetData {
     pub current_pair_strings: (String, String),
     pub current_pair_free_balances: (f64, f64),
     pub current_pair_locked_balances: (f64, f64),
+
 }
 
 impl AssetData {
@@ -877,7 +878,7 @@ async fn single_asset_dl(symbol: &str, start_time: i64) -> Result<()> {
                     .collect::<Vec<_>>();
             })
             .collect::<Vec<_>>();
-        let mut retries:usize = 0;
+        let mut retries: usize = 0;
         while retries <= 10 {
             tracing::debug!["Running iterate over remaining errors"];
             let res = iterate_over_remaining_errors(errors, symbol).await?;
@@ -938,36 +939,40 @@ pub async fn iterate_over_remaining_errors(
     let asset_pool = connect_sqlite(format!["./databases/Asset{}.db", &symbol]).await?;
     let client: Market = Binance::new(None, None);
     let new_err_vec = Arc::new(Mutex::new(vec![]));
-    for (intv,errs) in errors{
-        for (st,et) in errs{
-                tracing::debug!["iterate_over_remaining_errors Downloading data for: {} to: {}", st,et];
+    for (intv, errs) in errors {
+        for (st, et) in errs {
+            tracing::debug![
+                "iterate_over_remaining_errors Downloading data for: {} to: {}",
+                st,
+                et
+            ];
 
-                let res = get_data_binance2(
-                    &client,
-                    &symbol,
-                    intv,
-                    &asset_pool,
-                    st as i64,
-                    et as i64,
-                    false,
-                )
-                .await;
-                match res {
-                    Ok(err_opt) => {
-                        if let Some(err_vec) = err_opt {
-                            let nev_mut = new_err_vec.clone();
-                            let mut nev_ref = nev_mut.lock().expect(
-                                "Unable to unlock errors mutex iterate_over_remaining_errors",
-                            );
-                            nev_ref.push((intv, err_vec));
-                        };
-                    }
-                    Err(e) => {
-                        tracing::error!["iterate_over_remaining_errors {}", e];
-                    }
-                };
+            let res = get_data_binance2(
+                &client,
+                &symbol,
+                intv,
+                &asset_pool,
+                st as i64,
+                et as i64,
+                false,
+            )
+            .await;
+            match res {
+                Ok(err_opt) => {
+                    if let Some(err_vec) = err_opt {
+                        let nev_mut = new_err_vec.clone();
+                        let mut nev_ref = nev_mut
+                            .lock()
+                            .expect("Unable to unlock errors mutex iterate_over_remaining_errors");
+                        nev_ref.push((intv, err_vec));
+                    };
+                }
+                Err(e) => {
+                    tracing::error!["iterate_over_remaining_errors {}", e];
+                }
             };
-    };
+        }
+    }
     let nev = new_err_vec
         .lock()
         .expect("Unable to unlock errors mutex iterate_over_remaining_errors");
@@ -1702,7 +1707,7 @@ impl SQLConn {
         apool.close().await;
         Ok(())
     }
-    pub async fn update_data(&self) -> Result<()> {
+    pub async fn update_data(&mut self) -> Result<()> {
         tracing::info!["Update data called!"];
         if Sqlite::database_exists(&METADATA_DB_PATH).await? == false {
             create_metadata_db().await?;
@@ -1742,6 +1747,7 @@ impl SQLConn {
                 .download_single_asset(&asset_symbol, &exchange, &meta_pool, current_timestamp_ms)
                 .await;
         }
+        self.load_asset_list().await?;
         tracing::info!["Data update ran successfully!"];
         Ok(())
     }

@@ -305,9 +305,9 @@ impl ClientTask {
                     }));
                 let native_options = eframe::NativeOptions {
                     viewport: egui::ViewportBuilder::default(),
-                        //TODO - add resolution settings
-                        //.with_inner_size([1980.0, 1080.0])
-                        //.with_min_inner_size([300.0, 220.0]),
+                    //TODO - add resolution settings
+                    //.with_inner_size([1980.0, 1080.0])
+                    //.with_min_inner_size([300.0, 220.0]),
                     event_loop_builder,
                     persist_window: false,
                     //persistence_path: Some(std::path::PathBuf::from("./bintrade_gui_save")),
