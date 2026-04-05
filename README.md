@@ -1,24 +1,24 @@
 <div align="center">
 
 # bintrade_egui
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/main1.png)
+![example](images/main1.png)
 This is a simple trading app for Linux for Binance using Egui. Download historical data for an asset, do live trading through the binance API.
 The goal is to make trading as fast and intuitive as using VIM :), being able to change order prices without entering prices manually, the ability to change orders using hotkeys only.. 
 Orders can be added added or edited manually or can be changed using VIM bindings, see bellow for the shortcuts and use examples. 
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/main2.png)
+![example](images/main2.png)
 Different windows can be tiled
 
 This is a personal project, use at your own discresion. API keys can be added, changed stored in the Settings.bin file unencrypted or encrypted with a password. If unencrypted, api keys are autoloaded, if encrypted they must be unlocked from settings with a password. Keys are stored with magic-crypt [magic_crypt](https://crates.io/crates/magic-crypt). This is a personal project, it comes with absolutelly warranty or guarantees of security on my end, nor does it contain financial advice of any kind, I am not responsible for your actions. Live price ticker is based on OrderBook price ws output. 
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/api_keys_unencrypted.png)
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/api_keys_encrypted.png)
+![example](images/api_keys_unencrypted.png)
+![example](images/api_keys_encrypted.png)
 
 Orders can be set manually by entering prices, or via hotkeys in signle order mode, where default quantity is 100% by default
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/manual_order.png)
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/single_order_mode.png)
+![example](images/manual_order.png)
+![example](images/single_order_mode.png)
 
 
 Data can be managed with the "Data manager" window. Add a symbol, download all historic data (this may be large)
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/data_manager.png)
+![example](images/data_manager.png)
 
 
 </div>
@@ -33,29 +33,29 @@ Shift+Num0 - place market order (If quantity is 100% based on which asset is hel
 ```bash
 Shift+Num1 - place limit order (By default the last price is used an order is inactive)
 ```
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/limit_order_example.png)
+![example](images/limit_order_example.png)
 ```bash
 Shift+Num2 - place stop limit order 
 ```
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/stop_limit_order_example.png)
+![example](images/stop_limit_order_example.png)
 ```bash
 Shift+Num3 - place stop market order 
 ```
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/stop_market_order_example.png)
+![example](images/stop_market_order_example.png)
 ```bash
 
 Shift+J - reduce current order price by increment (By default order is deactivated as soon as it is changed)
 ```
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/limit_order_+example.png)
+![example](images/limit_order_+example.png)
 ```bash
 Shift+K - increase current order price by increment 
 ```
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/limit_order_-example.png)
+![example](images/limit_order_-example.png)
 
 ```bash
 Alt + J - reduce 2nd key (change the percentage between limit price and stop for stop limit order)
 ```
-![example](https://github.com/dd555a/bintrade_egui/blob/main/images/stop_market_order_change_example.png)
+![example](images/stop_market_order_change_example.png)
 ```bash
 Alt + K - increase 2nd key 
 ```
