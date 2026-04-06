@@ -216,34 +216,34 @@ macro_rules! unpack_channels{
 }
 #[derive(Debug, Default)]
 pub struct ClientTask {
-    frontend: Frontend,
+    pub frontend: Frontend,
 
-    live_dat: Arc<Mutex<AssetData>>,
-    hist_dat: Arc<Mutex<AssetData>>,
-    last_price: Arc<Mutex<f64>>,
-    live_collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
-    live_info: Arc<Mutex<LiveInfo>>,
+    pub live_dat: Arc<Mutex<AssetData>>,
+    pub hist_dat: Arc<Mutex<AssetData>>,
+    pub last_price: Arc<Mutex<f64>>,
+    pub live_collect: Arc<Mutex<HashMap<String, SymbolOutput>>>,
+    pub live_info: Arc<Mutex<LiveInfo>>,
 
-    cancel_all: CancellationToken,
+    pub cancel_all: CancellationToken,
 
-    cli_awake: Arc<Notify>,
-    cli_sleep: Arc<Notify>,
+    pub cli_awake: Arc<Notify>,
+    pub cli_sleep: Arc<Notify>,
 
     //Frontend
-    recv_settings: Option<watch::Receiver<ClientInstruct>>,
-    send_update: Option<watch::Sender<ClientResponse>>,
+    pub recv_settings: Option<watch::Receiver<ClientInstruct>>,
+    pub send_update: Option<watch::Sender<ClientResponse>>,
 
     //Task1 = Binance WS
-    send_sett_bin: Option<watch::Sender<BinInstructs>>,
-    recv_response_bin: Option<watch::Receiver<BinResponse>>,
-    bin_awake: Arc<Notify>,
-    bin_sleep: Arc<Notify>,
+    pub send_sett_bin: Option<watch::Sender<BinInstructs>>,
+    pub recv_response_bin: Option<watch::Receiver<BinResponse>>,
+    pub bin_awake: Arc<Notify>,
+    pub bin_sleep: Arc<Notify>,
 
     //Task3 = SQL
-    send_sett_sql: Option<watch::Sender<SQLInstructs>>,
-    recv_response_sql: Option<watch::Receiver<SQLResponse>>,
-    sql_awake: Arc<Notify>,
-    sql_sleep: Arc<Notify>,
+    pub send_sett_sql: Option<watch::Sender<SQLInstructs>>,
+    pub recv_response_sql: Option<watch::Receiver<SQLResponse>>,
+    pub sql_awake: Arc<Notify>,
+    pub sql_sleep: Arc<Notify>,
 }
 
 impl ClientTask {
