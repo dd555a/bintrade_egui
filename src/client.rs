@@ -36,7 +36,7 @@ use anyhow::{Context, Result};
 
 const ERR_CTX: &str = "Main client";
 
-async fn check_sleep_channel(mut chan: watch::Receiver<BinInstructs>, bin_client: &mut Account) {
+pub async fn check_sleep_channel(mut chan: watch::Receiver<BinInstructs>, bin_client: &mut Account) {
     loop {
         let _res = chan.changed().await;
         let msg = chan.borrow_and_update();
@@ -105,10 +105,10 @@ pub enum Tasks {
     Task3SQL {},
 }
 impl Tasks {
-    fn new_cli(_global_settings: &Settings) -> Result<Tasks> {
+    pub fn new_cli(_global_settings: &Settings) -> Result<Tasks> {
         return Ok(Tasks::Task0Cli {});
     }
-    fn new_binws(global_settings: &Settings) -> Result<Tasks> {
+    pub fn new_binws(global_settings: &Settings) -> Result<Tasks> {
         let (api_key, api_secret) = match (
             global_settings.binance_pub_key.clone(),
             global_settings.binance_priv_key.clone(),
@@ -126,7 +126,7 @@ impl Tasks {
         };
         return Ok(t);
     }
-    fn new_sql(_global_settings: &Settings) -> Tasks {
+    pub fn new_sql(_global_settings: &Settings) -> Tasks {
         let t = Tasks::Task3SQL {};
         return t;
     }
@@ -143,7 +143,7 @@ pub enum Frontend {
     Desktop,
 }
 impl Frontend {
-    fn init(&self, settings: &Settings) -> Result<Vec<Tasks>> {
+    pub fn init(&self, settings: &Settings) -> Result<Vec<Tasks>> {
         let mut tasks: Vec<Tasks> = std::vec::Vec::new();
         let s0 = Tasks::new_cli(&settings)?;
         tasks.push(s0);
