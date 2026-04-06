@@ -141,6 +141,8 @@ pub struct CliMode {
 pub enum Frontend {
     #[default]
     Desktop,
+    Server,
+    Android
 }
 impl Frontend {
     pub fn init(&self, settings: &Settings) -> Result<Vec<Tasks>> {
@@ -480,6 +482,9 @@ impl ClientTask {
                                 live_info,
                             );
                             handles.push(gui_blocking_handle);
+                        }
+                        _=>{
+                            panic!("Should not be passed here yet")
                         }
                     }
                 }
