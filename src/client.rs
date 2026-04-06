@@ -28,8 +28,8 @@ use crate::gui::{DesktopApp, KeysStatus, LiveInfo, Settings};
 
 #[derive(Clone, Debug)]
 pub struct ApiKeys {
-    api: String,
-    api_secret: String,
+    pub api: String,
+    pub api_secret: String,
 }
 
 use anyhow::{Context, Result};
@@ -137,8 +137,9 @@ pub struct CliMode {
     pub mode: Frontend,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub enum Frontend {
+    #[default]
     Desktop,
 }
 impl Frontend {
@@ -213,7 +214,7 @@ macro_rules! unpack_channels{
         }
     };
 }
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ClientTask {
     frontend: Frontend,
 

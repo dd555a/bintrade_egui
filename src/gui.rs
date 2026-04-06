@@ -1269,7 +1269,7 @@ impl Pane {
 }
 
 impl egui_tiles::Behavior<Pane> for DesktopApp {
-    fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
+    fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::widget_text::WidgetText {
         format!("{}", pane.ty).into()
     }
     fn top_bar_right_ui(

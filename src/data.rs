@@ -80,7 +80,7 @@ fn yfcandle_conv(input: &Candle) -> Result<(DateTime<Utc>, f64, f64, f64, f64, f
     Ok((time, open, high, low, close, volume))
 }
 
-async fn exec_query(pool: &Pool<Sqlite>, q: &str) -> Result<()> {
+pub async fn exec_query(pool: &Pool<Sqlite>, q: &str) -> Result<()> {
     let mut query_builder: QueryBuilder<Sqlite> = QueryBuilder::new(q);
     let query = query_builder.build();
     let result = query.execute(pool).await;
@@ -91,7 +91,7 @@ async fn exec_query(pool: &Pool<Sqlite>, q: &str) -> Result<()> {
     Ok(())
 }
 
-async fn connect_sqlite<P: AsRef<Path>>(filename: P) -> Result<Pool<Sqlite>> {
+pub async fn connect_sqlite<P: AsRef<Path>>(filename: P) -> Result<Pool<Sqlite>> {
     let options = SqliteConnectOptions::new()
         .filename(filename)
         .create_if_missing(true);
@@ -99,7 +99,7 @@ async fn connect_sqlite<P: AsRef<Path>>(filename: P) -> Result<Pool<Sqlite>> {
     Ok(pool)
 }
 #[instrument(level = "trace")]
-async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Result<Kline> {
+pub async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Result<Kline> {
     let q: &str = match t {
         None => {
             tracing::trace!("kfrom_sql_part Load all data:{}", intv);
@@ -130,7 +130,7 @@ async fn kfrom_sql(pool: &Pool<Sqlite>, intv: &str, t: Option<(i64, i64)>) -> Re
     Ok(kline)
 }
 
-async fn kfrom_sql_wcheck(
+pub async fn kfrom_sql_wcheck(
     symbol: &str,
     meta_pool: &Pool<Sqlite>,
     pool: &Pool<Sqlite>,
