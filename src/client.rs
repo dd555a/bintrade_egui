@@ -146,14 +146,21 @@ pub enum Frontend {
 }
 impl Frontend {
     pub fn init(&self, settings: &Settings) -> Result<Vec<Tasks>> {
-        let mut tasks: Vec<Tasks> = std::vec::Vec::new();
-        let s0 = Tasks::new_cli(&settings)?;
-        tasks.push(s0);
-        let s1 = Tasks::new_binws(&settings)?;
-        tasks.push(s1);
-        let s3 = Tasks::new_sql(&settings);
-        tasks.push(s3);
-        return Ok(tasks);
+        match self{
+            Frontend::Desktop | Frontend::Server=> {
+                let mut tasks: Vec<Tasks> = std::vec::Vec::new();
+                let s0 = Tasks::new_cli(&settings)?;
+                tasks.push(s0);
+                let s1 = Tasks::new_binws(&settings)?;
+                tasks.push(s1);
+                let s3 = Tasks::new_sql(&settings);
+                tasks.push(s3);
+                return Ok(tasks);
+            }
+            Frontend::Android=>{
+                panic!("Should not be passed here")
+            }
+        }
     }
 }
 
@@ -260,21 +267,7 @@ impl ClientTask {
             cli_sleep: Arc::new(Notify::new()),
 
             cancel_all: CancellationToken::new(),
-
-            recv_settings: None,
-            send_update: None,
-
-            send_sett_bin: None,
-            recv_response_bin: None,
-            bin_awake: Arc::new(Notify::new()),
-            bin_sleep: Arc::new(Notify::new()),
-            last_price: Arc::new(Mutex::new(0.0)),
-            live_collect: Arc::new(Mutex::new(HashMap::new())),
-
-            send_sett_sql: None,
-            recv_response_sql: None,
-            sql_awake: Arc::new(Notify::new()),
-            sql_sleep: Arc::new(Notify::new()),
+            ..Default::default()
         }
     }
     pub fn start_gui(
@@ -455,7 +448,8 @@ impl ClientTask {
         tasks: Vec<Tasks>,
         settings: Settings,
         api_keys: Option<ApiKeys>,
-    ) {
+        pass_baton:bool,
+    )->Option<(Vec<Handle<()>>,impl Future<Output = () >)> {
         let mut handles: Vec<Handle<()>> = vec![];
         let (a_key, a_sec_key) = match api_keys {
             Some(a) => (Some(a.api.clone()), Some(a.api_secret.clone())),
@@ -543,11 +537,17 @@ impl ClientTask {
                     handles.push(sql_handle);
                 }
             }
-        }
-        tracing::trace!("Joining handles");
-        let hh = join_all(handles);
-        let cli_handle = self.run_cli();
-        tokio::join![cli_handle, hh];
+        };
+        if pass_baton{
+            let cli_handle = self.run_cli();
+            return Some((handles,cli_handle));
+        }else{
+            tracing::trace!("Joining handles");
+            let hh = join_all(handles);
+            let cli_handle = self.run_cli();
+            tokio::join![cli_handle, hh];
+            return None;
+        };
     }
     pub async fn start_binclient(
         mut task_chans: Vec<ChanType>,
@@ -870,7 +870,7 @@ pub fn cli_run() -> Result<()> {
         let mut main_struct = ClientTask::new(frontend);
         let cancel_all_token = main_struct.cancel_all.clone();
         select! {
-            _ = main_struct.run_main(tasks, settings, api_keys) => {
+            _ = main_struct.run_main(tasks, settings, api_keys, false) => {
             }
             _  = cancel_all_token.cancelled() => {
             }
