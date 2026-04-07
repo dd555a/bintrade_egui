@@ -3633,7 +3633,7 @@ impl Default for HistPlot {
     }
 }
 
-#[derive(Dbg, Default, Encode, Decode, Clone, Eq, PartialEq, Copy)]
+#[derive(Dbg, Default, Encode, Decode, Clone, Eq, PartialEq, Copy, Hash)]
 pub enum KeysStatus {
     #[default]
     Invalid,

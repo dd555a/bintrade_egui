@@ -1,10 +1,10 @@
 use crate::gui::Settings;
 use crate::trade::Order;
-use serde_json::Value;
 use std::collections::HashMap;
 use strum_macros::EnumIter;
+use bincode::{Decode, Encode};
 
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash, Encode,Decode)]
 pub enum GeneralError {
     SystemError,
     GetError,
@@ -13,7 +13,7 @@ pub enum GeneralError {
     Generic,
 }
 
-#[derive(Eq, PartialEq, Debug, Clone, Hash, Default)]
+#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode,Decode, Default)]
 pub enum ProcResp {
     BinResp(BinResponse),
     SQLResp(SQLResponse),
@@ -21,7 +21,7 @@ pub enum ProcResp {
     Client,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(PartialEq,Default, Debug, Clone, Encode,Decode)]
 pub enum SQLInstructs {
     #[default]
     None,
@@ -102,14 +102,14 @@ impl SQLInstructs {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Clone, Hash)]
+#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode,Decode)]
 pub enum SQLResponse {
     None,
     Success,
     Failure((String, GeneralError)),
 }
 
-#[derive(Eq, PartialEq, Debug, Clone, Hash)]
+#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode,Decode)]
 pub enum BinResponse {
     None,
     Success,
@@ -117,7 +117,7 @@ pub enum BinResponse {
     OrderStatus(u64),
 }
 
-#[derive(PartialEq, EnumIter, Debug, Clone, Default)]
+#[derive(PartialEq, Default, EnumIter, Debug, Clone, Encode,Decode)]
 pub enum BinInstructs {
     #[default]
     None,
@@ -126,7 +126,7 @@ pub enum BinInstructs {
     },
     ReConnectWS,
     ConnectUserWS {
-        params: Value,
+        params: Vec<String>,
     },
     Disconnect,
     GetUserData,
