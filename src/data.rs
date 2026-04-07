@@ -1418,7 +1418,7 @@ pub async fn get_asset_bases_binance(symbol: &str) -> Result<Option<(String, Str
     Ok(res)
 }
 
-async fn get_asset_timestamps(
+pub async fn get_asset_timestamps(
     symbol: &str,
     metadata_db: &Pool<Sqlite>,
 ) -> Result<(Option<i64>, Option<i64>)> {
