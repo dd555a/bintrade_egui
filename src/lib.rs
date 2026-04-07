@@ -203,7 +203,7 @@ impl BinInstructs {
     }
 }
 
-#[derive(Eq, PartialEq, EnumIter, Debug, Clone)]
+#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Encode,Decode)]
 pub enum ClientResponse {
     None,
     Success,
@@ -211,7 +211,7 @@ pub enum ClientResponse {
     ProcResp(ProcResp),
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, EnumIter, Debug, Clone, Encode,Decode)]
 pub enum ClientInstruct {
     None,
 
