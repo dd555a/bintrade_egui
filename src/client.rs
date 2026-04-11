@@ -458,29 +458,31 @@ impl ClientTask {
         for t in tasks {
             match t {
                 Tasks::Task0Cli {} => {
-                    let task_chans = self.make_chans(&t);
-                    match self.frontend {
-                        Frontend::Desktop => {
-                            let asset_data = Arc::clone(&self.live_dat);
-                            let hist_asset_data = Arc::clone(&self.hist_dat);
-                            let lp = Arc::clone(&self.last_price); //NOTE more like latest
-                            let collect_data = Arc::clone(&self.live_collect);
-                            let live_info = Arc::clone(&self.live_info);
-                            let gui_blocking_handle = ClientTask::start_gui(
-                                task_chans,
-                                asset_data,
-                                hist_asset_data,
-                                lp,
-                                collect_data,
-                                settings.clone(),
-                                live_info,
-                            );
-                            handles.push(gui_blocking_handle);
+                    if !pass_baton{
+                        let task_chans = self.make_chans(&t);
+                        match self.frontend {
+                            Frontend::Desktop => {
+                                let asset_data = Arc::clone(&self.live_dat);
+                                let hist_asset_data = Arc::clone(&self.hist_dat);
+                                let lp = Arc::clone(&self.last_price); //NOTE more like latest
+                                let collect_data = Arc::clone(&self.live_collect);
+                                let live_info = Arc::clone(&self.live_info);
+                                let gui_blocking_handle = ClientTask::start_gui(
+                                    task_chans,
+                                    asset_data,
+                                    hist_asset_data,
+                                    lp,
+                                    collect_data,
+                                    settings.clone(),
+                                    live_info,
+                                );
+                                handles.push(gui_blocking_handle);
+                            }
+                            _=>{
+                                panic!("Should not be passed here yet")
+                            }
                         }
-                        _=>{
-                            panic!("Should not be passed here yet")
-                        }
-                    }
+                    };
                 }
                 Tasks::Task1BinWS {
                     ref default_symbol,

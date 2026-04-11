@@ -33,7 +33,7 @@ use crate::data::{
 };
 use crate::gui::{KeysStatus, LiveInfo, Settings};
 use crate::trade::{LimitStatus, Order, Quant, StopStatus};
-use crate::{BinInstructs, BinResponse, GeneralError};
+use crate::{BinInstructs, BinResponse,GeneralError};
 
 use chrono::{DateTime, Utc};
 
@@ -1282,6 +1282,12 @@ impl BinanceClient {
     }
     pub async fn parse_binance_instructs(&mut self, i: BinInstructs) -> BinResponse {
         match i {
+            BinInstructs::SellAllNow{symbol}=>{
+                todo!()
+            }
+            BinInstructs::BuyAllNow{symbol}=>{
+                todo!()
+            }
             BinInstructs::CancelOrder { id, symbol, .. } => {
                 let res = self.cancel_order(&symbol, &id).await;
                 let resp: BinResponse = match res {

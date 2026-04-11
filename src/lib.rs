@@ -132,6 +132,8 @@ pub enum BinInstructs {
     GetUserData,
     UpdateSettings(Settings),
     GetAllBalances,
+    SellAllNow{symbol:String},
+    BuyAllNow{symbol:String},
     GetBalance {
         symbol: String,
     },
@@ -169,6 +171,8 @@ impl BinInstructs {
     pub fn to_str(&self) -> &str {
         match &self {
             BinInstructs::None => "BinInstruct: None",
+            BinInstructs::SellAllNow{ symbol: _ } => "BinInstruct: BuyAllNow",
+            BinInstructs::BuyAllNow{ symbol: _ } => "BinInstruct: SellAllNow",
             BinInstructs::ConnectWS { params: _ } => "BinInstruct: Connect WS",
             BinInstructs::ConnectUserWS { params: _ } => "BinInstruct: Connect User WS",
             BinInstructs::Disconnect => "BinInstruct: Disconnect",
