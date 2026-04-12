@@ -52,14 +52,14 @@ pub struct OrderMarkers {
     pub percent_offset: f64,
 }
 impl OrderMarkers {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             marker_size: 5.0,
             percent_offset: 0.002,
             ..Default::default()
         }
     }
-    fn to_points(&self) -> (Points<'_>, Points<'_>) {
+    pub fn to_points(&self) -> (Points<'_>, Points<'_>) {
         let buy_points = Points::new(
             "Buy",
             self.buy_markers
@@ -85,11 +85,11 @@ impl OrderMarkers {
         (buy_points, sell_points)
     }
     /*
-    fn empty_points(&mut self){
+    pub fn empty_points(&mut self){
         self.buy_markers.clear();
         self.sell_markers.clear();
     }
-    fn add_point(&mut self, x:i64,y:f64, buy:bool){
+    pub fn add_point(&mut self, x:i64,y:f64, buy:bool){
         if buy{
             self.buy_markers.push((x,y))
         }else{
@@ -185,7 +185,7 @@ impl Default for KlinePlot {
 }
 
 impl KlinePlot {
-    fn show_empty(&self, ui: &mut egui::Ui) {
+    pub fn show_empty(&self, ui: &mut egui::Ui) {
         let (plot_candles, plot_volume) = self.mk_plt();
         let bp = BoxPlot::new(&self.name, vec![]);
         plot_candles.show(ui, |plot_ui| {
@@ -196,7 +196,7 @@ impl KlinePlot {
             plot_ui.bar_chart(bc);
         });
     }
-    fn show_live(
+    pub fn show_live(
         &mut self,
         ui: &mut egui::Ui,
         live_ad: Arc<Mutex<AssetData>>,
@@ -350,7 +350,7 @@ impl KlinePlot {
         });
         return ret;
     }
-    fn mk_plt(&self) -> (Plot<'_>, Plot<'_>) {
+    pub fn mk_plt(&self) -> (Plot<'_>, Plot<'_>) {
         let (x_lower, x_higher) = self.x_bounds;
         let (y_lower, y_higher) = self.y_bounds;
         let v_higher = self.v_bound;
@@ -358,7 +358,7 @@ impl KlinePlot {
             &self.name, self.intv, y_lower, y_higher, x_lower, x_higher, v_higher,
         )
     }
-    fn add_live(
+    pub fn add_live(
         &mut self,
         kline_input: &[(DateTime<Utc>, f64, f64, f64, f64, f64)],
         divider: &f64,
@@ -446,7 +446,7 @@ impl KlinePlot {
             self.y_bounds = (lowest * v_y, highest * u_y);
         };
     }
-    fn show(&mut self, ui: &mut egui::Ui) -> Result<()> {
+    pub fn show(&mut self, ui: &mut egui::Ui) -> Result<()> {
         let (plot_k, plot_v) = self.mk_plt();
         let plot_width = if ui.available_width() > MAX_PLOT_WIDTH {
             MAX_PLOT_WIDTH
@@ -524,7 +524,7 @@ impl KlinePlot {
         }
         Ok(())
     }
-    fn live_live_from_ad(
+    pub fn live_live_from_ad(
         &mut self,
         ad: &AssetData,
         intv: Intv,
@@ -565,7 +565,7 @@ impl KlinePlot {
         self.static_loaded = true;
         return Ok(());
     }
-    fn live_from_ad(
+    pub fn live_from_ad(
         &mut self,
         ad: &AssetData,
         symbol: &str,
@@ -1562,7 +1562,7 @@ pub struct DesktopApp {
 }
 
 impl DesktopApp {
-    fn update_procresp(
+    pub fn update_procresp(
         last_resp: &mut ClientResponse,
         recv: &mut watch::Receiver<ClientResponse>,
         buff: &mut HashMap<ProcResp, Vec<ClientResponse>>,
@@ -2057,7 +2057,7 @@ pub struct SingleOrderMode {
     pub last_order_price: f64,
 }
 impl SingleOrderMode {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             k0_i: K0_INC,
             k1_i: K1_INC,
@@ -2069,7 +2069,7 @@ impl SingleOrderMode {
     }
 }
 
-fn show_hotkeys(ui: &mut egui::Ui) {
+pub fn show_hotkeys(ui: &mut egui::Ui) {
     egui::Grid::new("hk grid").show(ui, |ui| {
         ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(40, 40, 40);
         ui.label(
@@ -2099,7 +2099,7 @@ fn show_hotkeys(ui: &mut egui::Ui) {
 }
 
 impl SingleOrderMode {
-    fn show(
+    pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         last_price: &f64,
@@ -2622,7 +2622,7 @@ fn hotkey_order_single(
 }
 
 impl ManualOrders {
-    fn hist_del_order(
+    pub fn hist_del_order(
         o: &Order,
         asset1_locked: &f64,
         asset2_locked: &f64,
@@ -2645,7 +2645,7 @@ impl ManualOrders {
         tracing::trace!["Unlocked A1:{}, Unlocked A2:{}", unlocked_a1, unlocked_a2];
         (a1, a2, a1_l, a2_l)
     }
-    fn hist_validate_order(
+    pub fn hist_validate_order(
         o: &Order,
         asset1: &f64,
         asset2: &f64,
@@ -2737,7 +2737,7 @@ impl ManualOrders {
             }
         }
     }
-    fn show_multiorder(
+    pub fn show_multiorder(
         man_orders: &mut ManualOrders,
         _last_price: &f64,
         cli_chan: watch::Sender<ClientInstruct>,
@@ -3182,7 +3182,7 @@ impl ManualOrders {
             });
         });
     }
-    fn show_singleorder(
+    pub fn show_singleorder(
         man_orders: &mut ManualOrders,
         last_price: &f64,
         hist_trade: bool,
@@ -3196,7 +3196,7 @@ impl ManualOrders {
             tracing::error!["show_singleorder should be some!"];
         };
     }
-    fn show(
+    pub fn show(
         man_orders: &mut ManualOrders,
         last_price: &f64,
         hist_trade: Option<&mut HistTrade>,
@@ -3455,7 +3455,7 @@ impl Default for LivePlot {
 }
 
 impl LivePlot {
-    fn new(
+    pub fn new(
         live_asset_data: Arc<Mutex<AssetData>>,
         default_intv: &Intv,
         default_symbol: &str,
@@ -3469,7 +3469,7 @@ impl LivePlot {
             ..Default::default()
         }
     }
-    fn show(
+    pub fn show(
         live_plot: &mut LivePlot,
         cli_chan: watch::Sender<ClientInstruct>,
         collect_data: &HashMap<String, SymbolOutput>,
@@ -3686,7 +3686,7 @@ impl Settings {
     pub fn verify_password_req(password: &str) -> bool {
         if password.len() < 17 { false } else { true }
     }
-    fn show(
+    pub fn show(
         settings: &mut Settings,
         live_info: &LiveInfo,
         cli_chan: watch::Sender<ClientInstruct>,
@@ -4067,7 +4067,7 @@ pub struct DataManager {
 }
 
 impl DataManager {
-    fn new(hist_asset_data: Arc<Mutex<AssetData>>) -> Self {
+    pub fn new(hist_asset_data: Arc<Mutex<AssetData>>) -> Self {
         DataManager {
             shortlist_max: 10,
             max_backdate_months: 120,
@@ -4079,7 +4079,7 @@ impl DataManager {
             ..Default::default()
         }
     }
-    fn show(
+    pub fn show(
         data_manager: &mut DataManager,
         cli_chan: watch::Sender<ClientInstruct>,
         ui: &mut egui::Ui,
@@ -4276,7 +4276,7 @@ const SELL_ACTIVE: LineState = LineState::ActiveColor(Color32::RED);
 const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(255, 188, 188));
 
 impl HlineType {
-    fn hline_order(o: &Order, active: bool) -> Vec<HLine> {
+    pub fn hline_order(o: &Order, active: bool) -> Vec<HLine> {
         let side = o.get_side();
         let line_state = match (side, active) {
             (true, true) => BUY_ACTIVE,
@@ -4338,7 +4338,7 @@ impl HlineType {
             }
         }
     }
-    fn to_hline(&self, value: &f64, label: &str) -> HLine {
+    pub fn to_hline(&self, value: &f64, label: &str) -> HLine {
         match &self {
             HlineType::BuyOrder((ba, bs)) => {
                 let color = match ba {
@@ -4389,7 +4389,7 @@ impl HlineType {
 }
 
 impl HistPlot {
-    fn new(hist_asset_data: Arc<Mutex<AssetData>>, intv: &Intv, default_trade_wicks: i64) -> Self {
+    pub fn new(hist_asset_data: Arc<Mutex<AssetData>>, intv: &Intv, default_trade_wicks: i64) -> Self {
         Self {
             intv: *intv,
             last_intv: *intv,
@@ -4400,7 +4400,7 @@ impl HistPlot {
             ..Default::default()
         }
     }
-    fn show(
+    pub fn show(
         hist_plot: &mut HistPlot,
         cli_chan: watch::Sender<ClientInstruct>,
         hist_ad: Arc<Mutex<AssetData>>,
