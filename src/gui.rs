@@ -1543,7 +1543,6 @@ pub struct DesktopApp {
     pub hist_asset_data: Arc<Mutex<AssetData>>,
     pub collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
     
-    pub //Non-copy windows
     pub live_plot: Rc<Mutex<LivePlot>>,
     pub data_manager: Rc<Mutex<DataManager>>,
     pub settings: Rc<Mutex<Settings>>,
