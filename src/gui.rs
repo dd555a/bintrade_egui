@@ -46,10 +46,10 @@ const SETTINGS_SAVE_PATH: &str = "./Settings.bin";
 
 #[derive(Dbg, Default, Clone)]
 pub struct OrderMarkers {
-    buy_markers: Vec<(i64, f64)>,
-    sell_markers: Vec<(i64, f64)>,
-    marker_size: f32,
-    percent_offset: f64,
+    pub buy_markers: Vec<(i64, f64)>,
+    pub sell_markers: Vec<(i64, f64)>,
+    pub marker_size: f32,
+    pub percent_offset: f64,
 }
 impl OrderMarkers {
     fn new() -> Self {
@@ -102,45 +102,45 @@ impl OrderMarkers {
 
 #[derive(Dbg, Clone)]
 pub struct KlinePlot {
-    l_boxplot: Vec<BoxElem>,
-    l_barchart: Vec<Bar>,
+    pub l_boxplot: Vec<BoxElem>,
+    pub l_barchart: Vec<Bar>,
 
-    l_tick_boxplot: Vec<BoxElem>,
-    l_tick_barchart: Vec<Bar>,
+    pub l_tick_boxplot: Vec<BoxElem>,
+    pub l_tick_barchart: Vec<Bar>,
 
-    tick_kline: Option<(DateTime<Utc>, f64, f64, f64, f64, f64)>,
-    markers: bool,
+    pub tick_kline: Option<(DateTime<Utc>, f64, f64, f64, f64, f64)>,
+    pub markers: bool,
 
-    points: OrderMarkers,
+    pub points: OrderMarkers,
 
-    intv: Intv,
-    name: String,
-    loading: bool,
-    static_loaded: bool,
-    chart_params: (f64, f64),
-    x_bounds: (f64, f64),
-    y_bounds: (f64, f64),
-    v_bound: f64,
+    pub intv: Intv,
+    pub name: String,
+    pub loading: bool,
+    pub static_loaded: bool,
+    pub chart_params: (f64, f64),
+    pub x_bounds: (f64, f64),
+    pub y_bounds: (f64, f64),
+    pub v_bound: f64,
 
-    tick_highest: f64,
-    tick_lowest: f64,
+    pub tick_highest: f64,
+    pub tick_lowest: f64,
 
-    symbol: String,
+    pub symbol: String,
 
-    hlines: Vec<HLine>,
-    navi_wicks_s: String,
-    navi_wicks: usize,
+    pub hlines: Vec<HLine>,
+    pub navi_wicks_s: String,
+    pub navi_wicks: usize,
 
-    get_data_timestamp: Option<i64>,
+    pub get_data_timestamp: Option<i64>,
 
-    ticks: usize,
-    offset: i64,
-    y_offset: i64,
-    y_offset_s: String,
-    y_increment: f64,
-    x_bounds_set: bool,
+    pub ticks: usize,
+    pub offset: i64,
+    pub y_offset: i64,
+    pub y_offset_s: String,
+    pub y_increment: f64,
+    pub x_bounds_set: bool,
 
-    live_asset_changed: bool,
+    pub live_asset_changed: bool,
 }
 impl Default for KlinePlot {
     fn default() -> Self {
@@ -1248,8 +1248,8 @@ impl fmt::Display for PaneType {
 
 #[derive(PartialEq, Dbg)]
 pub struct Pane {
-    nr: usize,
-    ty: PaneType,
+    pub nr: usize,
+    pub ty: PaneType,
 }
 
 //TODO this is retarded but fine for now. The default method
@@ -1517,49 +1517,49 @@ pub struct LiveInfo {
 
 #[derive(Dbg)]
 pub struct DesktopApp {
-    trade_slice: Rc<Mutex<Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>>>,
+    pub trade_slice: Rc<Mutex<Vec<(DateTime<Utc>, f64, f64, f64, f64, f64)>>>,
 
-    simplification_options: egui_tiles::SimplificationOptions,
-    tab_bar_height: f32,
-    gap_width: f32,
-    add_child_to: Option<egui_tiles::TileId>,
+    pub simplification_options: egui_tiles::SimplificationOptions,
+    pub tab_bar_height: f32,
+    pub gap_width: f32,
+    pub add_child_to: Option<egui_tiles::TileId>,
 
-    pane_number: usize,
+    pub pane_number: usize,
     #[dbg(skip)]
-    tree: Rc<Mutex<egui_tiles::Tree<Pane>>>,
+    pub tree: Rc<Mutex<egui_tiles::Tree<Pane>>>,
 
-    label: String,
+    pub label: String,
 
-    value: f32,
-    lock_x: bool,
-    lock_y: bool,
-    ctrl_to_zoom: bool,
-    shift_to_horizontal: bool,
-    zoom_speed: f32,
-    scroll_speed: f32,
+    pub value: f32,
+    pub lock_x: bool,
+    pub lock_y: bool,
+    pub ctrl_to_zoom: bool,
+    pub shift_to_horizontal: bool,
+    pub zoom_speed: f32,
+    pub scroll_speed: f32,
 
-    live_price: Arc<Mutex<f64>>,
-    asset_data: Arc<Mutex<AssetData>>,
-    hist_asset_data: Arc<Mutex<AssetData>>,
-    collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
-
-    //Non-copy windows
-    live_plot: Rc<Mutex<LivePlot>>,
-    data_manager: Rc<Mutex<DataManager>>,
-    settings: Rc<Mutex<Settings>>,
-    live_info: Arc<Mutex<LiveInfo>>,
-
-    lp_chan_recv: watch::Receiver<f64>,
-
-    send_to_cli: Option<watch::Sender<ClientInstruct>>,
-    recv_from_cli: Option<watch::Receiver<ClientResponse>>,
-
-    resp_buff: Option<HashMap<ProcResp, Vec<ClientResponse>>>,
-    last_resp: Option<ClientResponse>,
-
-    man_orders: BTreeMap<usize, ManualOrders>,
-    hist_plot: BTreeMap<usize, HistPlot>,
-    hist_extras: BTreeMap<usize, HistExtras>,
+    pub live_price: Arc<Mutex<f64>>,
+    pub asset_data: Arc<Mutex<AssetData>>,
+    pub hist_asset_data: Arc<Mutex<AssetData>>,
+    pub collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
+    
+    pub //Non-copy windows
+    pub live_plot: Rc<Mutex<LivePlot>>,
+    pub data_manager: Rc<Mutex<DataManager>>,
+    pub settings: Rc<Mutex<Settings>>,
+    pub live_info: Arc<Mutex<LiveInfo>>,
+    
+    pub lp_chan_recv: watch::Receiver<f64>,
+    
+    pub send_to_cli: Option<watch::Sender<ClientInstruct>>,
+    pub recv_from_cli: Option<watch::Receiver<ClientResponse>>,
+    
+    pub resp_buff: Option<HashMap<ProcResp, Vec<ClientResponse>>>,
+    pub last_resp: Option<ClientResponse>,
+    
+    pub man_orders: BTreeMap<usize, ManualOrders>,
+    pub hist_plot: BTreeMap<usize, HistPlot>,
+    pub hist_extras: BTreeMap<usize, HistExtras>,
 }
 
 impl DesktopApp {
@@ -1704,10 +1704,87 @@ impl DesktopApp {
     }
 }
 
+impl DesktopApp{
+    pub fn add_pane(&mut self, ui:&mut egui::Ui){
+        let mut next_panel_type: PaneType = PaneType::None;
+        ComboBox::from_label("")
+            .selected_text(format!("Tools"))
+            .show_ui(ui, |ui| {
+                for pty in PaneType::iter() {
+                    ui.selectable_value(&mut next_panel_type, pty, format!["{}", pty]);
+                }
+            });
+        if next_panel_type != PaneType::None {
+            if let Some(parent) = self.add_child_to.take() {
+                let mut tree = self.tree.lock().expect("Posoned mutex on pane tree!");
+                let mut new_child = tree
+                    .tiles
+                    .insert_pane(Pane::new(self.pane_number, PaneType::None));
+                match next_panel_type {
+                    PaneType::None => {}
+                    PaneType::LiveTrade => {
+                        self.man_orders
+                            .insert(self.pane_number + 1, ManualOrders::default());
+
+                        new_child = tree.tiles.insert_pane(Pane::new(
+                            self.pane_number + 1,
+                            PaneType::LiveTrade,
+                        ));
+                        self.pane_number += 1;
+                    }
+                    PaneType::HistTrade => {
+                        self.man_orders
+                            .insert(self.pane_number + 1, ManualOrders::default());
+                        let settings =
+                            self.settings.lock().expect("Unable to unlock settings");
+                        self.hist_plot.insert(
+                            self.pane_number + 1,
+                            HistPlot::new(
+                                Arc::clone(&self.hist_asset_data),
+                                &settings.default_intv,
+                                settings.defalt_next_wicks,
+                            ),
+                        );
+                        self.hist_extras
+                            .insert(self.pane_number + 1, HistExtras::default());
+
+                        new_child = tree.tiles.insert_pane(Pane::new(
+                            self.pane_number + 1,
+                            PaneType::HistTrade,
+                        ));
+                        self.pane_number += 1;
+                    }
+                    PaneType::ManageData => {
+                        new_child = tree.tiles.insert_pane(Pane::new(
+                            self.pane_number + 1,
+                            PaneType::ManageData,
+                        ));
+                        self.pane_number += 1;
+                    }
+                    PaneType::Settings => {
+                        new_child = tree.tiles.insert_pane(Pane::new(
+                            self.pane_number + 1,
+                            PaneType::Settings,
+                        ));
+                        self.pane_number += 1;
+                    }
+                };
+                if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(
+                    tabs,
+                ))) = tree.tiles.get_mut(parent)
+                {
+                    tabs.add_child(new_child);
+                    tabs.set_active(new_child);
+                }
+            }
+        }
+    }
+}
+
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            ui.heading("Bintrade Egui 0.1.2");
+            ui.heading("Bintrade Egui 0.1.4");
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Quit").clicked() {
@@ -1724,78 +1801,7 @@ impl eframe::App for DesktopApp {
                     }
                 });
                 ui.add_space(16.0);
-                let mut next_panel_type: PaneType = PaneType::None;
-                ComboBox::from_label("")
-                    .selected_text(format!("Tools"))
-                    .show_ui(ui, |ui| {
-                        for pty in PaneType::iter() {
-                            ui.selectable_value(&mut next_panel_type, pty, format!["{}", pty]);
-                        }
-                    });
-                if next_panel_type != PaneType::None {
-                    if let Some(parent) = self.add_child_to.take() {
-                        let mut tree = self.tree.lock().expect("Posoned mutex on pane tree!");
-                        let mut new_child = tree
-                            .tiles
-                            .insert_pane(Pane::new(self.pane_number, PaneType::None));
-                        match next_panel_type {
-                            PaneType::None => {}
-                            PaneType::LiveTrade => {
-                                self.man_orders
-                                    .insert(self.pane_number + 1, ManualOrders::default());
-
-                                new_child = tree.tiles.insert_pane(Pane::new(
-                                    self.pane_number + 1,
-                                    PaneType::LiveTrade,
-                                ));
-                                self.pane_number += 1;
-                            }
-                            PaneType::HistTrade => {
-                                self.man_orders
-                                    .insert(self.pane_number + 1, ManualOrders::default());
-                                let settings =
-                                    self.settings.lock().expect("Unable to unlock settings");
-                                self.hist_plot.insert(
-                                    self.pane_number + 1,
-                                    HistPlot::new(
-                                        Arc::clone(&self.hist_asset_data),
-                                        &settings.default_intv,
-                                        settings.defalt_next_wicks,
-                                    ),
-                                );
-                                self.hist_extras
-                                    .insert(self.pane_number + 1, HistExtras::default());
-
-                                new_child = tree.tiles.insert_pane(Pane::new(
-                                    self.pane_number + 1,
-                                    PaneType::HistTrade,
-                                ));
-                                self.pane_number += 1;
-                            }
-                            PaneType::ManageData => {
-                                new_child = tree.tiles.insert_pane(Pane::new(
-                                    self.pane_number + 1,
-                                    PaneType::ManageData,
-                                ));
-                                self.pane_number += 1;
-                            }
-                            PaneType::Settings => {
-                                new_child = tree.tiles.insert_pane(Pane::new(
-                                    self.pane_number + 1,
-                                    PaneType::Settings,
-                                ));
-                                self.pane_number += 1;
-                            }
-                        }
-                        if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(
-                            tabs,
-                        ))) = tree.tiles.get_mut(parent)
-                        {
-                            tabs.add_child(new_child);
-                            tabs.set_active(new_child);
-                        }
-                    }
-                }
+                self.add_pane(ui);
                 ui.add_space(16.0);
                 //egui::widgets::global_theme_preference_buttons(ui);
             });
@@ -1820,58 +1826,58 @@ impl eframe::App for DesktopApp {
 
 #[derive(Dbg, Clone)]
 pub struct ManualOrders {
-    man_orders: Option<HistTrade>,
-    active_orders: Option<Vec<Order>>,
-    order_set: bool,
-    last_slice_time: DateTime<Utc>,
+    pub man_orders: Option<HistTrade>,
+    pub active_orders: Option<Vec<Order>>,
+    pub order_set: bool,
+    pub last_slice_time: DateTime<Utc>,
 
-    hotkeys: bool,
-    single_order_mode: bool,
-    so_mode: Option<SingleOrderMode>,
-    mode_switched: bool,
+    pub hotkeys: bool,
+    pub single_order_mode: bool,
+    pub so_mode: Option<SingleOrderMode>,
+    pub mode_switched: bool,
 
-    current_symbol: String,
+    pub current_symbol: String,
 
-    search_string: String,
-    quant: Quant,
-    quant_selector: Quant,
-    last_quant: Quant,
+    pub search_string: String,
+    pub quant: Quant,
+    pub quant_selector: Quant,
+    pub last_quant: Quant,
 
-    single_order: Option<Order>,
+    pub single_order: Option<Order>,
 
-    order: Order,
-    new_order: Order,
+    pub order: Order,
+    pub new_order: Order,
 
-    scalar_set: bool,
-    scalar: f64,
+    pub scalar_set: bool,
+    pub scalar: f64,
 
-    refresh_hist_balance: bool,
+    pub refresh_hist_balance: bool,
 
-    locked_qnt: f64,
+    pub locked_qnt: f64,
 
-    buy: bool,
-    price_string: String,
-    stop_price_string: String,
-    orders: HashMap<u64, (Order, bool, f64)>,
-    asset1: f64,
-    asset2: f64,
+    pub buy: bool,
+    pub price_string: String,
+    pub stop_price_string: String,
+    pub orders: HashMap<u64, (Order, bool, f64)>,
+    pub asset1: f64,
+    pub asset2: f64,
 
-    asset1_locked: f64,
-    asset2_locked: f64,
+    pub asset1_locked: f64,
+    pub asset2_locked: f64,
 
-    last_id: u64,
-    asset1_name: String,
-    asset2_name: String,
+    pub last_id: u64,
+    pub asset1_name: String,
+    pub asset2_name: String,
 
-    price: f64,
-    stop_price: f64,
+    pub price: f64,
+    pub stop_price: f64,
 
-    last_price_buffer: Vec<f64>,
-    last_price_buffer_size: usize,
-    last_price_s: f64,
+    pub last_price_buffer: Vec<f64>,
+    pub last_price_buffer_size: usize,
+    pub last_price_s: f64,
 
-    plot_extras: Option<PlotExtras>,
-    eval_mode: EvalMode,
+    pub plot_extras: Option<PlotExtras>,
+    pub eval_mode: EvalMode,
 
     trade_slice_loaded: bool,
 }
@@ -2021,35 +2027,35 @@ const K1_INC: f32 = 0.0005;
 
 #[derive(Clone, Default, Debug)]
 pub struct SingleOrderMode {
-    hk_active: bool,
-    order: Order,
-    order_active: bool,
-    order_prev_active: bool,
-    show_hotkey_hints: bool,
-    order_id: u64,
-    asset1_held: bool,
-    order_active_after_change: bool,
-    k0_n: i64,
-    k1_n: i64,
+    pub hk_active: bool,
+    pub order: Order,
+    pub order_active: bool,
+    pub order_prev_active: bool,
+    pub show_hotkey_hints: bool,
+    pub order_id: u64,
+    pub asset1_held: bool,
+    pub order_active_after_change: bool,
+    pub k0_n: i64,
+    pub k1_n: i64,
 
-    k0_intv_s: String,
-    k1_intv_s: String,
+    pub k0_intv_s: String,
+    pub k1_intv_s: String,
 
-    k0_i: f32,
-    k1_i: f32,
+    pub k0_i: f32,
+    pub k1_i: f32,
 
-    parse_ks: bool,
-    place_order: bool,
-    delete_order: bool,
+    pub parse_ks: bool,
+    pub place_order: bool,
+    pub delete_order: bool,
 
-    locked_qnt: f64,
+    pub locked_qnt: f64,
 
-    order_adjusted: bool,
-    live_order_placed: bool,
+    pub order_adjusted: bool,
+    pub live_order_placed: bool,
 
-    order_placed: bool,
+    pub order_placed: bool,
 
-    last_order_price: f64,
+    pub last_order_price: f64,
 }
 impl SingleOrderMode {
     fn new() -> Self {
@@ -3419,16 +3425,16 @@ impl ManualOrders {
 
 #[derive(Dbg, Clone)]
 pub struct LivePlot {
-    live_asset_data: Arc<Mutex<AssetData>>,
-    kline_plot: KlinePlot,
-    search_string: String,
-    symbol: String,
-    default_symbol: String,
-    intv: Intv,
-    last_intv: Intv,
-    lines: Vec<HLine>,
-    reload: bool,
-    last_symbol: String,
+    pub live_asset_data: Arc<Mutex<AssetData>>,
+    pub kline_plot: KlinePlot,
+    pub search_string: String,
+    pub symbol: String,
+    pub default_symbol: String,
+    pub intv: Intv,
+    pub last_intv: Intv,
+    pub lines: Vec<HLine>,
+    pub reload: bool,
+    pub last_symbol: String,
 }
 
 impl Default for LivePlot {
@@ -3529,39 +3535,39 @@ impl LivePlot {
 
 #[derive(Clone, Dbg, Default)]
 pub struct HistExtras {
-    last_price: f64,
-    symbol_info: (String, String, String),
+    pub last_price: f64,
+    pub symbol_info: (String, String, String),
 }
 
 #[derive(Dbg)]
 pub struct HistPlot {
-    hist_asset_data: Arc<Mutex<AssetData>>,
-    kline_plot: KlinePlot,
-    search_string: String,
-    loaded_search_string: String,
-    unload_search_string: String,
+    pub hist_asset_data: Arc<Mutex<AssetData>>,
+    pub kline_plot: KlinePlot,
+    pub search_string: String,
+    pub loaded_search_string: String,
+    pub unload_search_string: String,
 
-    search_date: String,
-    search_load_string: String,
-    intv: Intv,
-    last_intv: Intv,
-    picked_date: chrono::NaiveDate,
-    picked_date_end: chrono::NaiveDate,
+    pub search_date: String,
+    pub search_load_string: String,
+    pub intv: Intv,
+    pub last_intv: Intv,
+    pub picked_date: chrono::NaiveDate,
+    pub picked_date_end: chrono::NaiveDate,
 
-    trade_h: u16,
-    trade_min: u16,
+    pub trade_h: u16,
+    pub trade_min: u16,
 
-    trade_h_s: String,
-    trade_min_s: String,
+    pub trade_h_s: String,
+    pub trade_min_s: String,
 
-    hist_extras: Option<HistExtras>,
-    hist_trade: HistTrade,
+    pub hist_extras: Option<HistExtras>,
+    pub hist_trade: HistTrade,
 
-    navi_wicks: u16,
-    trade_wicks: u16,
+    pub navi_wicks: u16,
+    pub trade_wicks: u16,
 
-    navi_wicks_s: String,
-    trade_wicks_s: String,
+    pub navi_wicks_s: String,
+    pub trade_wicks_s: String,
 
     pub trade_time: i64,
     pub last_trade_time: i64,
@@ -4034,31 +4040,31 @@ impl Settings {
 
 #[derive(Dbg, Default)]
 pub struct DataManager {
-    coin_list: Vec<String>,            //load Assetlist (All binance assets)
-    downloaded_coin_list: Vec<String>, //load AssetlistDL (All binance assets)
-    search_coin_shortlist: Vec<String>,
-    downloaded_coin_shortlist: Vec<String>,
+    pub coin_list: Vec<String>,            //load Assetlist (All binance assets)
+    pub downloaded_coin_list: Vec<String>, //load AssetlistDL (All binance assets)
+    pub search_coin_shortlist: Vec<String>,
+    pub downloaded_coin_shortlist: Vec<String>,
 
-    coin_search_string: String,
-    shortlist_max: usize,
+    pub coin_search_string: String,
+    pub shortlist_max: usize,
 
-    selected_coin: String,
+    pub selected_coin: String,
 
-    delete_selected_coin: String,
+    pub delete_selected_coin: String,
 
-    max_backdate_months: usize,
+    pub max_backdate_months: usize,
 
-    autoupdate_on_start: bool,
-    update_success: bool,
-    update_ran: bool,
-    update_status: String,
+    pub autoupdate_on_start: bool,
+    pub update_success: bool,
+    pub update_ran: bool,
+    pub update_status: String,
 
-    asset_list_loaded: bool,
-    asset_list_imported: bool,
+    pub asset_list_loaded: bool,
+    pub asset_list_imported: bool,
 
-    asset_list: Vec<DLAsset>,
+    pub asset_list: Vec<DLAsset>,
 
-    hist_asset_data: Arc<Mutex<AssetData>>,
+    pub hist_asset_data: Arc<Mutex<AssetData>>,
 }
 
 impl DataManager {
