@@ -294,7 +294,7 @@ impl ClientTask {
         }
         let handle: Handle<()> = tokio::task::spawn_blocking(move || {
             loop {
-                tracing::trace!("Desktop GUI started");
+                tracing::info!("Desktop GUI started");
                 let event_loop_builder: Option<EventLoopBuilderHook> =
                     Some(Box::new(|event_loop_builder| {
                         event_loop_builder.with_any_thread(true);
@@ -563,6 +563,7 @@ impl ClientTask {
         live_ad: Arc<Mutex<AssetData>>,
         live_info: Arc<Mutex<LiveInfo>>,
     ) {
+        tracing::info!("Binclient started");
         let (send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
         loop {
@@ -600,7 +601,6 @@ impl ClientTask {
                 live_ad.clone(),
                 live_info.clone(),
             );
-            tracing::info!("Binclient started");
             cli.default_symbol = default_symbol.to_string();
             cli.current_symbol = default_symbol.to_string();
             cli.default_intv = default_intv;
