@@ -172,9 +172,9 @@ pub enum ChanType {
     WSend { s: watch::Sender<Value> },
     WRecv { r: watch::Receiver<Value> },
 
-    WSendCli { s: watch::Sender<ClientInstruct> },
     WRecvCli { r: watch::Receiver<ClientInstruct> },
     WRSendCli { s: watch::Sender<ClientResponse> },
+    WSendCli { s: watch::Sender<ClientInstruct> },
     WRRecvCli { r: watch::Receiver<ClientResponse> },
 
     BSend { s: watch::Sender<BinInstructs> },
@@ -442,14 +442,13 @@ impl ClientTask {
             self.cli_awake.notified().await
         }
     }
-
     pub async fn run_main(
         &mut self,
         tasks: Vec<Tasks>,
         settings: Settings,
         api_keys: Option<ApiKeys>,
         pass_baton:bool,
-    )->Option<(Vec<Handle<()>>,impl Future<Output = () >)> {
+    )->Option<Vec<Handle<()>>> {
         let mut handles: Vec<Handle<()>> = vec![];
         let (a_key, a_sec_key) = match api_keys {
             Some(a) => (Some(a.api.clone()), Some(a.api_secret.clone())),
@@ -541,8 +540,7 @@ impl ClientTask {
             }
         };
         if pass_baton{
-            let cli_handle = self.run_cli();
-            return Some((handles,cli_handle));
+            return Some(handles);
         }else{
             tracing::trace!("Joining handles");
             let hh = join_all(handles);
@@ -602,7 +600,7 @@ impl ClientTask {
                 live_ad.clone(),
                 live_info.clone(),
             );
-            tracing::trace!("Binclient started");
+            tracing::info!("Binclient started");
             cli.default_symbol = default_symbol.to_string();
             cli.current_symbol = default_symbol.to_string();
             cli.default_intv = default_intv;
@@ -720,7 +718,7 @@ impl ClientTask {
         let (send_to_client, mut recv_from_client) =
             unpack_channels!(task_chans, SRSend, SQLResponse, SRecv, SQLInstructs);
         let mut sql_client = SQLConn::new(hist_asset_data);
-        tracing::trace!("SQL started");
+        tracing::info!("SQL started");
         loop {
             loop {
                 select! {
@@ -868,7 +866,7 @@ pub fn cli_run() -> Result<()> {
     let tasks: Vec<Tasks> = frontend.init(&settings)?;
     let _res = rt.block_on(async {
         let frontend = Frontend::Desktop;
-        tracing::trace!("Bintrade starting");
+        tracing::info!("Bintrade starting");
         let mut main_struct = ClientTask::new(frontend);
         let cancel_all_token = main_struct.cancel_all.clone();
         select! {
