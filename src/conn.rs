@@ -1,4 +1,4 @@
-se binance::account::*;
+use binance::account::*;
 use binance::api::Binance;
 use binance::rest_model::{
     AccountInformation, Order as BinanceOrder, OrderSide, OrderStatus, OrderType, TimeInForce,
