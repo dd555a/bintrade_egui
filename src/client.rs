@@ -574,7 +574,7 @@ impl ClientTask {
                         .lock()
                         .expect("Unable to unlock live info mutex- start_binclient");
                     live_i.keys_status = KeysStatus::Valid;
-                    tracing::trace!["API keys valid"];
+                    tracing::debug!["API keys valid"];
                 }
                 Err(e) => {
                     let mut live_i = live_info
@@ -633,22 +633,22 @@ impl ClientTask {
             let ss2 = sleep_notify.clone();
             let an2 = awake_notify.clone();
             let _ws_task_handle = tokio::task::spawn(async move {
-                tracing::trace!["connect_ws task started"];
+                tracing::debug!["connect_ws task started"];
                 loop {
                     select! {
                         _ =BinanceClient::connect_ws(ws_tick.clone(), params.clone(), 50) =>{
                         }
                         _ = cc2.cancelled() => {
-                            tracing::trace!("Binclient task cancelled 3");
+                            tracing::debug!("Binclient task cancelled 3");
                         }
                         _ = ss2.notified() => {
-                            tracing::trace!("Binclient task put to sleep 3");
+                            tracing::debug!("Binclient task put to sleep 3");
                             break;
                         }
                     };
-                    tracing::trace!("Binclient task sleep connect_ws");
+                    tracing::debug!("Binclient task sleep connect_ws");
                     an2.notified().await;
-                    tracing::trace!("Binclient task awake");
+                    tracing::debug!("Binclient task awake");
                 }
             });
 
@@ -658,18 +658,18 @@ impl ClientTask {
             let an1 = awake_notify.clone();
             let _live_info_update_handle = tokio::task::spawn(async move {
                 let mut bin_client = bin.clone();
-                tracing::trace!["check_live_orders_change start"];
+                tracing::debug!["check_live_orders_change start"];
                 loop {
                     loop {
                         select! {
                             _ = BinanceClient::check_live_orders_change(live_i.clone(), bin_client.clone()) =>{
                             }
                             _ = cc.cancelled() => {
-                                tracing::trace!("Binclient task cancelled 2");
+                                tracing::debug!("Binclient task cancelled 2");
                                 break;
                             }
                             _ = ss.notified() => {
-                                tracing::trace!("Binclient task put to sleep 2");
+                                tracing::debug!("Binclient task put to sleep 2");
                                 break;
                             }
                             _ = check_sleep_channel(recv_from_client2.clone(),&mut bin_client) =>{
@@ -679,30 +679,30 @@ impl ClientTask {
                         };
                     }
                     an1.notified().await;
-                    tracing::trace!("Binclient task awake");
+                    tracing::debug!("Binclient task awake");
                 }
             });
-            tracing::trace!("recv_from_client loop reached");
+            tracing::debug!("recv_from_client loop reached");
             loop {
                 select! {
                     _ = recv_from_client.changed() =>{
                         let instruct=recv_from_client.borrow_and_update().clone();
-                        tracing::trace!("recv_from_client instruct received");
+                        tracing::debug!("recv_from_client instruct received");
                         let response=cli.parse_binance_instructs(instruct).await;
                         let _res=send_to_client.send(response);
                     }
                     _ = cancel_token.cancelled() => {
-                        tracing::trace!("Binclient task cancelled");
+                        tracing::debug!("Binclient task cancelled");
                         return ();
                     }
                     _ = sleep_notify.notified() => {
-                        tracing::trace!("Binclient task put to sleep");
+                        tracing::debug!("Binclient task put to sleep");
                         break;
                     }
                 };
             }
             awake_notify.notified().await;
-            tracing::trace!("Binclient task awake");
+            tracing::debug!("Binclient task awake");
         }
     }
     pub async fn start_sql(
@@ -725,17 +725,17 @@ impl ClientTask {
                         let _=send_to_client.send(response);
                     }
                     _ = cancel_token.cancelled() => {
-                        tracing::trace!("SQL task cancelled");
+                        tracing::debug!("SQL task cancelled");
                         return ();
                     }
                     _ = sleep_notify.notified() => {
-                        tracing::trace!("SQL task put to sleep");
+                        tracing::debug!("SQL task put to sleep");
                         break;
                     }
                 }
             }
             awake_notify.notified().await;
-            tracing::trace!("SQL task awake");
+            tracing::debug!("SQL task awake");
         }
     }
     pub fn make_chans(&mut self, t: &Tasks) -> Vec<ChanType> {
