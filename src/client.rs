@@ -442,7 +442,7 @@ impl ClientTask {
             self.cli_awake.notified().await
         }
     }
-    #[instrument]
+    #[instrument,level="debug"]
     pub async fn run_main(
         &mut self,
         tasks: Vec<Tasks>,
@@ -552,7 +552,7 @@ impl ClientTask {
             return None;
         };
     }
-    #[instrument]
+    #[instrument,level="debug"]
     pub async fn start_binclient(
         mut task_chans: Vec<ChanType>,
         api_key: Option<String>,
