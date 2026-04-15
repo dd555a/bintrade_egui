@@ -7,8 +7,6 @@ fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .pretty()
         .init();
-    //env_logger::init();
-    color_backtrace::install();
     cli_run()?;
     Ok(())
 }

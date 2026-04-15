@@ -147,12 +147,14 @@ pub enum Frontend {
     Android
 }
 impl Frontend {
-    pub fn init(&self, settings: &Settings) -> Result<Vec<Tasks>> {
+    pub fn init(&self, settings: &Settings, cli_task:bool) -> Result<Vec<Tasks>> {
         match self{
             Frontend::Desktop | Frontend::Server=> {
                 let mut tasks: Vec<Tasks> = std::vec::Vec::new();
-                let s0 = Tasks::new_cli(&settings)?;
-                tasks.push(s0);
+                if cli_task{
+                    let s0 = Tasks::new_cli(&settings)?;
+                    tasks.push(s0);
+                };
                 let s1 = Tasks::new_binws(&settings)?;
                 tasks.push(s1);
                 let s3 = Tasks::new_sql(&settings);
@@ -362,6 +364,7 @@ impl ClientTask {
             ClientInstruct::StartBinCli => self.bin_awake.notify_one(),
             ClientInstruct::StopBinCli => self.bin_sleep.notify_one(),
             ClientInstruct::SendBinInstructs(instructs) => {
+                tracing::debug!["SQL INSTRUCTS {:?}",instructs];
                 let chan = self
                     .send_sett_bin
                     .take()
@@ -374,6 +377,7 @@ impl ClientTask {
             ClientInstruct::StartSQL => self.sql_awake.notify_one(),
             ClientInstruct::StopSQL => self.sql_sleep.notify_one(),
             ClientInstruct::SendSQLInstructs(instructs) => {
+                tracing::debug!["SQL INSTRUCTS {:?}",instructs];
                 let chan = self
                     .send_sett_sql
                     .take()
@@ -447,11 +451,16 @@ impl ClientTask {
         settings: Settings,
         api_keys: Option<ApiKeys>,
         pass_baton:bool,
-    )->Option<Vec<Handle<()>>> {
+    )->Option<(Vec<Handle<()>>,Vec<ChanType>)> {
         let mut handles: Vec<Handle<()>> = vec![];
         let (a_key, a_sec_key) = match api_keys {
             Some(a) => (Some(a.api.clone()), Some(a.api_secret.clone())),
             None => (None, None),
+        };
+        let mut cli_chans:Option<Vec<ChanType>>=None;
+        if pass_baton{
+            let task_chans = self.make_chans(&Tasks::Task0Cli{});
+            cli_chans=Some(task_chans);
         };
         for t in tasks {
             match t {
@@ -480,6 +489,8 @@ impl ClientTask {
                                 panic!("Should not be passed here yet")
                             }
                         }
+                    }else{
+                        cli_chans=Some(task_chans);
                     };
                 }
                 Tasks::Task1BinWS {
@@ -543,7 +554,8 @@ impl ClientTask {
             }
         };
         if pass_baton{
-            return Some(handles);
+            let a_chans=cli_chans.take().expect("Must be SOME");
+            return Some((handles, a_chans));
         }else{
             tracing::trace!("Joining handles");
             let hh = join_all(handles);
@@ -571,16 +583,20 @@ impl ClientTask {
             unpack_channels!(task_chans, BRSend, BinResponse, BRecv, BinInstructs);
         loop {
             let bin_cfg = Config::default(); //.set_recv_window(10_000);
+            tracing::trace!("Getting api info");
             let bin: Account =
                 Binance::new_with_config(api_key.clone(), api_secret.clone(), &bin_cfg);
+            tracing::trace!("Binclient getting account info");
             let res = bin.get_account().await;
-            let _keys_status = match res {
+            tracing::trace!("GET ACCOUNT RES: \n{:?}\n",res);
+            let keys_status = match res {
                 Ok(_) => {
                     let mut live_i = live_info
                         .lock()
                         .expect("Unable to unlock live info mutex- start_binclient");
                     live_i.keys_status = KeysStatus::Valid;
                     tracing::debug!["API keys valid"];
+                    KeysStatus::Valid
                 }
                 Err(e) => {
                     let mut live_i = live_info
@@ -591,6 +607,7 @@ impl ClientTask {
                         "Unable to get account info, setting API key status as invalid, ERROR: {}",
                         e
                     ];
+                    KeysStatus::Invalid
                 }
             };
 
@@ -613,6 +630,7 @@ impl ClientTask {
             let ad_c = cli.live_ad.clone();
 
             //let _parent_span = tracing::info_span!("test_span").entered();
+            tracing::trace!("Binclient getting initial data");
 
             let _get_initial_data_handle = tokio::task::spawn(async move {
                 let _a = BinanceClient::get_initial_data2(&symbol, ad_c)
@@ -622,7 +640,16 @@ impl ClientTask {
             let s_d = cli.current_symbol.clone();
             let ad_d = cli.live_ad.clone();
 
-            let _res = cli.refresh_balances(&s_d, ad_d).await;
+            tracing::debug!("Binclient refresh balances");
+            match keys_status{
+                KeysStatus::Valid=>{
+                    let _res = cli.refresh_balances(&s_d, ad_d).await;
+                }
+                KeysStatus::Invalid=>{
+
+                }
+            };
+            tracing::debug!("Binclient getting exchange info");
             let res = get_exchange_info().await;
             match res {
                 Ok(e) => {
@@ -661,7 +688,9 @@ impl ClientTask {
                     an2.notified().await;
                     tracing::debug!("Binclient task awake");
                 }
-            });
+            }
+            .in_current_span()
+            );
 
             let live_i = live_info.clone();
             let cc = cancel_token.clone();
@@ -692,7 +721,9 @@ impl ClientTask {
                     an1.notified().await;
                     tracing::debug!("Binclient task awake");
                 }
-            });
+            }
+            .in_current_span()
+            );
             tracing::debug!("recv_from_client loop reached");
             loop {
                 select! {
@@ -870,9 +901,17 @@ pub fn cli_run() -> Result<()> {
             (Settings::new(), None)
         }
     };
+
     let frontend = Frontend::Desktop;
-    let tasks: Vec<Tasks> = frontend.init(&settings)?;
+    let tasks: Vec<Tasks> = frontend.init(&settings, true)?;
     let _res = rt.block_on(async {
+
+        if !sqlx::Sqlite::database_exists(&METADATA_DB_PATH){
+
+            let _res=tokio::fs::create_dir("./databases").await?;
+            let _res=create_metadata_db().await?;
+        };
+
         let frontend = Frontend::Desktop;
         tracing::info!("Bintrade starting");
         let mut main_struct = ClientTask::new(frontend);
@@ -887,3 +926,4 @@ pub fn cli_run() -> Result<()> {
     });
     Ok(())
 }
+use crate::data::{create_metadata_db,METADATA_DB_PATH};

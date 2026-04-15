@@ -4093,11 +4093,22 @@ impl DataManager {
                         .hint_text("Add asset to download list for binance"),
                 );
                 if ui.button("Add").clicked() {
+                    tracing::debug!["Add clicked: {:?}",data_manager.coin_search_string];
                     let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::InsertDLAsset {
                         symbol: data_manager.coin_search_string.clone(),
                         exchange: "Binance".to_string(),
                     });
-                    let _res = cli_chan.send(msg);
+                    let res = cli_chan.send(msg);
+                    match res{
+                        Ok(_)=>{
+                            tracing::debug!["MSG SENT TO CLIENT"]
+                        }
+                        Err(e)=>{
+                            tracing::debug!["ERROR: {}, channel_closed:{}",e,cli_chan.is_closed()];
+
+                        }
+
+                    };
                     data_manager.asset_list_loaded = false;
                 };
                 ui.end_row();
