@@ -22,8 +22,6 @@ use eframe::EventLoopBuilderHook;
 use eframe::egui;
 use winit::platform::wayland::EventLoopBuilderExtWayland;
 
-use tracing::{Instrument,instrument};
-
 
 use crate::conn::{BinanceClient, SymbolOutput, get_exchange_info};
 use crate::data::{AssetData, Intv, SQLConn};
@@ -442,7 +440,6 @@ impl ClientTask {
             self.cli_awake.notified().await
         }
     }
-    #[instrument( level = "debug" )]
     pub async fn run_main(
         &mut self,
         tasks: Vec<Tasks>,
@@ -516,7 +513,6 @@ impl ClientTask {
                             live_ad,
                             live_info,
                         )
-                        .in_current_span()
                         .await;
                     });
                     handles.push(bin_cli_handle);
@@ -535,7 +531,6 @@ impl ClientTask {
                             sleep_notify,
                             hist_data,
                         )
-                        .in_current_span()
                         .await;
                     });
                     handles.push(sql_handle);
@@ -552,7 +547,6 @@ impl ClientTask {
             return None;
         };
     }
-    #[instrument( level = "debug" )]
     pub async fn start_binclient(
         mut task_chans: Vec<ChanType>,
         api_key: Option<String>,
@@ -613,7 +607,7 @@ impl ClientTask {
             let symbol = cli.current_symbol.clone();
             let ad_c = cli.live_ad.clone();
             let _get_initial_data_handle = tokio::task::spawn(async move {
-                let _a = BinanceClient::get_initial_data2(&symbol, ad_c).in_current_span().await;
+                let _a = BinanceClient::get_initial_data2(&symbol, ad_c).await;
             });
             let s_d = cli.current_symbol.clone();
             let ad_d = cli.live_ad.clone();
@@ -657,7 +651,7 @@ impl ClientTask {
                     an2.notified().await;
                     tracing::debug!("Binclient task awake");
                 }
-            }.in_current_span());
+            });
 
             let live_i = live_info.clone();
             let cc = cancel_token.clone();
