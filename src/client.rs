@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 use binance::account::Account;
 use binance::api::Binance;
 use binance::config::Config;
+use tracing::Instrument;
 
 use crate::{
     BinInstructs, BinResponse, ClientInstruct, ClientResponse, ProcResp, SQLInstructs, SQLResponse,
@@ -513,6 +514,8 @@ impl ClientTask {
                             live_ad,
                             live_info,
                         )
+                        .instrument(tracing::trace_span!("binclient_span"))
+                        .in_current_span()
                         .await;
                     });
                     handles.push(bin_cli_handle);
@@ -531,6 +534,8 @@ impl ClientTask {
                             sleep_notify,
                             hist_data,
                         )
+                        .instrument(tracing::trace_span!("sql_span"))
+                        .in_current_span()
                         .await;
                     });
                     handles.push(sql_handle);
@@ -606,9 +611,14 @@ impl ClientTask {
 
             let symbol = cli.current_symbol.clone();
             let ad_c = cli.live_ad.clone();
+
+            //let _parent_span = tracing::info_span!("test_span").entered();
+
             let _get_initial_data_handle = tokio::task::spawn(async move {
-                let _a = BinanceClient::get_initial_data2(&symbol, ad_c).await;
-            });
+                let _a = BinanceClient::get_initial_data2(&symbol, ad_c)
+                    .await;
+            }
+            );
             let s_d = cli.current_symbol.clone();
             let ad_d = cli.live_ad.clone();
 
