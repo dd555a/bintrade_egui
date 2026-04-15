@@ -1,6 +1,6 @@
 [package]
 name = "bintrade_egui"
-version = "0.1.42"
+version = "0.1.44"
 edition = "2024"
 authors = ["DB <dd555@protonmail.com>"]
 description = "GUI binance trade program using egui. Do live trading, historic data and simulate trading, plot historic data"

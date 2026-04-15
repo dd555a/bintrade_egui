@@ -301,9 +301,6 @@ impl ClientTask {
                     }));
                 let native_options = eframe::NativeOptions {
                     viewport: egui::ViewportBuilder::default(),
-                    //TODO - add resolution settings
-                    //.with_inner_size([1980.0, 1080.0])
-                    //.with_min_inner_size([300.0, 220.0]),
                     event_loop_builder,
                     persist_window: false,
                     //persistence_path: Some(std::path::PathBuf::from("./bintrade_gui_save")),
@@ -457,8 +454,8 @@ impl ClientTask {
         for t in tasks {
             match t {
                 Tasks::Task0Cli {} => {
+                    let task_chans = self.make_chans(&t);
                     if !pass_baton{
-                        let task_chans = self.make_chans(&t);
                         match self.frontend {
                             Frontend::Desktop => {
                                 let asset_data = Arc::clone(&self.live_dat);
