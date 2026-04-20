@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::data::{METADATA_DB_PATH, create_metadata_db};
+use sqlx::migrate::MigrateDatabase;
+
 use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Notify, watch};
@@ -23,7 +26,6 @@ use eframe::EventLoopBuilderHook;
 use eframe::egui;
 use winit::platform::wayland::EventLoopBuilderExtWayland;
 
-
 use crate::conn::{BinanceClient, SymbolOutput, get_exchange_info};
 use crate::data::{AssetData, Intv, SQLConn};
 use crate::gui::{DesktopApp, KeysStatus, LiveInfo, Settings};
@@ -38,7 +40,10 @@ use anyhow::{Context, Result};
 
 const ERR_CTX: &str = "Main client";
 
-pub async fn check_sleep_channel(mut chan: watch::Receiver<BinInstructs>, bin_client: &mut Account) {
+pub async fn check_sleep_channel(
+    mut chan: watch::Receiver<BinInstructs>,
+    bin_client: &mut Account,
+) {
     loop {
         let _res = chan.changed().await;
         let msg = chan.borrow_and_update();
@@ -144,14 +149,14 @@ pub enum Frontend {
     #[default]
     Desktop,
     Server,
-    Android
+    Android,
 }
 impl Frontend {
-    pub fn init(&self, settings: &Settings, cli_task:bool) -> Result<Vec<Tasks>> {
-        match self{
-            Frontend::Desktop | Frontend::Server=> {
+    pub fn init(&self, settings: &Settings, cli_task: bool) -> Result<Vec<Tasks>> {
+        match self {
+            Frontend::Desktop => {
                 let mut tasks: Vec<Tasks> = std::vec::Vec::new();
-                if cli_task{
+                if cli_task {
                     let s0 = Tasks::new_cli(&settings)?;
                     tasks.push(s0);
                 };
@@ -161,7 +166,17 @@ impl Frontend {
                 tasks.push(s3);
                 return Ok(tasks);
             }
-            Frontend::Android=>{
+            Frontend::Server=> {
+                let mut tasks: Vec<Tasks> = std::vec::Vec::new();
+                if cli_task {
+                    let s0 = Tasks::new_cli(&settings)?;
+                    tasks.push(s0);
+                };
+                let s1 = Tasks::new_binws(&settings)?;
+                tasks.push(s1);
+                return Ok(tasks);
+            }
+            Frontend::Android => {
                 panic!("Should not be passed here")
             }
         }
@@ -364,7 +379,7 @@ impl ClientTask {
             ClientInstruct::StartBinCli => self.bin_awake.notify_one(),
             ClientInstruct::StopBinCli => self.bin_sleep.notify_one(),
             ClientInstruct::SendBinInstructs(instructs) => {
-                tracing::debug!["SQL INSTRUCTS {:?}",instructs];
+                tracing::debug!["SQL INSTRUCTS {:?}", instructs];
                 let chan = self
                     .send_sett_bin
                     .take()
@@ -377,7 +392,7 @@ impl ClientTask {
             ClientInstruct::StartSQL => self.sql_awake.notify_one(),
             ClientInstruct::StopSQL => self.sql_sleep.notify_one(),
             ClientInstruct::SendSQLInstructs(instructs) => {
-                tracing::debug!["SQL INSTRUCTS {:?}",instructs];
+                tracing::debug!["SQL INSTRUCTS {:?}", instructs];
                 let chan = self
                     .send_sett_sql
                     .take()
@@ -450,23 +465,23 @@ impl ClientTask {
         tasks: Vec<Tasks>,
         settings: Settings,
         api_keys: Option<ApiKeys>,
-        pass_baton:bool,
-    )->Option<(Vec<Handle<()>>,Vec<ChanType>)> {
+        pass_baton: bool,
+    ) -> Option<(Vec<Handle<()>>, Vec<ChanType>)> {
         let mut handles: Vec<Handle<()>> = vec![];
         let (a_key, a_sec_key) = match api_keys {
             Some(a) => (Some(a.api.clone()), Some(a.api_secret.clone())),
             None => (None, None),
         };
-        let mut cli_chans:Option<Vec<ChanType>>=None;
-        if pass_baton{
-            let task_chans = self.make_chans(&Tasks::Task0Cli{});
-            cli_chans=Some(task_chans);
+        let mut cli_chans: Option<Vec<ChanType>> = None;
+        if pass_baton {
+            let task_chans = self.make_chans(&Tasks::Task0Cli {});
+            cli_chans = Some(task_chans);
         };
         for t in tasks {
             match t {
                 Tasks::Task0Cli {} => {
                     let task_chans = self.make_chans(&t);
-                    if !pass_baton{
+                    if !pass_baton {
                         match self.frontend {
                             Frontend::Desktop => {
                                 let asset_data = Arc::clone(&self.live_dat);
@@ -485,12 +500,12 @@ impl ClientTask {
                                 );
                                 handles.push(gui_blocking_handle);
                             }
-                            _=>{
+                            _ => {
                                 panic!("Should not be passed here yet")
                             }
                         }
-                    }else{
-                        cli_chans=Some(task_chans);
+                    } else {
+                        cli_chans = Some(task_chans);
                     };
                 }
                 Tasks::Task1BinWS {
@@ -552,11 +567,11 @@ impl ClientTask {
                     handles.push(sql_handle);
                 }
             }
-        };
-        if pass_baton{
-            let a_chans=cli_chans.take().expect("Must be SOME");
+        }
+        if pass_baton {
+            let a_chans = cli_chans.take().expect("Must be SOME");
             return Some((handles, a_chans));
-        }else{
+        } else {
             tracing::trace!("Joining handles");
             let hh = join_all(handles);
             let cli_handle = self.run_cli();
@@ -588,7 +603,7 @@ impl ClientTask {
                 Binance::new_with_config(api_key.clone(), api_secret.clone(), &bin_cfg);
             tracing::trace!("Binclient getting account info");
             let res = bin.get_account().await;
-            tracing::trace!("GET ACCOUNT RES: \n{:?}\n",res);
+            tracing::trace!("GET ACCOUNT RES: \n{:?}\n", res);
             let keys_status = match res {
                 Ok(_) => {
                     let mut live_i = live_info
@@ -633,21 +648,17 @@ impl ClientTask {
             tracing::trace!("Binclient getting initial data");
 
             let _get_initial_data_handle = tokio::task::spawn(async move {
-                let _a = BinanceClient::get_initial_data2(&symbol, ad_c)
-                    .await;
-            }
-            );
+                let _a = BinanceClient::get_initial_data2(&symbol, ad_c).await;
+            });
             let s_d = cli.current_symbol.clone();
             let ad_d = cli.live_ad.clone();
 
             tracing::debug!("Binclient refresh balances");
-            match keys_status{
-                KeysStatus::Valid=>{
+            match keys_status {
+                KeysStatus::Valid => {
                     let _res = cli.refresh_balances(&s_d, ad_d).await;
                 }
-                KeysStatus::Invalid=>{
-
-                }
+                KeysStatus::Invalid => {}
             };
             tracing::debug!("Binclient getting exchange info");
             let res = get_exchange_info().await;
@@ -670,26 +681,27 @@ impl ClientTask {
             let cc2 = cancel_token.clone();
             let ss2 = sleep_notify.clone();
             let an2 = awake_notify.clone();
-            let _ws_task_handle = tokio::task::spawn(async move {
-                tracing::debug!["connect_ws task started"];
-                loop {
-                    select! {
-                        _ =BinanceClient::connect_ws(ws_tick.clone(), params.clone(), 50) =>{
-                        }
-                        _ = cc2.cancelled() => {
-                            tracing::debug!("Binclient task cancelled 3");
-                        }
-                        _ = ss2.notified() => {
-                            tracing::debug!("Binclient task put to sleep 3");
-                            break;
-                        }
-                    };
-                    tracing::debug!("Binclient task sleep connect_ws");
-                    an2.notified().await;
-                    tracing::debug!("Binclient task awake");
+            let _ws_task_handle = tokio::task::spawn(
+                async move {
+                    tracing::debug!["connect_ws task started"];
+                    loop {
+                        select! {
+                            _ =BinanceClient::connect_ws(ws_tick.clone(), params.clone(), 50) =>{
+                            }
+                            _ = cc2.cancelled() => {
+                                tracing::debug!("Binclient task cancelled 3");
+                            }
+                            _ = ss2.notified() => {
+                                tracing::debug!("Binclient task put to sleep 3");
+                                break;
+                            }
+                        };
+                        tracing::debug!("Binclient task sleep connect_ws");
+                        an2.notified().await;
+                        tracing::debug!("Binclient task awake");
+                    }
                 }
-            }
-            .in_current_span()
+                .in_current_span(),
             );
 
             let live_i = live_info.clone();
@@ -905,11 +917,17 @@ pub fn cli_run() -> Result<()> {
     let frontend = Frontend::Desktop;
     let tasks: Vec<Tasks> = frontend.init(&settings, true)?;
     let _res = rt.block_on(async {
-
-        if !sqlx::Sqlite::database_exists(&METADATA_DB_PATH){
-
-            let _res=tokio::fs::create_dir("./databases").await?;
-            let _res=create_metadata_db().await?;
+        let res = sqlx::Sqlite::database_exists(&METADATA_DB_PATH).await;
+        let db_exists = match res {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::error!["Check db exists ERROR: {}", e];
+                false
+            }
+        };
+        if !db_exists {
+            let _res = tokio::fs::create_dir("./databases").await;
+            let _res = create_metadata_db().await;
         };
 
         let frontend = Frontend::Desktop;
@@ -926,4 +944,3 @@ pub fn cli_run() -> Result<()> {
     });
     Ok(())
 }
-use crate::data::{create_metadata_db,METADATA_DB_PATH};

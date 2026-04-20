@@ -25,7 +25,7 @@ use binance::rest_model::{KlineSummaries, KlineSummary};
 
 const ERR_CTX: &str = "SQL Data loader";
 const SINGLE_ASSET_DL_TASKS_MAX: usize = 8;
-const METADATA_DB_PATH: &str = "./databases/metadata.db";
+pub const METADATA_DB_PATH: &str = "./databases/metadata.db";
 const BIN_TIMESTAMP: i64 = 1577836800000;
 
 use bincode::{Decode, Encode, config};
@@ -1083,7 +1083,7 @@ pub async fn get_data_binance2(
     };
 }
 
-async fn create_metadata_db() -> Result<()> {
+pub async fn create_metadata_db() -> Result<()> {
     create_db(&METADATA_DB_PATH)
         .await
         .context(anyhow!("SQL::Unable cereate db"))?;

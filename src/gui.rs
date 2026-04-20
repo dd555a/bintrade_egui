@@ -1542,20 +1542,20 @@ pub struct DesktopApp {
     pub asset_data: Arc<Mutex<AssetData>>,
     pub hist_asset_data: Arc<Mutex<AssetData>>,
     pub collect_data: Arc<Mutex<HashMap<String, SymbolOutput>>>,
-    
+
     pub live_plot: Rc<Mutex<LivePlot>>,
     pub data_manager: Rc<Mutex<DataManager>>,
     pub settings: Rc<Mutex<Settings>>,
     pub live_info: Arc<Mutex<LiveInfo>>,
-    
+
     pub lp_chan_recv: watch::Receiver<f64>,
-    
+
     pub send_to_cli: Option<watch::Sender<ClientInstruct>>,
     pub recv_from_cli: Option<watch::Receiver<ClientResponse>>,
-    
+
     pub resp_buff: Option<HashMap<ProcResp, Vec<ClientResponse>>>,
     pub last_resp: Option<ClientResponse>,
-    
+
     pub man_orders: BTreeMap<usize, ManualOrders>,
     pub hist_plot: BTreeMap<usize, HistPlot>,
     pub hist_extras: BTreeMap<usize, HistExtras>,
@@ -1703,8 +1703,8 @@ impl DesktopApp {
     }
 }
 
-impl DesktopApp{
-    pub fn add_pane(&mut self, ui:&mut egui::Ui){
+impl DesktopApp {
+    pub fn add_pane(&mut self, ui: &mut egui::Ui) {
         let mut next_panel_type: PaneType = PaneType::None;
         ComboBox::from_label("")
             .selected_text(format!("Tools"))
@@ -1725,17 +1725,15 @@ impl DesktopApp{
                         self.man_orders
                             .insert(self.pane_number + 1, ManualOrders::default());
 
-                        new_child = tree.tiles.insert_pane(Pane::new(
-                            self.pane_number + 1,
-                            PaneType::LiveTrade,
-                        ));
+                        new_child = tree
+                            .tiles
+                            .insert_pane(Pane::new(self.pane_number + 1, PaneType::LiveTrade));
                         self.pane_number += 1;
                     }
                     PaneType::HistTrade => {
                         self.man_orders
                             .insert(self.pane_number + 1, ManualOrders::default());
-                        let settings =
-                            self.settings.lock().expect("Unable to unlock settings");
+                        let settings = self.settings.lock().expect("Unable to unlock settings");
                         self.hist_plot.insert(
                             self.pane_number + 1,
                             HistPlot::new(
@@ -1747,30 +1745,26 @@ impl DesktopApp{
                         self.hist_extras
                             .insert(self.pane_number + 1, HistExtras::default());
 
-                        new_child = tree.tiles.insert_pane(Pane::new(
-                            self.pane_number + 1,
-                            PaneType::HistTrade,
-                        ));
+                        new_child = tree
+                            .tiles
+                            .insert_pane(Pane::new(self.pane_number + 1, PaneType::HistTrade));
                         self.pane_number += 1;
                     }
                     PaneType::ManageData => {
-                        new_child = tree.tiles.insert_pane(Pane::new(
-                            self.pane_number + 1,
-                            PaneType::ManageData,
-                        ));
+                        new_child = tree
+                            .tiles
+                            .insert_pane(Pane::new(self.pane_number + 1, PaneType::ManageData));
                         self.pane_number += 1;
                     }
                     PaneType::Settings => {
-                        new_child = tree.tiles.insert_pane(Pane::new(
-                            self.pane_number + 1,
-                            PaneType::Settings,
-                        ));
+                        new_child = tree
+                            .tiles
+                            .insert_pane(Pane::new(self.pane_number + 1, PaneType::Settings));
                         self.pane_number += 1;
                     }
                 };
-                if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(
-                    tabs,
-                ))) = tree.tiles.get_mut(parent)
+                if let Some(egui_tiles::Tile::Container(egui_tiles::Container::Tabs(tabs))) =
+                    tree.tiles.get_mut(parent)
                 {
                     tabs.add_child(new_child);
                     tabs.set_active(new_child);
@@ -1834,6 +1828,7 @@ pub struct ManualOrders {
     pub single_order_mode: bool,
     pub so_mode: Option<SingleOrderMode>,
     pub mode_switched: bool,
+    pub show_orders: bool,
 
     pub current_symbol: String,
 
@@ -1884,6 +1879,7 @@ pub struct ManualOrders {
 impl Default for ManualOrders {
     fn default() -> Self {
         Self {
+            show_orders: true,
             so_mode: Some(SingleOrderMode::new()),
             last_slice_time: DateTime::<Utc>::default(),
             eval_mode: EvalMode::default(),
@@ -1945,7 +1941,7 @@ impl Default for ManualOrders {
     }
 }
 
-fn link_hline_orders(orders: &HashMap<u64, (Order, bool, f64)>, hlines: &mut Vec<HLine>) {
+pub fn link_hline_orders(orders: &HashMap<u64, (Order, bool, f64)>, hlines: &mut Vec<HLine>) {
     hlines.clear();
     let _ = orders
         .iter()
@@ -3170,7 +3166,7 @@ impl ManualOrders {
                                                 man_orders.asset1 = a1;
                                                 man_orders.asset2 = a2;
                                                 man_orders.orders.remove(id);
-                                            }else{
+                                            } else {
                                                 man_orders.orders.remove(id);
                                             };
                                         };
@@ -3376,7 +3372,9 @@ impl ManualOrders {
                 */
 
                 if live_info.is_none() {
-                    ui.checkbox(&mut man_orders.single_order_mode, "Hotkeys only mode");
+                    if man_orders.show_orders {
+                        ui.checkbox(&mut man_orders.single_order_mode, "Hotkeys only mode");
+                    };
                     if man_orders.single_order_mode {
                         man_orders.mode_switched = !man_orders.mode_switched;
                         let res = man_orders.so_mode.as_mut();
@@ -3410,14 +3408,16 @@ impl ManualOrders {
         });
         ui.end_row();
         ui.ctx().request_repaint();
-        if man_orders.single_order_mode == true {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ManualOrders::show_singleorder(man_orders, last_price, hh, cli_chan, ui);
-            });
-        } else {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ManualOrders::show_multiorder(man_orders, last_price, cli_chan, ui, live_info);
-            });
+        if man_orders.show_orders {
+            if man_orders.single_order_mode == true {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ManualOrders::show_singleorder(man_orders, last_price, hh, cli_chan, ui);
+                });
+            } else {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ManualOrders::show_multiorder(man_orders, last_price, cli_chan, ui, live_info);
+                });
+            };
         };
     }
 }
@@ -4039,7 +4039,7 @@ impl Settings {
 
 #[derive(Dbg, Default)]
 pub struct DataManager {
-    pub coin_list: Vec<String>,            //load Assetlist (All binance assets)
+    pub coin_list: Vec<String>, //load Assetlist (All binance assets)
     pub downloaded_coin_list: Vec<String>, //load AssetlistDL (All binance assets)
     pub search_coin_shortlist: Vec<String>,
     pub downloaded_coin_shortlist: Vec<String>,
@@ -4093,21 +4093,23 @@ impl DataManager {
                         .hint_text("Add asset to download list for binance"),
                 );
                 if ui.button("Add").clicked() {
-                    tracing::debug!["Add clicked: {:?}",data_manager.coin_search_string];
+                    tracing::debug!["Add clicked: {:?}", data_manager.coin_search_string];
                     let msg = ClientInstruct::SendSQLInstructs(SQLInstructs::InsertDLAsset {
                         symbol: data_manager.coin_search_string.clone(),
                         exchange: "Binance".to_string(),
                     });
                     let res = cli_chan.send(msg);
-                    match res{
-                        Ok(_)=>{
+                    match res {
+                        Ok(_) => {
                             tracing::debug!["MSG SENT TO CLIENT"]
                         }
-                        Err(e)=>{
-                            tracing::debug!["ERROR: {}, channel_closed:{}",e,cli_chan.is_closed()];
-
+                        Err(e) => {
+                            tracing::debug![
+                                "ERROR: {}, channel_closed:{}",
+                                e,
+                                cli_chan.is_closed()
+                            ];
                         }
-
                     };
                     data_manager.asset_list_loaded = false;
                 };
@@ -4258,33 +4260,33 @@ fn time_conversion(timestamp: i64) -> Option<DateTime<Local>> {
     };
 }
 
-enum LineStyle {
+pub enum LineStyle {
     Solid(f32),
     Dotted(f32),
 }
 
 #[derive(Copy, Clone, Debug)]
-enum LineState {
+pub enum LineState {
     ActiveColor(Color32),
     InactiveColor(Color32),
 }
 
-enum HlineType {
+pub enum HlineType {
     BuyOrder((LineState, LineStyle)),
     SellOrder((LineState, LineStyle)),
 }
 
-const PRICE_STYLE: LineStyle = LineStyle::Solid(1.0);
-const LIMIT_STYLE: LineStyle = LineStyle::Solid(1.0);
+pub const PRICE_STYLE: LineStyle = LineStyle::Solid(1.0);
+pub const LIMIT_STYLE: LineStyle = LineStyle::Solid(1.0);
 
-const DOTT_LINE_SPACING: f32 = 10.0;
-const STOP_STYLE: LineStyle = LineStyle::Dotted(1.0);
+pub const DOTT_LINE_SPACING: f32 = 10.0;
+pub const STOP_STYLE: LineStyle = LineStyle::Dotted(1.0);
 
-const BUY_ACTIVE: LineState = LineState::ActiveColor(Color32::GREEN);
-const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(188, 255, 188));
+pub const BUY_ACTIVE: LineState = LineState::ActiveColor(Color32::GREEN);
+pub const BUY_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(188, 255, 188));
 
-const SELL_ACTIVE: LineState = LineState::ActiveColor(Color32::RED);
-const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(255, 188, 188));
+pub const SELL_ACTIVE: LineState = LineState::ActiveColor(Color32::RED);
+pub const SELL_INACTIVE: LineState = LineState::InactiveColor(Color32::from_rgb(255, 188, 188));
 
 impl HlineType {
     pub fn hline_order(o: &Order, active: bool) -> Vec<HLine> {
@@ -4400,7 +4402,11 @@ impl HlineType {
 }
 
 impl HistPlot {
-    pub fn new(hist_asset_data: Arc<Mutex<AssetData>>, intv: &Intv, default_trade_wicks: i64) -> Self {
+    pub fn new(
+        hist_asset_data: Arc<Mutex<AssetData>>,
+        intv: &Intv,
+        default_trade_wicks: i64,
+    ) -> Self {
         Self {
             intv: *intv,
             last_intv: *intv,

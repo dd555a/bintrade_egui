@@ -66,7 +66,6 @@ const fn eval_stop(stop: f64, h: f64, o: f64, _c: f64, l: f64) -> Option<f64> {
 }
 use strum_macros::EnumIter;
 
-
 #[derive(EnumIter, Debug, Clone, Copy, PartialEq, Default, Hash, Encode, Decode)]
 pub enum EvalMode {
     #[default]
@@ -116,7 +115,7 @@ const fn eval_limit(
     }
 }
 
-#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Copy, Hash, Encode,Decode)]
+#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Copy, Hash, Encode, Decode)]
 pub enum OrderCondition {
     Untouched,
     Filled,
@@ -232,7 +231,7 @@ pub const fn eval_order_basic(
 
 use bincode::{Decode, Encode};
 
-#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Hash, Encode,Decode)]
+#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Hash, Encode, Decode)]
 pub enum BasicOrderType {
     Market,
     Limit,
@@ -346,7 +345,7 @@ pub const fn eval_basic_condition(
     }
 }
 
-#[derive(PartialEq, EnumIter, Debug, Clone, Copy, Default, Encode,Decode)]
+#[derive(PartialEq, EnumIter, Debug, Clone, Copy, Default, Encode, Decode)]
 pub enum LimitStatus {
     #[default]
     Untouched,
@@ -356,14 +355,14 @@ pub enum LimitStatus {
     FullyFilled,
 }
 
-#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Copy, Default, Encode,Decode)]
+#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Copy, Default, Encode, Decode)]
 pub enum StopStatus {
     #[default]
     Untouched,
     Triggered,
 }
 
-#[derive(PartialEq, EnumIter, Debug, Clone, Copy, Default, Encode,Decode)]
+#[derive(PartialEq, EnumIter, Debug, Clone, Copy, Default, Encode, Decode)]
 pub enum Quant {
     #[default]
     Q100,
@@ -389,7 +388,7 @@ impl Quant {
     }
 }
 
-#[derive(PartialEq, EnumIter, Debug, Clone, Copy, Default, Encode,Decode)]
+#[derive(PartialEq, EnumIter, Debug, Clone, Copy, Default, Encode, Decode)]
 pub enum Order {
     #[default]
     None,

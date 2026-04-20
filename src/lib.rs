@@ -1,10 +1,10 @@
 use crate::gui::Settings;
 use crate::trade::Order;
+use bincode::{Decode, Encode};
 use std::collections::HashMap;
 use strum_macros::EnumIter;
-use bincode::{Decode, Encode};
 
-#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash, Encode,Decode)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy, Hash, Encode, Decode)]
 pub enum GeneralError {
     SystemError,
     GetError,
@@ -13,7 +13,7 @@ pub enum GeneralError {
     Generic,
 }
 
-#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode,Decode, Default)]
+#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode, Decode, Default)]
 pub enum ProcResp {
     BinResp(BinResponse),
     SQLResp(SQLResponse),
@@ -21,7 +21,7 @@ pub enum ProcResp {
     Client,
 }
 
-#[derive(PartialEq,Default, Debug, Clone, Encode,Decode)]
+#[derive(PartialEq, Default, Debug, Clone, Encode, Decode)]
 pub enum SQLInstructs {
     #[default]
     None,
@@ -102,14 +102,14 @@ impl SQLInstructs {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode,Decode)]
+#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode, Decode)]
 pub enum SQLResponse {
     None,
     Success,
     Failure((String, GeneralError)),
 }
 
-#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode,Decode)]
+#[derive(Eq, PartialEq, Debug, Clone, Hash, Encode, Decode)]
 pub enum BinResponse {
     None,
     Success,
@@ -117,7 +117,7 @@ pub enum BinResponse {
     OrderStatus(u64),
 }
 
-#[derive(PartialEq, Default, EnumIter, Debug, Clone, Encode,Decode)]
+#[derive(PartialEq, Default, EnumIter, Debug, Clone, Encode, Decode)]
 pub enum BinInstructs {
     #[default]
     None,
@@ -132,8 +132,12 @@ pub enum BinInstructs {
     GetUserData,
     UpdateSettings(Settings),
     GetAllBalances,
-    SellAllNow{symbol:String},
-    BuyAllNow{symbol:String},
+    SellAllNow {
+        symbol: String,
+    },
+    BuyAllNow {
+        symbol: String,
+    },
     GetBalance {
         symbol: String,
     },
@@ -171,8 +175,8 @@ impl BinInstructs {
     pub fn to_str(&self) -> &str {
         match &self {
             BinInstructs::None => "BinInstruct: None",
-            BinInstructs::SellAllNow{ symbol: _ } => "BinInstruct: BuyAllNow",
-            BinInstructs::BuyAllNow{ symbol: _ } => "BinInstruct: SellAllNow",
+            BinInstructs::SellAllNow { symbol: _ } => "BinInstruct: BuyAllNow",
+            BinInstructs::BuyAllNow { symbol: _ } => "BinInstruct: SellAllNow",
             BinInstructs::ConnectWS { params: _ } => "BinInstruct: Connect WS",
             BinInstructs::ConnectUserWS { params: _ } => "BinInstruct: Connect User WS",
             BinInstructs::Disconnect => "BinInstruct: Disconnect",
@@ -207,7 +211,7 @@ impl BinInstructs {
     }
 }
 
-#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Encode,Decode)]
+#[derive(Eq, PartialEq, EnumIter, Debug, Clone, Encode, Decode)]
 pub enum ClientResponse {
     None,
     Success,
@@ -215,7 +219,7 @@ pub enum ClientResponse {
     ProcResp(ProcResp),
 }
 
-#[derive(PartialEq, EnumIter, Debug, Clone, Encode,Decode)]
+#[derive(PartialEq, EnumIter, Debug, Clone, Encode, Decode)]
 pub enum ClientInstruct {
     None,
 
